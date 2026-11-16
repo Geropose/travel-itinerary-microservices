@@ -1,0 +1,43 @@
+# Reglas para el agente — Trotamundos
+
+Prototipo funcional del sistema Trotamundos (TPE de Diseño de Sistemas de Software). La arquitectura está
+documentada en la wiki, clonada al lado de este repositorio en `../Trabajo-especial-trotamundos.wiki/`
+(iteraciones 1 a 7, vistas y ADR-001 a ADR-019). El prototipo tiene que ser trazable a la wiki: no inventar
+componentes que no estén ahí.
+
+## Antes de programar
+
+- Leer `docs/CONVENCIONES.md` y las páginas de la wiki que nombre cada tarea.
+- Actualizar la wiki con `git pull` dentro de `../Trabajo-especial-trotamundos.wiki/` antes de leerla.
+
+## Reglas
+
+- **Spec-driven:** primero el contrato en `specs/`, después el código. Nunca cambiar un contrato sin decirlo
+  explícitamente.
+- **Cada servicio solo toca su carpeta** (`services/<servicio>`, `mocks/<mock>`). Lo compartido va en
+  `packages/comun`.
+- **Todo cambio lleva pruebas.** No dar una tarea por terminada si `npm run lint`, `npm run typecheck` o
+  `npm test` fallan.
+- **Nada de secretos en el repositorio:** usar `.env.example` con valores de ejemplo.
+- **Idioma:** comentarios y textos de la interfaz en español; nombres de dominio en español como en la wiki
+  (viaje, reserva, examinador, anonimizador).
+- Los mensajes de commit y las descripciones de pull request no llevan líneas Co-Authored-By ni menciones a
+  Claude Code.
+
+## Comandos
+
+| Comando | Qué hace |
+|---|---|
+| `npm run lint` | ESLint y Prettier (`--check`) |
+| `npm run format` | Formatea con Prettier |
+| `npm run typecheck` | TypeScript estricto sobre todo el repositorio |
+| `npm test` | Pruebas unitarias y de contrato (Vitest) |
+| `npm run test:contratos` | Solo las pruebas de contrato (archivos `*.contrato.test.ts`) |
+| `npm run e2e` | Pruebas de extremo a extremo de `tests/e2e`, contra el sistema levantado |
+
+## Configuración compartida
+
+- `tsconfig.base.json`: opciones estrictas (`strict`, `noUncheckedIndexedAccess`). Cada paquete o servicio
+  que tenga su propio `tsconfig.json` lo extiende.
+- `vitest.config.ts`: busca pruebas en `{src,test}/**/*.test.ts` de cada paquete, servicio y mock.
+- Requiere Node 24 (`.nvmrc`).
