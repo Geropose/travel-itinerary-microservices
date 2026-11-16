@@ -1,0 +1,27 @@
+# Dependencias y compilados
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+.vite/
+
+# Reportes de pruebas
+playwright-report/
+test-results/
+blob-report/
+
+# Secretos: solo se versiona .env.example
+.env
+.env.*
+!.env.example
+
+# Configuración local de Claude Code (la compartida es .claude/settings.json)
+.claude/settings.local.json
+
+# Varios
+*.log
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
