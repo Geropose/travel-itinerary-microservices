@@ -1,0 +1,35 @@
+{
+  "name": "trotamundos",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Prototipo funcional del sistema Trotamundos (TPE Diseño de Sistemas de Software)",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "workspaces": [
+    "packages/*",
+    "services/*",
+    "mocks/*",
+    "web"
+  ],
+  "scripts": {
+    "lint": "eslint . && prettier --check .",
+    "format": "prettier --write .",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run --passWithNoTests",
+    "test:contratos": "vitest run --passWithNoTests contrato",
+    "e2e": "vitest run --passWithNoTests --config tests/e2e/vitest.config.ts"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^24.19.2",
+    "eslint": "^10.15.0",
+    "eslint-config-prettier": "^10.1.8",
+    "globals": "^17.14.0",
+    "prettier": "^3.10.1",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.73.0",
+    "vitest": "^5.1.0"
+  }
+}

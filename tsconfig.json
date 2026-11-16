@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": [
+    "*.ts",
+    "packages/*/src/**/*.ts",
+    "packages/*/test/**/*.ts",
+    "services/*/src/**/*.ts",
+    "services/*/test/**/*.ts",
+    "mocks/*/src/**/*.ts",
+    "mocks/*/test/**/*.ts",
+    "tests/**/*.ts"
+  ],
+  "exclude": ["node_modules", "**/dist"]
+}
