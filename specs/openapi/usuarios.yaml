@@ -1,0 +1,700 @@
+# Contrato REST del Servicio de Usuarios (dueño: B).
+# Wiki: Iteración 1 (Servicio de Usuarios), Iteración 5 (Permisos de itinerarios, Filtros y whitelist,
+# Validador de Intercepción) y Vista de módulos (Cuentas y preferencias, Permisos de itinerarios,
+# Filtros y whitelist). Convenciones: docs/CONVENCIONES.md.
+openapi: 3.1.0
+info:
+  title: Trotamundos — Servicio de Usuarios
+  version: 0.1.0
+  description: >-
+    Cuentas y preferencias, permisos de los itinerarios compartidos y filtros y whitelist de
+    remitentes de cada usuario (Iteración 1 y 5). Las rutas públicas entran por el enrutador global
+    y el API Gateway con el prefijo /api/usuarios; las rutas con el tag "interna" solo las llaman
+    otros servicios dentro de la red privada. Toda solicitud pasa por el Validador de Intercepción
+    del servicio (ADR-005): un usuario solo ve y cambia sus propios datos, y el rol analista no
+    accede a este servicio. Cada servicio guarda solo los usuarios de su región (CONST-6).
+servers:
+  - url: http://localhost:8000/api/usuarios
+    description: Público, a través del enrutador global y el API Gateway.
+  - url: http://usuarios:3002
+    description: Interno, dentro de la red privada de la región.
+security:
+  - bearerJWT: []
+tags:
+  - name: perfil
+    description: Cuentas y preferencias del usuario.
+  - name: whitelist
+    description: Filtros y whitelist de remitentes (UC-2). Publica FiltrosActualizados.
+  - name: designados
+    description: Permisos de itinerarios, personas designadas para ver un viaje compartido (QA-9).
+  - name: interna
+    description: Rutas entre servicios. No pasan por el API Gateway.
+  - name: salud
+    description: Estado del servicio para el monitor de salud (ADR-007).
+
+paths:
+  /health:
+    get:
+      operationId: obtenerSalud
+      summary: Estado del servicio
+      description: >-
+        Responde 200 si el servicio puede atender (base y broker conectados) y 503 si no. Lo
+        consulta el monitor de salud (ADR-007).
+      tags: [salud]
+      security: []
+      parameters:
+        - $ref: './comun.yaml#/components/parameters/XRequestId'
+      responses:
+        '200':
+          $ref: './comun.yaml#/components/responses/Salud'
+        '503':
+          $ref: './comun.yaml#/components/responses/NoDisponible'
+
+  /perfil:
+    get:
+      operationId: obtenerPerfil
+      summary: Perfil del usuario autenticado
+      description: Devuelve el perfil del usuario del JWT (claim sub). Solo el propio usuario lo ve.
+      tags: [perfil]
+      parameters:
+        - $ref: './comun.yaml#/components/parameters/XRequestId'
+      responses:
+        '200':
+          description: Perfil del usuario.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Perfil'
+              example:
+                usuarioId: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+                email: ana@correo.example
+                nombre: Ana Pérez
+                region: region-1
+                idioma: es
+                moneda: ARS
+                agenciaPreferida: viajes-del-plata
+                creadoEn: '2026-11-01T12:00:00Z'
+        '401':
+          $ref: './comun.yaml#/components/responses/NoAutenticado'
+        '403':
+          $ref: './comun.yaml#/components/responses/Prohibido'
+        '404':
+          $ref: './comun.yaml#/components/responses/NoEncontrado'
+        '503':
+          $ref: './comun.yaml#/components/responses/NoDisponible'
+    patch:
+      operationId: actualizarPerfil
+      summary: Cambiar las preferencias del usuario
+      description: >-
+        Cambia solo los campos enviados (al menos uno). agenciaPreferida tiene que ser una de las
+        agencias configuradas en Integraciones; null la quita. El cambio de idioma se refleja en el
+        claim idioma del JWT recién cuando se renueva.
+      tags: [perfil]
+      parameters:
+        - $ref: './comun.yaml#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CambioPerfil'
+            example:
+              idioma: en
+              moneda: USD
+              agenciaPreferida: viajes-del-plata
+      responses:
+        '200':
+          description: Perfil actualizado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Perfil'
+              example:
+                usuarioId: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+                email: ana@correo.example
+                nombre: Ana Pérez
+                region: region-1
+                idioma: en
+                moneda: USD
+                agenciaPreferida: viajes-del-plata
+                creadoEn: '2026-11-01T12:00:00Z'
+        '400':
+          $ref: './comun.yaml#/components/responses/SolicitudInvalida'
+        '401':
+          $ref: './comun.yaml#/components/responses/NoAutenticado'
+        '403':
+          $ref: './comun.yaml#/components/responses/Prohibido'
+        '404':
+          $ref: './comun.yaml#/components/responses/NoEncontrado'
+        '503':
+          $ref: './comun.yaml#/components/responses/NoDisponible'
+
+  /whitelist:
+    get:
+      operationId: obtenerWhitelist
+      summary: Whitelist de remitentes del usuario
+      description: >-
+        Devuelve la lista de remitentes permitidos y si los filtros están activos. Si el usuario
+        nunca la guardó, responde la lista vacía con filtrosActivos en false.
+      tags: [whitelist]
+      parameters:
+        - $ref: './comun.yaml#/components/parameters/XRequestId'
+      responses:
+        '200':
+          description: Whitelist del usuario.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Whitelist'
+              example:
+                usuarioId: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+                remitentesPermitidos:
+                  - reservas@aerolinea-andina.example
+                  - '@hotel-cordillera.example'
+                filtrosActivos: true
+                actualizadoEn: '2026-11-10T09:30:00Z'
+        '401':
+          $ref: './comun.yaml#/components/responses/NoAutenticado'
+        '403':
+          $ref: './comun.yaml#/components/responses/Prohibido'
+        '404':
+          $ref: './comun.yaml#/components/responses/NoEncontrado'
+        '503':
+          $ref: './comun.yaml#/components/responses/NoDisponible'
+    put:
+      operationId: guardarWhitelist
+      summary: Reemplazar la whitelist de remitentes
+      description: >-
+        Reemplaza la lista completa de remitentes permitidos y el estado de los filtros (UC-2). En la
+        misma transacción guarda el evento FiltrosActualizados en el outbox (specs/asyncapi/eventos.yaml,
+        datos según specs/schemas/FiltrosActualizados.json: usuarioId, remitentesPermitidos y
+        filtrosActivos, con la lista completa); el filtro de remitentes del Servicio de Correo lo
+        consume. Cada remitente es una dirección completa (reservas@aerolinea.example) o un dominio
+        (@aerolinea.example) y se guarda en minúscula.
+      tags: [whitelist]
+      parameters:
+        - $ref: './comun.yaml#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CambioWhitelist'
+            example:
+              remitentesPermitidos:
+                - reservas@aerolinea-andina.example
+                - '@hotel-cordillera.example'
+                - '@rentadora-sur.example'
+              filtrosActivos: true
+      responses:
+        '200':
+          description: Whitelist guardada. El evento FiltrosActualizados queda en el outbox.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Whitelist'
+              example:
+                usuarioId: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+                remitentesPermitidos:
+                  - reservas@aerolinea-andina.example
+                  - '@hotel-cordillera.example'
+                  - '@rentadora-sur.example'
+                filtrosActivos: true
+                actualizadoEn: '2026-11-16T22:10:00Z'
+        '400':
+          $ref: './comun.yaml#/components/responses/SolicitudInvalida'
+        '401':
+          $ref: './comun.yaml#/components/responses/NoAutenticado'
+        '403':
+          $ref: './comun.yaml#/components/responses/Prohibido'
+        '404':
+          $ref: './comun.yaml#/components/responses/NoEncontrado'
+        '503':
+          $ref: './comun.yaml#/components/responses/NoDisponible'
+
+  /itinerarios/{viajeId}/designados:
+    parameters:
+      - $ref: '#/components/parameters/ViajeId'
+    get:
+      operationId: listarDesignados
+      summary: Personas designadas para ver un itinerario
+      description: >-
+        Lista las personas que pueden ver el itinerario del viaje. Solo lo consulta el dueño del
+        viaje; cualquier otro recibe 403 y el intento queda en el registro de accesos (QA-9).
+      tags: [designados]
+      parameters:
+        - $ref: './comun.yaml#/components/parameters/XRequestId'
+      responses:
+        '200':
+          description: Designados del itinerario (puede ser una lista vacía).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListaDesignados'
+              example:
+                viajeId: 9b2d4f6a-1c3e-4a5b-8d7f-0e1a2b3c4d5e
+                designados:
+                  - email: juan@correo.example
+                    usuarioId: 6c1e8a2f-4b3d-4e5f-9a0b-1c2d3e4f5a6b
+                    designadoEn: '2026-11-12T18:00:00Z'
+                  - email: maria@correo.example
+                    usuarioId: null
+                    designadoEn: '2026-11-13T10:15:00Z'
+        '400':
+          $ref: './comun.yaml#/components/responses/SolicitudInvalida'
+        '401':
+          $ref: './comun.yaml#/components/responses/NoAutenticado'
+        '403':
+          $ref: './comun.yaml#/components/responses/Prohibido'
+        '404':
+          $ref: './comun.yaml#/components/responses/NoEncontrado'
+        '503':
+          $ref: './comun.yaml#/components/responses/NoDisponible'
+    post:
+      operationId: designarPersona
+      summary: Designar a una persona para ver el itinerario
+      description: >-
+        El dueño del viaje designa a una persona por email. Si esa persona ya tiene cuenta en la
+        región, se guarda su usuarioId; si no, usuarioId queda en null hasta que se registre. No se
+        puede designar al propio dueño (400) ni a alguien ya designado (409).
+      tags: [designados]
+      parameters:
+        - $ref: './comun.yaml#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NuevoDesignado'
+            example:
+              email: juan@correo.example
+      responses:
+        '201':
+          description: Persona designada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Designado'
+              example:
+                email: juan@correo.example
+                usuarioId: 6c1e8a2f-4b3d-4e5f-9a0b-1c2d3e4f5a6b
+                designadoEn: '2026-11-12T18:00:00Z'
+        '400':
+          $ref: './comun.yaml#/components/responses/SolicitudInvalida'
+        '401':
+          $ref: './comun.yaml#/components/responses/NoAutenticado'
+        '403':
+          $ref: './comun.yaml#/components/responses/Prohibido'
+        '404':
+          $ref: './comun.yaml#/components/responses/NoEncontrado'
+        '409':
+          $ref: './comun.yaml#/components/responses/Conflicto'
+        '503':
+          $ref: './comun.yaml#/components/responses/NoDisponible'
+
+  /itinerarios/{viajeId}/designados/{email}:
+    parameters:
+      - $ref: '#/components/parameters/ViajeId'
+      - name: email
+        in: path
+        required: true
+        description: Email de la persona designada (con la @ codificada como %40 si hace falta).
+        schema:
+          type: string
+          format: email
+        example: juan@correo.example
+    delete:
+      operationId: quitarDesignado
+      summary: Quitar a una persona designada
+      description: >-
+        El dueño del viaje le quita el permiso a una persona. Desde ese momento la consulta interna de
+        permisos responde que no puede ver el itinerario.
+      tags: [designados]
+      parameters:
+        - $ref: './comun.yaml#/components/parameters/XRequestId'
+      responses:
+        '204':
+          description: Designado quitado.
+        '400':
+          $ref: './comun.yaml#/components/responses/SolicitudInvalida'
+        '401':
+          $ref: './comun.yaml#/components/responses/NoAutenticado'
+        '403':
+          $ref: './comun.yaml#/components/responses/Prohibido'
+        '404':
+          $ref: './comun.yaml#/components/responses/NoEncontrado'
+        '503':
+          $ref: './comun.yaml#/components/responses/NoDisponible'
+
+  /interna/permisos/itinerarios/{viajeId}:
+    servers:
+      - url: http://usuarios:3002
+        description: Solo interno.
+    parameters:
+      - $ref: '#/components/parameters/ViajeId'
+    get:
+      operationId: consultarPermisoItinerario
+      summary: Si un usuario puede ver un itinerario
+      description: >-
+        La usa el Validador de Intercepción de otro servicio (por ejemplo Viajes en GET
+        /viajes/{viajeId}) en las rutas declaradas "dueño o designado". Responde puedeVer true si el
+        usuario es el dueño o una persona designada del itinerario. Tiene que responder rápido
+        (índice por viajeId y usuario; la Iteración 5 estima 20 ms) y el que llama la corta a los
+        2 s. Recibe el JWT del usuario propagado (ADR-019): usuarioId tiene que ser el sub del token,
+        si no responde 403. Un viaje desconocido no es un error: responde puedeVer false.
+      tags: [interna]
+      parameters:
+        - $ref: './comun.yaml#/components/parameters/XRequestId'
+        - name: usuarioId
+          in: query
+          required: true
+          description: Usuario que quiere ver el itinerario.
+          schema:
+            type: string
+            format: uuid
+          example: 6c1e8a2f-4b3d-4e5f-9a0b-1c2d3e4f5a6b
+      responses:
+        '200':
+          description: Resultado de la consulta de permiso.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PermisoItinerario'
+              example:
+                viajeId: 9b2d4f6a-1c3e-4a5b-8d7f-0e1a2b3c4d5e
+                usuarioId: 6c1e8a2f-4b3d-4e5f-9a0b-1c2d3e4f5a6b
+                puedeVer: true
+                motivo: designado
+        '400':
+          $ref: './comun.yaml#/components/responses/SolicitudInvalida'
+        '401':
+          $ref: './comun.yaml#/components/responses/NoAutenticado'
+        '403':
+          $ref: './comun.yaml#/components/responses/Prohibido'
+        '503':
+          $ref: './comun.yaml#/components/responses/NoDisponible'
+
+  /interna/cuentas:
+    servers:
+      - url: http://usuarios:3002
+        description: Solo interno.
+    post:
+      operationId: crearCuenta
+      summary: Crear la cuenta de un usuario recién registrado
+      description: >-
+        La llama el Servicio de Autenticación en POST /registro, después de crear la credencial. Si
+        responde un error, Autenticación deshace el registro. No hay JWT todavía (el usuario se está
+        registrando), por eso no lleva bearerJWT. La cuenta se crea con moneda USD, sin agencia
+        preferida y con la whitelist vacía y los filtros inactivos. La región tiene que ser la de
+        este servicio (CONST-6), si no responde 400.
+      tags: [interna]
+      security: []
+      parameters:
+        - $ref: './comun.yaml#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NuevaCuenta'
+            example:
+              usuarioId: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+              email: ana@correo.example
+              nombre: Ana Pérez
+              region: region-1
+              idioma: es
+      responses:
+        '201':
+          description: Cuenta creada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Perfil'
+              example:
+                usuarioId: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+                email: ana@correo.example
+                nombre: Ana Pérez
+                region: region-1
+                idioma: es
+                moneda: USD
+                agenciaPreferida: null
+                creadoEn: '2026-11-16T22:00:00Z'
+        '400':
+          $ref: './comun.yaml#/components/responses/SolicitudInvalida'
+        '409':
+          $ref: './comun.yaml#/components/responses/Conflicto'
+        '503':
+          $ref: './comun.yaml#/components/responses/NoDisponible'
+
+  /interna/usuarios/{usuarioId}/agencia:
+    servers:
+      - url: http://usuarios:3002
+        description: Solo interno.
+    parameters:
+      - name: usuarioId
+        in: path
+        required: true
+        description: Usuario del que se pide la agencia preferida.
+        schema:
+          type: string
+          format: uuid
+        example: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+    get:
+      operationId: obtenerAgenciaPreferida
+      summary: Agencia preferida de un usuario
+      description: >-
+        La usa el plug-in de derivación del Asistente Virtual para mandar el problema a la agencia
+        del usuario a través de Integraciones (Iteración 7). Recibe el JWT del usuario propagado
+        (ADR-019): usuarioId tiene que ser el sub del token, si no responde 403. Si el usuario no
+        eligió agencia, agenciaPreferida es null.
+      tags: [interna]
+      parameters:
+        - $ref: './comun.yaml#/components/parameters/XRequestId'
+      responses:
+        '200':
+          description: Agencia preferida del usuario.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgenciaPreferida'
+              example:
+                usuarioId: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+                agenciaPreferida: viajes-del-plata
+        '400':
+          $ref: './comun.yaml#/components/responses/SolicitudInvalida'
+        '401':
+          $ref: './comun.yaml#/components/responses/NoAutenticado'
+        '403':
+          $ref: './comun.yaml#/components/responses/Prohibido'
+        '404':
+          $ref: './comun.yaml#/components/responses/NoEncontrado'
+        '503':
+          $ref: './comun.yaml#/components/responses/NoDisponible'
+
+components:
+  securitySchemes:
+    bearerJWT:
+      $ref: './comun.yaml#/components/securitySchemes/bearerJWT'
+
+  parameters:
+    ViajeId:
+      name: viajeId
+      in: path
+      required: true
+      description: Viaje (itinerario) del Servicio de Viajes.
+      schema:
+        type: string
+        format: uuid
+      example: 9b2d4f6a-1c3e-4a5b-8d7f-0e1a2b3c4d5e
+
+  schemas:
+    Moneda:
+      type: string
+      description: Código de moneda ISO 4217 en mayúsculas.
+      pattern: '^[A-Z]{3}$'
+      example: ARS
+
+    Agencia:
+      type: string
+      description: >-
+        Identificador de la agencia de viajes, el mismo que usa la configuración de Integraciones.
+      pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'
+      example: viajes-del-plata
+
+    Remitente:
+      type: string
+      description: >-
+        Dirección completa (reservas@aerolinea.example) o dominio entero (@aerolinea.example). Mismo
+        patrón que FiltrosActualizados.remitentesPermitidos.
+      pattern: '^[^@\s]*@[^@\s]+\.[^@\s]+$'
+      example: '@aerolinea-andina.example'
+
+    Perfil:
+      type: object
+      description: Cuenta y preferencias del usuario.
+      additionalProperties: false
+      required: [usuarioId, email, nombre, region, idioma, moneda, agenciaPreferida, creadoEn]
+      properties:
+        usuarioId:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        nombre:
+          type: string
+          minLength: 1
+          maxLength: 100
+        region:
+          $ref: './comun.yaml#/components/schemas/Region'
+        idioma:
+          $ref: './comun.yaml#/components/schemas/Idioma'
+        moneda:
+          $ref: '#/components/schemas/Moneda'
+        agenciaPreferida:
+          description: Agencia preferida, o null si no eligió ninguna.
+          oneOf:
+            - $ref: '#/components/schemas/Agencia'
+            - type: 'null'
+        creadoEn:
+          type: string
+          format: date-time
+
+    CambioPerfil:
+      type: object
+      description: Campos del perfil que el usuario puede cambiar. Al menos uno.
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        nombre:
+          type: string
+          minLength: 1
+          maxLength: 100
+        idioma:
+          $ref: './comun.yaml#/components/schemas/Idioma'
+        moneda:
+          $ref: '#/components/schemas/Moneda'
+        agenciaPreferida:
+          description: Agencia configurada en Integraciones, o null para quitarla.
+          oneOf:
+            - $ref: '#/components/schemas/Agencia'
+            - type: 'null'
+
+    NuevaCuenta:
+      type: object
+      description: Datos que manda Autenticación al registrar a un usuario.
+      additionalProperties: false
+      required: [usuarioId, email, nombre, region, idioma]
+      properties:
+        usuarioId:
+          type: string
+          format: uuid
+          description: El mismo usuarioId de la credencial (claim sub del JWT).
+        email:
+          type: string
+          format: email
+        nombre:
+          type: string
+          minLength: 1
+          maxLength: 100
+        region:
+          $ref: './comun.yaml#/components/schemas/Region'
+        idioma:
+          $ref: './comun.yaml#/components/schemas/Idioma'
+
+    Whitelist:
+      type: object
+      description: Filtros y whitelist de remitentes del usuario.
+      additionalProperties: false
+      required: [usuarioId, remitentesPermitidos, filtrosActivos, actualizadoEn]
+      properties:
+        usuarioId:
+          type: string
+          format: uuid
+        remitentesPermitidos:
+          type: array
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/Remitente'
+        filtrosActivos:
+          type: boolean
+          description: >-
+            Si es true, el Servicio de Correo solo procesa los correos de remitentes permitidos; si
+            es false, procesa todos.
+        actualizadoEn:
+          description: Último cambio, o null si el usuario nunca la guardó.
+          oneOf:
+            - type: string
+              format: date-time
+            - type: 'null'
+
+    CambioWhitelist:
+      type: object
+      description: Lista completa que reemplaza a la anterior (no es una diferencia).
+      additionalProperties: false
+      required: [remitentesPermitidos, filtrosActivos]
+      properties:
+        remitentesPermitidos:
+          type: array
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/Remitente'
+        filtrosActivos:
+          type: boolean
+
+    NuevoDesignado:
+      type: object
+      additionalProperties: false
+      required: [email]
+      properties:
+        email:
+          type: string
+          format: email
+          description: Email de la persona que va a poder ver el itinerario.
+
+    Designado:
+      type: object
+      description: Persona designada para ver un itinerario.
+      additionalProperties: false
+      required: [email, usuarioId, designadoEn]
+      properties:
+        email:
+          type: string
+          format: email
+        usuarioId:
+          description: Cuenta de la persona en esta región, o null si todavía no se registró.
+          oneOf:
+            - type: string
+              format: uuid
+            - type: 'null'
+        designadoEn:
+          type: string
+          format: date-time
+
+    ListaDesignados:
+      type: object
+      additionalProperties: false
+      required: [viajeId, designados]
+      properties:
+        viajeId:
+          type: string
+          format: uuid
+        designados:
+          type: array
+          items:
+            $ref: '#/components/schemas/Designado'
+
+    PermisoItinerario:
+      type: object
+      description: Respuesta del permiso de itinerario para el Validador de Intercepción.
+      additionalProperties: false
+      required: [viajeId, usuarioId, puedeVer, motivo]
+      properties:
+        viajeId:
+          type: string
+          format: uuid
+        usuarioId:
+          type: string
+          format: uuid
+        puedeVer:
+          type: boolean
+        motivo:
+          type: string
+          description: >-
+            Por qué puede (o no) verlo. "ninguno" va con puedeVer false; el validador lo usa como
+            motivo en el registro de accesos.
+          enum: [dueno, designado, ninguno]
+
+    AgenciaPreferida:
+      type: object
+      additionalProperties: false
+      required: [usuarioId, agenciaPreferida]
+      properties:
+        usuarioId:
+          type: string
+          format: uuid
+        agenciaPreferida:
+          description: Agencia preferida, o null si el usuario no eligió ninguna.
+          oneOf:
+            - $ref: '#/components/schemas/Agencia'
+            - type: 'null'
