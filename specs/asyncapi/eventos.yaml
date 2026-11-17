@@ -1,0 +1,315 @@
+asyncapi: 3.0.0
+
+info:
+  title: Eventos de Trotamundos
+  version: 1.0.0
+  description: |
+    Contrato de los eventos que viajan por el broker de mensajes (ADR-002, ADR-016).
+
+    - Exchange de tipo *topic* `trotamundos.eventos`. La routing key es el nombre del evento.
+    - Todos los eventos usan el mismo sobre (`specs/schemas/Sobre.json`); el campo `datos` se valida
+      con el esquema de cada evento (`specs/schemas/<Evento>.json`).
+    - Cada consumidor tiene su propia cola *quorum* y una cola de mensajes fallidos `<cola>.dlq`.
+      El nombre de la cola de cada consumidor está en `x-cola` de su operación (`<servicio>.<Evento>`).
+    - Idempotencia: cada consumidor guarda el `eventId` en `eventos_procesados` en la misma
+      transacción que aplica el cambio, e ignora los repetidos.
+    - Publicación segura (outbox): quien publica guarda el evento en `eventos_salientes` en la misma
+      transacción que su cambio, y un publicador lo envía al broker cada 500 ms.
+    - En cada operación, `x-servicio` y `x-componente` dicen qué servicio y qué componente de la wiki
+      publica o consume el evento.
+
+    La fila anonimizada que el anonimizador guarda en la base de analítica (`ViajeAnonimizado`) está en
+    `components.schemas`: no viaja por el broker.
+
+defaultContentType: application/json
+
+servers:
+  broker:
+    host: rabbitmq:5672
+    protocol: amqp
+    protocolVersion: 0.9.1
+    description: >-
+      Broker de mensajes de la región (3 instancias, Vista de despliegue). Cada región tiene el suyo:
+      los eventos con datos personales no salen de la región del usuario (CONST-6, ADR-017). El host
+      real lo define la infraestructura de cada región.
+
+channels:
+  ReservaDetectada:
+    address: ReservaDetectada
+    title: Reserva detectada en un correo
+    description: Una reserva nueva extraída de un correo de viaje (UC-1, Iteración 2).
+    servers:
+      - $ref: '#/servers/broker'
+    messages:
+      ReservaDetectada:
+        $ref: '#/components/messages/ReservaDetectada'
+    bindings:
+      $ref: '#/components/channelBindings/exchangeEventos'
+
+  ReservaActualizada:
+    address: ReservaActualizada
+    title: Reserva actualizada por el proveedor
+    description: Un cambio o una cancelación informados por un proveedor (QA-1, Iteraciones 2 y 3).
+    servers:
+      - $ref: '#/servers/broker'
+    messages:
+      ReservaActualizada:
+        $ref: '#/components/messages/ReservaActualizada'
+    bindings:
+      $ref: '#/components/channelBindings/exchangeEventos'
+
+  FiltrosActualizados:
+    address: FiltrosActualizados
+    title: Whitelist de remitentes actualizada
+    description: El usuario cambió sus filtros o su lista de remitentes seguros (UC-2, Iteración 5).
+    servers:
+      - $ref: '#/servers/broker'
+    messages:
+      FiltrosActualizados:
+        $ref: '#/components/messages/FiltrosActualizados'
+    bindings:
+      $ref: '#/components/channelBindings/exchangeEventos'
+
+  ViajeActualizado:
+    address: ViajeActualizado
+    title: Reserva de un viaje guardada
+    description: >-
+      El Servicio de Viajes guardó un cambio en una reserva (UC-7, Iteración 6). Lleva datos personales:
+      lo consume solo el anonimizador de la misma región.
+    servers:
+      - $ref: '#/servers/broker'
+    messages:
+      ViajeActualizado:
+        $ref: '#/components/messages/ViajeActualizado'
+    bindings:
+      $ref: '#/components/channelBindings/exchangeEventos'
+
+operations:
+  publicarReservaDetectada:
+    action: send
+    channel:
+      $ref: '#/channels/ReservaDetectada'
+    summary: Los procesadores de correo publican cada reserva que extraen de un correo.
+    messages:
+      - $ref: '#/channels/ReservaDetectada/messages/ReservaDetectada'
+    bindings:
+      $ref: '#/components/operationBindings/publicar'
+    x-servicio: correo
+    x-componente: Procesadores de correo
+
+  consumirReservaDetectada:
+    action: receive
+    channel:
+      $ref: '#/channels/ReservaDetectada'
+    summary: Los consumidores de eventos de Viajes guardan la reserva y la agrupan en un viaje.
+    messages:
+      - $ref: '#/channels/ReservaDetectada/messages/ReservaDetectada'
+    bindings:
+      $ref: '#/components/operationBindings/consumir'
+    x-servicio: viajes
+    x-componente: Consumidores de eventos
+    x-cola: viajes.ReservaDetectada
+
+  publicarReservaActualizada:
+    action: send
+    channel:
+      $ref: '#/channels/ReservaActualizada'
+    summary: Los adaptadores de Integraciones publican cada cambio o cancelación de un proveedor.
+    messages:
+      - $ref: '#/channels/ReservaActualizada/messages/ReservaActualizada'
+    bindings:
+      $ref: '#/components/operationBindings/publicar'
+    x-servicio: integraciones
+    x-componente: Adaptadores
+
+  consumirReservaActualizada:
+    action: receive
+    channel:
+      $ref: '#/channels/ReservaActualizada'
+    summary: >-
+      Los consumidores de eventos de Viajes buscan la reserva por proveedor + numeroReserva y aplican
+      el cambio.
+    messages:
+      - $ref: '#/channels/ReservaActualizada/messages/ReservaActualizada'
+    bindings:
+      $ref: '#/components/operationBindings/consumir'
+    x-servicio: viajes
+    x-componente: Consumidores de eventos
+    x-cola: viajes.ReservaActualizada
+
+  publicarFiltrosActualizados:
+    action: send
+    channel:
+      $ref: '#/channels/FiltrosActualizados'
+    summary: Filtros y whitelist publica la lista completa cada vez que el usuario la cambia.
+    messages:
+      - $ref: '#/channels/FiltrosActualizados/messages/FiltrosActualizados'
+    bindings:
+      $ref: '#/components/operationBindings/publicar'
+    x-servicio: usuarios
+    x-componente: Filtros y whitelist
+
+  consumirFiltrosActualizados:
+    action: receive
+    channel:
+      $ref: '#/channels/FiltrosActualizados'
+    summary: El filtro de remitentes de Correo reemplaza la whitelist que tenía del usuario.
+    messages:
+      - $ref: '#/channels/FiltrosActualizados/messages/FiltrosActualizados'
+    bindings:
+      $ref: '#/components/operationBindings/consumir'
+    x-servicio: correo
+    x-componente: Filtro de remitentes
+    x-cola: correo.FiltrosActualizados
+
+  publicarViajeActualizado:
+    action: send
+    channel:
+      $ref: '#/channels/ViajeActualizado'
+    summary: >-
+      El gestor de viajes publica cada cambio que guarda (de un correo, de un proveedor, manual o por el
+      archivado).
+    messages:
+      - $ref: '#/channels/ViajeActualizado/messages/ViajeActualizado'
+    bindings:
+      $ref: '#/components/operationBindings/publicar'
+    x-servicio: viajes
+    x-componente: Gestor de viajes
+
+  consumirViajeActualizado:
+    action: receive
+    channel:
+      $ref: '#/channels/ViajeActualizado'
+    summary: >-
+      El anonimizador de Analítica quita los datos personales, reemplaza el número de reserva por
+      codigoReserva y guarda la fila ViajeAnonimizado en la base de analítica.
+    messages:
+      - $ref: '#/channels/ViajeActualizado/messages/ViajeActualizado'
+    bindings:
+      $ref: '#/components/operationBindings/consumir'
+    x-servicio: analitica
+    x-componente: Anonimizador
+    x-cola: analitica.ViajeActualizado
+
+components:
+  messages:
+    ReservaDetectada:
+      name: ReservaDetectada
+      title: ReservaDetectada v1
+      contentType: application/json
+      payload:
+        schemaFormat: application/schema+json;version=draft-07
+        schema:
+          allOf:
+            - $ref: '../schemas/Sobre.json'
+            - type: object
+              properties:
+                tipo:
+                  const: ReservaDetectada
+                version:
+                  const: 1
+                datos:
+                  $ref: '../schemas/ReservaDetectada.json'
+      examples:
+        - name: vueloDetectado
+          summary: Vuelo extraído de un correo de la aerolínea.
+          payload:
+            $ref: '../schemas/ejemplos/ReservaDetectada.valido.json'
+
+    ReservaActualizada:
+      name: ReservaActualizada
+      title: ReservaActualizada v1
+      contentType: application/json
+      payload:
+        schemaFormat: application/schema+json;version=draft-07
+        schema:
+          allOf:
+            - $ref: '../schemas/Sobre.json'
+            - type: object
+              properties:
+                tipo:
+                  const: ReservaActualizada
+                version:
+                  const: 1
+                datos:
+                  $ref: '../schemas/ReservaActualizada.json'
+      examples:
+        - name: vueloReprogramado
+          summary: La aerolínea avisa que cambió el horario del vuelo.
+          payload:
+            $ref: '../schemas/ejemplos/ReservaActualizada.valido.json'
+
+    FiltrosActualizados:
+      name: FiltrosActualizados
+      title: FiltrosActualizados v1
+      contentType: application/json
+      payload:
+        schemaFormat: application/schema+json;version=draft-07
+        schema:
+          allOf:
+            - $ref: '../schemas/Sobre.json'
+            - type: object
+              properties:
+                tipo:
+                  const: FiltrosActualizados
+                version:
+                  const: 1
+                datos:
+                  $ref: '../schemas/FiltrosActualizados.json'
+      examples:
+        - name: whitelistConDominio
+          summary: Whitelist con una dirección y un dominio entero.
+          payload:
+            $ref: '../schemas/ejemplos/FiltrosActualizados.valido.json'
+
+    ViajeActualizado:
+      name: ViajeActualizado
+      title: ViajeActualizado v1
+      contentType: application/json
+      payload:
+        schemaFormat: application/schema+json;version=draft-07
+        schema:
+          allOf:
+            - $ref: '../schemas/Sobre.json'
+            - type: object
+              properties:
+                tipo:
+                  const: ViajeActualizado
+                version:
+                  const: 1
+                datos:
+                  $ref: '../schemas/ViajeActualizado.json'
+      examples:
+        - name: vueloModificadoPorProveedor
+          summary: Viajes guardó el cambio de horario informado por la aerolínea.
+          payload:
+            $ref: '../schemas/ejemplos/ViajeActualizado.valido.json'
+
+  schemas:
+    ViajeAnonimizado:
+      schemaFormat: application/schema+json;version=draft-07
+      schema:
+        $ref: '../schemas/ViajeAnonimizado.json'
+
+  channelBindings:
+    exchangeEventos:
+      amqp:
+        is: routingKey
+        exchange:
+          name: trotamundos.eventos
+          type: topic
+          durable: true
+          autoDelete: false
+          vhost: /
+        bindingVersion: 0.3.0
+
+  operationBindings:
+    publicar:
+      amqp:
+        deliveryMode: 2
+        mandatory: true
+        bindingVersion: 0.3.0
+    consumir:
+      amqp:
+        ack: true
+        bindingVersion: 0.3.0
