@@ -6,5 +6,6 @@ rules:
   # El prototipo no publica licencia ni servidores de producción.
   info-license: off
   no-server-example.com: off
-  # Las rutas internas no pasan por el gateway y no llevan bearerJWT.
+  # Las rutas públicas y las internas sin usuario (por ejemplo, tareas programadas) van con
+  # security: []; el resto de las internas recibe el JWT del usuario propagado (ADR-019).
   security-defined: warn
