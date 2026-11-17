@@ -76,13 +76,13 @@ paths:
               example:
                 cuentas:
                   - id: 3b1f0c9e-6a2d-4f5b-9c8e-1a2b3c4d5e6f
-                    proveedor: gmail
+                    proveedorCorreo: gmail
                     email: ana.garcia@gmail.com
                     estado: conectada
                     conectadaEn: '2026-11-28T12:00:05Z'
                     ultimaRevision: '2026-11-28T12:12:35Z'
                   - id: 9d8c7b6a-5f4e-4d3c-8b2a-1f0e9d8c7b6a
-                    proveedor: outlook
+                    proveedorCorreo: outlook
                     email: ana.garcia@outlook.com
                     estado: sin-permiso
                     conectadaEn: '2026-11-20T09:30:00Z'
@@ -94,13 +94,13 @@ paths:
         '503':
           $ref: './comun.yaml#/components/responses/NoDisponible'
 
-  /cuentas-correo/{proveedor}/conectar:
+  /cuentas-correo/{proveedorCorreo}/conectar:
     post:
       operationId: conectarCuentaCorreo
       summary: Empezar a conectar una cuenta de correo
       description: >-
         Arma la URL de la pantalla de permiso del proveedor con el scope de solo lectura
-        (`gmail.readonly` en Gmail; `offline_access Mail.Read` en Outlook) y un `state` firmado por el
+        (`gmail.readonly` en Gmail; `offline_access Mail.Read User.Read` en Outlook) y un `state` firmado por el
         Servicio de Correo. El `state` lleva el usuarioId, la región, el proveedor y un nonce de un solo
         uso, y vence a los 10 minutos. La web redirige al usuario a `urlAutorizacion`; al volver, el
         proveedor llama a GET /oauth/callback. Trotamundos nunca pide ni guarda la contraseña del
@@ -108,7 +108,7 @@ paths:
       tags: [cuentas-correo]
       parameters:
         - $ref: './comun.yaml#/components/parameters/XRequestId'
-        - name: proveedor
+        - name: proveedorCorreo
           in: path
           required: true
           description: Proveedor de correo. Cada uno tiene su adaptador (ADR-003).
@@ -126,14 +126,14 @@ paths:
                 gmail:
                   summary: Gmail (mock en el puerto 4001)
                   value:
-                    proveedor: gmail
-                    urlAutorizacion: http://localhost:4001/o/oauth2/v2/auth?client_id=trotamundos-local.apps.googleusercontent.com&redirect_uri=http%3A%2F%2Flocalhost%3A8000%2Fapi%2Fcorreo%2Foauth%2Fcallback&response_type=code&scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fgmail.readonly&access_type=offline&include_granted_scopes=true&state=eyJ1IjoiNmIxZTdjMmEiLCJyIjoicmVnaW9uLTEifQ.firma
+                    proveedorCorreo: gmail
+                    urlAutorizacion: http://localhost:4001/o/oauth2/v2/auth?client_id=trotamundos-local.apps.googleusercontent.com&redirect_uri=http%3A%2F%2Flocalhost%3A8000%2Fregion-1%2Fapi%2Fcorreo%2Foauth%2Fcallback&response_type=code&scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fgmail.readonly&access_type=offline&include_granted_scopes=true&state=eyJ1IjoiNmIxZTdjMmEiLCJyIjoicmVnaW9uLTEifQ.firma
                     stateVenceEn: '2026-11-28T12:10:00Z'
                 outlook:
                   summary: Outlook (mock en el puerto 4002)
                   value:
-                    proveedor: outlook
-                    urlAutorizacion: http://localhost:4002/common/oauth2/v2.0/authorize?client_id=11112222-bbbb-3333-cccc-4444dddd5555&response_type=code&redirect_uri=http%3A%2F%2Flocalhost%3A8000%2Fapi%2Fcorreo%2Foauth%2Fcallback&response_mode=query&scope=offline_access%20https%3A%2F%2Fgraph.microsoft.com%2FMail.Read&state=eyJ1IjoiNmIxZTdjMmEiLCJyIjoicmVnaW9uLTEifQ.firma
+                    proveedorCorreo: outlook
+                    urlAutorizacion: http://localhost:4002/common/oauth2/v2.0/authorize?client_id=11112222-bbbb-3333-cccc-4444dddd5555&response_type=code&redirect_uri=http%3A%2F%2Flocalhost%3A8000%2Fregion-1%2Fapi%2Fcorreo%2Foauth%2Fcallback&response_mode=query&scope=offline_access%20https%3A%2F%2Fgraph.microsoft.com%2FMail.Read%20https%3A%2F%2Fgraph.microsoft.com%2FUser.Read&state=eyJ1IjoiNmIxZTdjMmEiLCJyIjoicmVnaW9uLTEifQ.firma
                     stateVenceEn: '2026-11-28T12:10:00Z'
         '400':
           $ref: './comun.yaml#/components/responses/SolicitudInvalida'
@@ -144,7 +144,7 @@ paths:
         '503':
           $ref: './comun.yaml#/components/responses/NoDisponible'
 
-  /cuentas-correo/{id}:
+  /cuentas-correo/{cuentaId}:
     delete:
       operationId: desconectarCuentaCorreo
       summary: Desconectar una cuenta de correo
@@ -156,7 +156,7 @@ paths:
       tags: [cuentas-correo]
       parameters:
         - $ref: './comun.yaml#/components/parameters/XRequestId'
-        - name: id
+        - name: cuentaId
           in: path
           required: true
           description: Id de la cuenta de correo (campo `id` de GET /cuentas-correo).
@@ -184,7 +184,10 @@ paths:
       summary: Vuelta desde la pantalla de permiso del proveedor
       description: >-
         Pública: la llama el navegador del usuario cuando el proveedor de correo lo redirige
-        (`redirect_uri`), así que no trae JWT. El usuario se identifica por el `state`: se verifica la
+        (`redirect_uri`), así que no trae JWT. Cada región registra su propio `redirect_uri` con el
+        prefijo de región del enrutador global (por ejemplo
+        `http://localhost:8000/region-1/api/correo/oauth/callback`, gateway.yaml), así la vuelta
+        llega a la región del usuario. El usuario se identifica por el `state`: se verifica la
         firma, el vencimiento y que el nonce no se haya usado; si falla, responde 400 y no se conecta
         nada. Con un `state` válido, el adaptador del proveedor canjea `code` por los tokens,
         comprueba que el scope concedido incluya el de solo lectura, guarda los tokens encriptados con
@@ -275,7 +278,9 @@ paths:
         nombres originales de Google. El aviso no trae el correo: `message.data` decodificado solo dice
         qué buzón cambió (`emailAddress`) y su `historyId` nuevo. El adaptador busca la cuenta por
         `emailAddress`, encola el buzón para el Examinador (cola correo.buzones-a-revisar, ADR-010) y
-        responde enseguida; los procesadores llaman después a `history.list`.
+        responde enseguida; los procesadores llaman después a `history.list`. Cada región crea su
+        `watch` con su propia URL de avisos, con el prefijo de región del enrutador global
+        (`/region-1/api/correo/notificaciones/gmail`), así el aviso llega a la región del buzón.
 
         Verificación: la URL de avisos configurada en la suscripción push lleva un secreto en la query
         (`?token=<secreto>`, como recomienda Pub/Sub para endpoints push); si no coincide con el
@@ -324,7 +329,9 @@ paths:
       operationId: recibirAvisoOutlook
       summary: Validación y avisos de Microsoft Graph
       description: >-
-        Pública: la llama Microsoft Graph (en el prototipo, el mock de Outlook). Atiende dos casos
+        Pública: la llama Microsoft Graph (en el prototipo, el mock de Outlook). Cada región crea la
+        suscripción con su propia URL, con el prefijo de región del enrutador global
+        (`/region-1/api/correo/notificaciones/outlook`), así el aviso llega a la región del buzón. Atiende dos casos
         (specs/externos/outlook.md, secciones 4.2 y 5), con los nombres originales de Microsoft:
 
         1. Validación de la URL al crear la suscripción: viene `validationToken` en la query y un cuerpo
@@ -498,17 +505,20 @@ components:
     CuentaCorreo:
       type: object
       additionalProperties: false
-      required: [id, proveedor, email, estado, conectadaEn, ultimaRevision]
+      required: [id, proveedorCorreo, email, estado, conectadaEn, ultimaRevision]
       properties:
         id:
           type: string
           format: uuid
-        proveedor:
+        proveedorCorreo:
           $ref: '#/components/schemas/ProveedorCorreo'
         email:
           type: string
           format: email
-          description: Dirección del buzón conectado.
+          description: >-
+            Dirección del buzón conectado. La pide el adaptador después del canje del código: Gmail
+            `GET /gmail/v1/users/me/profile` (`emailAddress`) y Outlook `GET /v1.0/me` (`mail` o, si
+            viene vacío, `userPrincipalName`); ver specs/externos.
         estado:
           $ref: '#/components/schemas/EstadoCuentaCorreo'
         conectadaEn:
@@ -533,9 +543,9 @@ components:
     AutorizacionCorreo:
       type: object
       additionalProperties: false
-      required: [proveedor, urlAutorizacion, stateVenceEn]
+      required: [proveedorCorreo, urlAutorizacion, stateVenceEn]
       properties:
-        proveedor:
+        proveedorCorreo:
           $ref: '#/components/schemas/ProveedorCorreo'
         urlAutorizacion:
           type: string

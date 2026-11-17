@@ -5,8 +5,8 @@
   "tipoReserva": "vuelo",
   "origen": "EZE",
   "destino": "SCL",
-  "inicio": "2026-12-10T11:15:00-03:00",
-  "fin": "2026-12-10T13:25:00-03:00",
+  "inicio": "2026-12-10",
+  "fin": "2026-12-10",
   "estado": "modificada",
   "origenCambio": "proveedor"
 }

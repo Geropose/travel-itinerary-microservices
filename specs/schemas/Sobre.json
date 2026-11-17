@@ -14,7 +14,13 @@
     "tipo": {
       "description": "Nombre del evento. También es la routing key en el exchange.",
       "type": "string",
-      "enum": ["ReservaDetectada", "ReservaActualizada", "FiltrosActualizados", "ViajeActualizado"]
+      "enum": [
+        "ReservaDetectada",
+        "ReservaActualizada",
+        "FiltrosActualizados",
+        "ViajeActualizado",
+        "AccesoRechazado"
+      ]
     },
     "version": {
       "description": "Versión del esquema de 'datos'. Empieza en 1 y sube solo con cambios incompatibles.",

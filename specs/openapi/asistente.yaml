@@ -19,7 +19,7 @@ info:
     **Respuestas lentas (QA-12).** Todo mensaje que no espera a un proveedor se responde en menos de
     3 s con **200**. Si una reprogramación tarda más de 3 s, se responde **202** con
     `estado: consultando` y el texto "estoy consultando con la aerolínea"; la ventana de chat pregunta
-    cada 2 s a `GET /conversaciones/{id}/mensajes?desde=` hasta que llega la respuesta y
+    cada 2 s a `GET /conversaciones/{conversacionId}/mensajes?desde=` hasta que llega la respuesta y
     `consultando` vuelve a `false`.
 
     **Degradación controlada (ADR-019).** Si Viajes, Usuarios, Integraciones, el proveedor o la agencia
@@ -116,7 +116,7 @@ paths:
         '503':
           $ref: './comun.yaml#/components/responses/NoDisponible'
 
-  /conversaciones/{id}:
+  /conversaciones/{conversacionId}:
     get:
       operationId: obtenerConversacion
       summary: Historial de una conversación
@@ -181,7 +181,7 @@ paths:
         '503':
           $ref: './comun.yaml#/components/responses/NoDisponible'
 
-  /conversaciones/{id}/mensajes:
+  /conversaciones/{conversacionId}/mensajes:
     post:
       operationId: enviarMensaje
       summary: Enviar un mensaje al asistente
@@ -189,7 +189,7 @@ paths:
         Guarda el mensaje del usuario, detecta la intención y responde. 200 con la respuesta del
         asistente cuando no hay que esperar a un proveedor (menos de 3 s, QA-12). 202 con
         `estado: consultando` cuando una reprogramación tarda más de 3 s: la respuesta llega después
-        por `GET /conversaciones/{id}/mensajes?desde=`. Si una dependencia no responde, igual es 200
+        por `GET /conversaciones/{conversacionId}/mensajes?desde=`. Si una dependencia no responde, igual es 200
         con `resultado: noDisponible` (degradación controlada, ADR-019). Si no entiende la consulta
         repregunta, y al segundo intento fallido deriva el caso a la agencia.
       tags: [conversaciones]
@@ -359,7 +359,7 @@ paths:
           description: >-
             La reprogramación tarda más de 3 s. El asistente sigue consultando en segundo plano y deja
             la respuesta en el historial; la ventana de chat pregunta cada 2 s con
-            `GET /conversaciones/{id}/mensajes?desde=<secuencia de esta respuesta>`.
+            `GET /conversaciones/{conversacionId}/mensajes?desde=<secuencia de esta respuesta>`.
           headers:
             Retry-After:
               description: Segundos que la ventana de chat espera antes de preguntar de nuevo.
@@ -468,7 +468,7 @@ paths:
         '503':
           $ref: './comun.yaml#/components/responses/NoDisponible'
 
-  /conversaciones/{id}/confirmaciones:
+  /conversaciones/{conversacionId}/confirmaciones:
     post:
       operationId: confirmarReprogramacion
       summary: Confirmar una opción de reprogramación
@@ -568,7 +568,7 @@ paths:
         '202':
           description: >-
             Aplicar el cambio tarda más de 3 s. La respuesta llega por
-            `GET /conversaciones/{id}/mensajes?desde=`.
+            `GET /conversaciones/{conversacionId}/mensajes?desde=`.
           headers:
             Retry-After:
               description: Segundos que la ventana de chat espera antes de preguntar de nuevo.
@@ -618,10 +618,10 @@ components:
 
   parameters:
     ConversacionId:
-      name: id
+      name: conversacionId
       in: path
       required: true
-      description: Identificador de la conversación (`conversacionId`).
+      description: Identificador de la conversación.
       schema:
         type: string
         format: uuid
@@ -903,7 +903,7 @@ components:
           enum: [respondido, consultando]
           description: >-
             `respondido` con 200; `consultando` con 202 (la respuesta definitiva llega por
-            `GET /conversaciones/{id}/mensajes?desde=`).
+            `GET /conversaciones/{conversacionId}/mensajes?desde=`).
         mensajeUsuario:
           $ref: '#/components/schemas/Mensaje'
         respuesta:

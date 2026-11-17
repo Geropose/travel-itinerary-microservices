@@ -1,0 +1,17 @@
+{
+  "eventId": "5e7a9c1b-3d4f-4a6b-8c2d-0e1f3a5b7c9d",
+  "tipo": "AccesoRechazado",
+  "version": 1,
+  "ocurridoEn": "2026-11-21T10:05:12Z",
+  "region": "region-1",
+  "datos": {
+    "servicio": "viajes",
+    "metodo": "GET",
+    "ruta": "/viajes/b7c9d1e3-5f6a-4b8c-8d0e-2f4a6b8c0d2e",
+    "status": 403,
+    "motivo": "sin-permiso",
+    "usuarioId": "2c4e6a8b-0d1f-4b3c-9e5a-7f9b1d3e5a7c",
+    "ip": "10.0.1.25",
+    "requestId": "7f3c1e2a-9b4d-4c6e-8a1f-2d3e4f5a6b7c"
+  }
+}

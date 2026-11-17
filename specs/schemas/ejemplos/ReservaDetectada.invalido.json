@@ -12,6 +12,7 @@
     "inicio": "2026-12-10T08:30:00-03:00",
     "fin": "2026-12-10T10:40:00-03:00",
     "destino": "SCL",
+    "estado": "confirmada",
     "detalle": {},
     "correoId": "18c4f2a9d7e3b001"
   }

@@ -30,14 +30,19 @@ ejemplo `OUTLOOK_URL=http://localhost:4002`).
 | Host real | Para qué | Rutas que imita el mock |
 |---|---|---|
 | `https://login.microsoftonline.com` | Permiso y tokens | `GET /{tenant}/oauth2/v2.0/authorize`, `POST /{tenant}/oauth2/v2.0/token` |
-| `https://graph.microsoft.com` | Microsoft Graph | `GET /v1.0/me/messages`, `GET /v1.0/me/messages/{id}`, `POST /v1.0/subscriptions`, `PATCH /v1.0/subscriptions/{id}` |
+| `https://graph.microsoft.com` | Microsoft Graph | `GET /v1.0/me`, `GET /v1.0/me/messages`, `GET /v1.0/me/messages/{id}`, `POST /v1.0/subscriptions`, `PATCH /v1.0/subscriptions/{id}` |
 
 `{tenant}` es `common` (cuentas personales y de trabajo). El mock acepta cualquier valor.
 
 ## 1. OAuth 2.0 (authorization code)
 
-Scopes: `offline_access https://graph.microsoft.com/Mail.Read`. `Mail.Read` es solo lectura (ADR-015);
-`offline_access` hace falta para recibir `refresh_token`.
+Scopes: `offline_access https://graph.microsoft.com/Mail.Read https://graph.microsoft.com/User.Read`.
+`Mail.Read` es solo lectura (ADR-015); `offline_access` hace falta para recibir `refresh_token`; `User.Read`
+deja leer el perfil básico, para saber qué dirección de correo se conectó (1.6). Ninguno permite enviar ni
+borrar correos.
+
+El `redirect_uri` lleva el prefijo de región del enrutador global (`/region-1/...` o `/region-2/...`,
+`specs/openapi/gateway.yaml`): cada región registra el suyo, así la vuelta llega a la región del usuario.
 
 ### 1.1 Pedido de permiso
 
@@ -45,9 +50,9 @@ Scopes: `offline_access https://graph.microsoft.com/Mail.Read`. `Mail.Read` es s
 GET /common/oauth2/v2.0/authorize?
   client_id=11112222-bbbb-3333-cccc-4444dddd5555
   &response_type=code
-  &redirect_uri=http%3A%2F%2Flocalhost%3A8000%2Fapi%2Fcorreo%2Foauth%2Fcallback
+  &redirect_uri=http%3A%2F%2Flocalhost%3A8000%2Fregion-1%2Fapi%2Fcorreo%2Foauth%2Fcallback
   &response_mode=query
-  &scope=offline_access%20https%3A%2F%2Fgraph.microsoft.com%2FMail.Read
+  &scope=offline_access%20https%3A%2F%2Fgraph.microsoft.com%2FMail.Read%20https%3A%2F%2Fgraph.microsoft.com%2FUser.Read
   &state=<state firmado por el Servicio de Correo>
 ```
 
@@ -71,7 +76,7 @@ El código vence en alrededor de 1 minuto.
 POST /common/oauth2/v2.0/token
 Content-Type: application/x-www-form-urlencoded
 
-client_id=11112222-bbbb-3333-cccc-4444dddd5555&scope=offline_access%20https%3A%2F%2Fgraph.microsoft.com%2FMail.Read&code=OAAABAAAAiL9Kn2Z27UubvWFPbm0gLWQJVzCTE9UkP3pSx1aXxUjq3n8b2JRLk4OxVXr&redirect_uri=http%3A%2F%2Flocalhost%3A8000%2Fapi%2Fcorreo%2Foauth%2Fcallback&grant_type=authorization_code&client_secret=<secreto>
+client_id=11112222-bbbb-3333-cccc-4444dddd5555&scope=offline_access%20https%3A%2F%2Fgraph.microsoft.com%2FMail.Read%20https%3A%2F%2Fgraph.microsoft.com%2FUser.Read&code=OAAABAAAAiL9Kn2Z27UubvWFPbm0gLWQJVzCTE9UkP3pSx1aXxUjq3n8b2JRLk4OxVXr&redirect_uri=http%3A%2F%2Flocalhost%3A8000%2Fregion-1%2Fapi%2Fcorreo%2Foauth%2Fcallback&grant_type=authorization_code&client_secret=<secreto>
 ```
 
 Respuesta `200`:
@@ -81,12 +86,12 @@ Respuesta `200`:
   "access_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.ejemplo",
   "token_type": "Bearer",
   "expires_in": 3599,
-  "scope": "https://graph.microsoft.com/Mail.Read",
+  "scope": "https://graph.microsoft.com/Mail.Read https://graph.microsoft.com/User.Read",
   "refresh_token": "AwABAAAAvPM1KaPlrEqdFSBzjqfTGAMxZGUTdM0t4B4ejemplo"
 }
 ```
 
-El adaptador comprueba que `scope` incluya `Mail.Read`. El access token es opaco para Trotamundos: no se
+El adaptador comprueba que `scope` incluya `Mail.Read` y `User.Read`. El access token es opaco para Trotamundos: no se
 decodifica ni se valida (Microsoft lo desaconseja).
 
 ### 1.3 Renovación del token
@@ -95,7 +100,7 @@ decodifica ni se valida (Microsoft lo desaconseja).
 POST /common/oauth2/v2.0/token
 Content-Type: application/x-www-form-urlencoded
 
-client_id=11112222-bbbb-3333-cccc-4444dddd5555&scope=offline_access%20https%3A%2F%2Fgraph.microsoft.com%2FMail.Read&refresh_token=AwABAAAAvPM1KaPlrEqdFSBzjqfTGAMxZGUTdM0t4B4ejemplo&grant_type=refresh_token&client_secret=<secreto>
+client_id=11112222-bbbb-3333-cccc-4444dddd5555&scope=offline_access%20https%3A%2F%2Fgraph.microsoft.com%2FMail.Read%20https%3A%2F%2Fgraph.microsoft.com%2FUser.Read&refresh_token=AwABAAAAvPM1KaPlrEqdFSBzjqfTGAMxZGUTdM0t4B4ejemplo&grant_type=refresh_token&client_secret=<secreto>
 ```
 
 Respuesta `200`: mismo formato que el canje. Trae un `refresh_token` **nuevo**: el adaptador reemplaza el
@@ -139,6 +144,28 @@ Graph responde `401` con el formato de error de Graph:
 ```
 
 El adaptador renueva el token (1.3) y repite la llamada una sola vez.
+
+### 1.6 Dirección de la cuenta conectada
+
+Después del canje, el adaptador pide el perfil para saber qué dirección se conectó (la guarda en la cuenta
+de correo y la usa para buscar la cuenta cuando llega un aviso):
+
+```
+GET /v1.0/me?$select=id,mail,userPrincipalName
+Authorization: Bearer <access_token>
+```
+
+Respuesta `200`:
+
+```json
+{
+  "id": "87d349ed-44d7-43e1-9a83-5f2406dee5bd",
+  "mail": "ana@outlook.example",
+  "userPrincipalName": "ana@outlook.example"
+}
+```
+
+`mail` puede venir en `null` en cuentas personales: en ese caso se usa `userPrincipalName`.
 
 ## 2. Listar mensajes nuevos
 

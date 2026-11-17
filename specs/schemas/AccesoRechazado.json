@@ -1,0 +1,65 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AccesoRechazado",
+  "description": "Campo 'datos' del evento AccesoRechazado, versión 1. Lo publica el Validador de Intercepción de cada microservicio (packages/comun) cuando rechaza una solicitud; lo consume el registro de accesos del API Gateway de la misma región, que lo guarda en la tabla accesos_rechazados (Iteración 5, ADR-005, QA-8, QA-9). Los rechazos del propio gateway se guardan directo, sin evento. Lleva datos personales (usuarioId, ip): no sale de la región.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["servicio", "metodo", "ruta", "status", "motivo", "requestId"],
+  "properties": {
+    "servicio": {
+      "description": "Servicio que rechazó la solicitud.",
+      "type": "string",
+      "enum": [
+        "autenticacion",
+        "usuarios",
+        "correo",
+        "viajes",
+        "integraciones",
+        "analitica",
+        "asistente"
+      ]
+    },
+    "metodo": {
+      "description": "Método HTTP de la solicitud.",
+      "type": "string",
+      "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"]
+    },
+    "ruta": {
+      "description": "Ruta pedida, sin la query string.",
+      "type": "string",
+      "pattern": "^/"
+    },
+    "status": {
+      "description": "Respuesta que devolvió el validador.",
+      "type": "integer",
+      "enum": [401, 403]
+    },
+    "motivo": {
+      "description": "Por qué se rechazó: sin-token (faltó el JWT), token-invalido (firma inválida o vencido), otra-region (el claim region no es la del servicio), sin-permiso (el rol o el permiso no alcanza).",
+      "type": "string",
+      "enum": ["sin-token", "token-invalido", "otra-region", "sin-permiso"]
+    },
+    "usuarioId": {
+      "description": "Usuario del JWT (claim 'sub'). No viene si faltó el token o era inválido, ni si era un token de servicio.",
+      "type": "string",
+      "format": "uuid"
+    },
+    "ip": {
+      "description": "Dirección IP desde la que llegó la solicitud, si se conoce.",
+      "type": "string",
+      "anyOf": [
+        {
+          "format": "ipv4"
+        },
+        {
+          "format": "ipv6"
+        }
+      ]
+    },
+    "requestId": {
+      "description": "X-Request-Id de la solicitud rechazada, para cruzarla con los logs.",
+      "type": "string",
+      "format": "uuid"
+    }
+  }
+}

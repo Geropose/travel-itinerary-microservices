@@ -65,6 +65,7 @@ Todas las rutas públicas pasan por el gateway con el prefijo del servicio: `/ap
 - Firmado con RS256 por el Servicio de Autenticación. La clave pública se publica en `GET /api/autenticacion/.well-known/jwks.json`. Los validadores la descargan una vez y verifican **sin usar la red** en cada solicitud.
 - Claims: `sub` (usuarioId, UUID), `region` (`region-1` o `region-2`), `roles` (`["usuario"]` o `["analista"]`), `idioma`, `exp` (**15 minutos**).
 - Token de renovación opaco (guardado con hash), válido 7 días, para pedir un JWT nuevo sin volver a escribir la contraseña.
+- **Token de servicio** (`tokenServicio` en `specs/openapi/comun.yaml`): solo para las rutas internas sin un usuario detrás (registro, tareas programadas, pruebas). Lo emite `POST /interna/tokens-servicio` de Autenticación a cambio del secreto del servicio (`SECRETO_SERVICIO_<SERVICIO>`). Claims: `sub` (nombre del servicio), `roles` (`["servicio"]`), `region`, `exp` (**5 minutos**). Cada ruta dice qué servicios la pueden llamar. Donde hay un usuario se propaga su JWT (ADR-019), nunca el token de servicio.
 
 ### 4.5 Eventos (ADR-002, ADR-016)
 
@@ -84,19 +85,24 @@ Todas las rutas públicas pasan por el gateway con el prefijo del servicio: `/ap
 
 | Evento | Publica | Consume | `datos` |
 |---|---|---|---|
-| `ReservaDetectada` | Correo (procesadores) | Viajes (consumidores) | `usuarioId, proveedor, tipoReserva (vuelo/hotel/auto), numeroReserva, inicio, fin, origen, destino, detalle{}, correoId` |
+| `ReservaDetectada` | Correo (procesadores) | Viajes (consumidores) | `usuarioId, proveedor, tipoReserva (vuelo/hotel/auto), numeroReserva, inicio, fin, origen, destino, estado (confirmada/modificada/cancelada), detalle{}, correoId` |
 | `ReservaActualizada` | Integraciones (adaptadores) | Viajes (consumidores) | `proveedor, numeroReserva, estado (confirmada/modificada/cancelada), cambios{inicio?, fin?, origen?, destino?, detalle?}, origenCambio ("proveedor")` |
 | `FiltrosActualizados` | Usuarios (filtros y whitelist) | Correo (filtro de remitentes) | `usuarioId, remitentesPermitidos[], filtrosActivos (bool)` |
-| `ViajeActualizado` | Viajes (gestor de viajes) | Analítica (anonimizador) | `usuarioId, viajeId, reservaId, numeroReserva, proveedor, tipoReserva, origen, destino, inicio, fin, estado, origenCambio (correo/proveedor/manual/archivado)` |
+| `ViajeActualizado` | Viajes (gestor de viajes) | Analítica (anonimizador) | `numeroReserva, proveedor, tipoReserva, origen, destino, inicio, fin, estado, origenCambio (correo/proveedor/manual/archivado)` |
+| `AccesoRechazado` | Cada microservicio (Validador de Intercepción) | Gateway (registro de accesos) | `servicio, metodo, ruta, status (401/403), motivo (sin-token/token-invalido/otra-region/sin-permiso), usuarioId?, ip?, requestId` |
 
 - **Idempotencia:** cada consumidor guarda el `eventId` en una tabla `eventos_procesados` dentro de la misma transacción que aplica el cambio; si ya está, ignora el evento (Iteración 2: "ignoran los repetidos").
 - **Publicación segura (outbox):** quien publica guarda el evento en una tabla `eventos_salientes` en la misma transacción que su cambio, y un publicador lo envía al broker cada 500 ms. Así un cambio guardado nunca se queda sin su evento.
-- `ReservaActualizada` no trae `usuarioId` (el proveedor no lo conoce): Viajes busca la reserva por `proveedor + numeroReserva`.
-- El anonimizador reemplaza `numeroReserva` por `codigoReserva = HMAC-SHA256(numeroReserva, SECRETO_ANALITICA)` y quita `usuarioId` y `reservaId` (ADR-016).
+- `ReservaDetectada`: Viajes hace un *upsert* por `proveedor + numeroReserva`. Si la reserva no existe la crea y la agrupa en un viaje; si existe le aplica el `estado` y las fechas nuevas.
+- `ReservaActualizada` no trae `usuarioId` (el proveedor no lo conoce): Viajes busca la reserva por `proveedor + numeroReserva`. Si no la encuentra, ignora el evento, lo registra en el log y lo confirma sin reintentar.
+- `FiltrosActualizados`: mientras Correo no recibió ninguno de un usuario, toma sus filtros como inactivos y su lista como vacía.
+- `ViajeActualizado` no lleva `usuarioId`, `viajeId` ni `reservaId`. El anonimizador reemplaza `numeroReserva` por `codigoReserva = HMAC-SHA256(numeroReserva, SECRETO_ANALITICA)` y guarda `inicio` y `fin` solo con la fecha, sin la hora (ADR-016).
+- `AccesoRechazado`: el Validador de Intercepción de cada microservicio lo publica sin hacer esperar la respuesta. Los rechazos del propio gateway se guardan directo en `accesos_rechazados`, sin pasar por el broker (QA-8, QA-9).
 
 ### 4.6 Roles y permisos (ADR-005)
 
 - `usuario`: solo ve y cambia sus propios datos.
-- Itinerario compartido: lo ven el dueño y las personas designadas (Servicio de Usuarios, "Permisos de itinerarios").
+- Itinerario compartido: lo ven el dueño y las personas designadas. El dueño lo resuelve Viajes con sus datos; las personas designadas las guarda Usuarios ("Permisos de itinerarios"), que no sabe de quién es cada viaje y se lo pregunta a Viajes (`GET /interna/viajes/{viajeId}/dueno`).
 - `analista`: solo accede a `/api/analitica/...`, nunca a datos personales.
-- Toda solicitud rechazada se guarda de forma asíncrona en el registro de accesos (QA-9: menos de 1 s).
+- `servicio`: solo lo tiene el token de servicio. Sirve únicamente en las rutas internas que lo piden; en el resto responde 403.
+- Toda solicitud rechazada se guarda de forma asíncrona en el registro de accesos (QA-9: menos de 1 s). Los microservicios la publican como evento `AccesoRechazado`; el gateway guarda las suyas directo.
