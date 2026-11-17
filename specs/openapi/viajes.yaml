@@ -1,0 +1,942 @@
+# Contrato REST del Servicio de Viajes (dueño: C).
+# Trazabilidad: Iteración 2 (gestor de viajes, consumidores, tarea de archivado), Iteración 4 y ADR-004
+# (CQRS liviano: panel desde la cache o la read replica, gestión manual UC-4), Iteración 6 (evento
+# ViajeActualizado), Iteración 3 (la publicación en redes pasa por Integraciones), Iteración 7 y ADR-019
+# (el Asistente llama con el JWT del usuario) y Diagrama de secuencia, escenario B (itinerario compartido).
+openapi: 3.1.0
+info:
+  title: Trotamundos — Servicio de Viajes
+  version: 0.1.0
+  description: >-
+    Guarda las reservas, las agrupa por viaje, responde el panel y archiva los viajes terminados.
+    Las lecturas del panel se resuelven primero en la cache del panel y, si el dato no está, en la
+    read replica (CQRS liviano, ADR-004). Las escrituras van a la base principal de la región del
+    usuario (ADR-017), invalidan la cache del panel de ese usuario y publican el evento
+    ViajeActualizado por la tabla de eventos salientes (outbox). Las reservas también llegan por los
+    eventos ReservaDetectada (Correo) y ReservaActualizada (Integraciones), definidos en
+    specs/asyncapi/eventos.yaml.
+
+servers:
+  - url: http://localhost:8000/api/viajes
+    description: Público. Entra por el enrutador global, el balanceador y el API Gateway.
+  - url: http://viajes:3004
+    description: Interno. Solo entre servicios de la misma región; no pasa por el gateway.
+
+security:
+  - bearerJWT: []
+
+tags:
+  - name: panel
+    description: Consultas del panel de viajes (UC-5, QA-2, QA-3).
+  - name: viajes
+    description: Detalle de un viaje e itinerario compartido (QA-9).
+  - name: reservas
+    description: Gestión manual de reservas desde el panel (UC-4).
+  - name: interna
+    description: Rutas internas entre servicios. No pasan por el API Gateway.
+  - name: salud
+    description: Estado del servicio para el monitor de salud (ADR-007).
+
+paths:
+  /health:
+    get:
+      operationId: obtenerSalud
+      summary: Estado del servicio
+      description: Responde 200 si la base y el broker están conectados, y 503 si no.
+      tags: [salud]
+      security: []
+      parameters:
+        - $ref: './comun.yaml#/components/parameters/XRequestId'
+      responses:
+        '200':
+          $ref: './comun.yaml#/components/responses/Salud'
+        '503':
+          $ref: './comun.yaml#/components/responses/NoDisponible'
+
+  /panel:
+    get:
+      operationId: obtenerPanel
+      summary: Panel de viajes activos del usuario
+      description: >-
+        Devuelve los viajes activos (no archivados) del usuario del JWT, ordenados por fecha de
+        inicio, cada uno con sus reservas ordenadas por fecha de inicio. Incluye las reservas
+        canceladas, para que el usuario vea la cancelación. El gestor de viajes busca primero en la
+        cache del panel y, si no está, lee la read replica y guarda el resultado en la cache
+        (ADR-004, ADR-011, ADR-012). El encabezado X-Origen-Dato indica de dónde salió la respuesta,
+        para medir QA-2.
+      tags: [panel]
+      parameters:
+        - $ref: './comun.yaml#/components/parameters/XRequestId'
+      responses:
+        '200':
+          description: Panel del usuario.
+          headers:
+            X-Request-Id:
+              $ref: './comun.yaml#/components/headers/XRequestId'
+            X-Origen-Dato:
+              $ref: '#/components/headers/XOrigenDato'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Panel'
+              examples:
+                panel:
+                  $ref: '#/components/examples/PanelSantiago'
+        '401':
+          $ref: './comun.yaml#/components/responses/NoAutenticado'
+        '403':
+          $ref: './comun.yaml#/components/responses/Prohibido'
+        '503':
+          $ref: './comun.yaml#/components/responses/NoDisponible'
+
+  /archivados:
+    get:
+      operationId: listarArchivados
+      summary: Viajes archivados del usuario
+      description: >-
+        Devuelve los viajes terminados que archivó la tarea de archivado, del más reciente al más
+        antiguo, cada uno con sus reservas ordenadas por fecha de inicio. Se lee de la read replica.
+      tags: [panel]
+      parameters:
+        - $ref: './comun.yaml#/components/parameters/XRequestId'
+      responses:
+        '200':
+          description: Viajes archivados del usuario.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListaViajes'
+              examples:
+                archivados:
+                  $ref: '#/components/examples/ListaArchivados'
+        '401':
+          $ref: './comun.yaml#/components/responses/NoAutenticado'
+        '403':
+          $ref: './comun.yaml#/components/responses/Prohibido'
+        '503':
+          $ref: './comun.yaml#/components/responses/NoDisponible'
+
+  /viajes/{viajeId}:
+    get:
+      operationId: obtenerViaje
+      summary: Detalle de un viaje
+      description: >-
+        Devuelve un viaje con sus reservas. Lo puede ver el dueño o una persona designada por el
+        dueño (itinerario compartido). Si quien pide no es el dueño, el Servicio de Viajes consulta
+        los permisos de itinerarios del Servicio de Usuarios aunque el gateway ya lo haya hecho
+        (defensa en profundidad, ADR-005); la cache nunca reemplaza esa verificación. Si el Servicio
+        de Usuarios no responde, se deniega con 503: nunca se permite el acceso por defecto.
+      tags: [viajes]
+      parameters:
+        - $ref: './comun.yaml#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/ViajeId'
+      responses:
+        '200':
+          description: Detalle del viaje.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Viaje'
+              examples:
+                viaje:
+                  $ref: '#/components/examples/ViajeSantiago'
+        '400':
+          $ref: './comun.yaml#/components/responses/SolicitudInvalida'
+        '401':
+          $ref: './comun.yaml#/components/responses/NoAutenticado'
+        '403':
+          $ref: './comun.yaml#/components/responses/Prohibido'
+        '404':
+          $ref: './comun.yaml#/components/responses/NoEncontrado'
+        '503':
+          $ref: './comun.yaml#/components/responses/NoDisponible'
+
+  /viajes/{viajeId}/compartir-red:
+    post:
+      operationId: compartirViajeEnRed
+      summary: Publicar el itinerario en una red social
+      description: >-
+        Publica el itinerario del viaje en una red social. Solo lo puede pedir el dueño del viaje.
+        El Servicio de Viajes arma el itinerario y llama a la ruta interna POST /interna/redes/publicar
+        del Servicio de Integraciones con el JWT del usuario; el adaptador de la red social hace la
+        publicación (Iteración 3, QA-7: menos de 3 s). Si Integraciones o la red social fallan o no
+        responden a tiempo, responde 503 y no se publica nada.
+      tags: [viajes]
+      parameters:
+        - $ref: './comun.yaml#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/ViajeId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PedidoCompartirRed'
+            example:
+              red: redsocial
+      responses:
+        '201':
+          description: El itinerario se publicó.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicacionRed'
+              example:
+                red: redsocial
+                url: https://redsocial.example/@ana_garcia/103254962155278888
+                publicadaEn: '2026-11-28T15:04:47Z'
+        '400':
+          $ref: './comun.yaml#/components/responses/SolicitudInvalida'
+        '401':
+          $ref: './comun.yaml#/components/responses/NoAutenticado'
+        '403':
+          $ref: './comun.yaml#/components/responses/Prohibido'
+        '404':
+          $ref: './comun.yaml#/components/responses/NoEncontrado'
+        '503':
+          $ref: './comun.yaml#/components/responses/NoDisponible'
+
+  /reservas:
+    post:
+      operationId: crearReserva
+      summary: Agregar una reserva a mano
+      description: >-
+        Alta manual de una reserva (UC-4). Si no se indica viajeId, el gestor de viajes la agrupa sola
+        en el viaje que corresponde por fechas, o crea un viaje nuevo, igual que con las reservas que
+        llegan por correo. Se escribe en la base principal, se invalida la cache del panel del usuario
+        y se publica ViajeActualizado con origenCambio "manual" y estado "confirmada". Responde 409 si
+        el usuario ya tiene una reserva con el mismo proveedor y numeroReserva.
+      tags: [reservas]
+      parameters:
+        - $ref: './comun.yaml#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NuevaReserva'
+            examples:
+              vueloSinViaje:
+                summary: Vuelo sin viaje (se agrupa solo)
+                value:
+                  proveedor: aerolinea-andina
+                  tipoReserva: vuelo
+                  numeroReserva: XKQ7PL
+                  inicio: '2026-12-10T08:30:00Z'
+                  fin: '2026-12-10T10:45:00Z'
+                  origen: Buenos Aires (EZE)
+                  destino: Santiago (SCL)
+                  detalle:
+                    numeroVuelo: AN 1234
+              hotelEnViaje:
+                summary: Hotel en un viaje existente
+                value:
+                  viajeId: 9a1d7c3e-2b4f-4e6a-8c0d-5f1e2a3b4c5d
+                  proveedor: hotel-cordillera
+                  tipoReserva: hotel
+                  numeroReserva: HC-48213
+                  inicio: '2026-12-10T15:00:00Z'
+                  fin: '2026-12-14T11:00:00Z'
+                  destino: Santiago
+      responses:
+        '201':
+          description: Reserva creada.
+          headers:
+            Location:
+              description: Ruta de la reserva creada.
+              schema:
+                type: string
+              example: /api/viajes/reservas/4c2e8f1a-7b3d-4a5e-9c6f-0d1e2f3a4b5c
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reserva'
+              examples:
+                vuelo:
+                  $ref: '#/components/examples/ReservaVueloManual'
+        '400':
+          $ref: './comun.yaml#/components/responses/SolicitudInvalida'
+        '401':
+          $ref: './comun.yaml#/components/responses/NoAutenticado'
+        '403':
+          $ref: './comun.yaml#/components/responses/Prohibido'
+        '404':
+          $ref: './comun.yaml#/components/responses/NoEncontrado'
+        '409':
+          $ref: './comun.yaml#/components/responses/Conflicto'
+        '503':
+          $ref: './comun.yaml#/components/responses/NoDisponible'
+
+  /reservas/{reservaId}:
+    patch:
+      operationId: modificarReserva
+      summary: Modificar una reserva a mano
+      description: >-
+        Cambio manual de una reserva del usuario (UC-4). Solo se mandan los campos que cambian;
+        proveedor, numeroReserva y tipoReserva no se pueden cambiar (identifican la reserva). Con
+        viajeId se mueve la reserva a otro viaje del usuario. Se escribe en la base principal, se
+        invalida la cache del panel y se publica ViajeActualizado con origenCambio "manual". Responde
+        409 si la reserva o el viaje destino están archivados, o si fin queda antes que inicio.
+      tags: [reservas]
+      parameters:
+        - $ref: './comun.yaml#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/ReservaId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CambioReserva'
+            example:
+              inicio: '2026-12-10T09:30:00Z'
+              fin: '2026-12-10T11:45:00Z'
+              estado: modificada
+      responses:
+        '200':
+          description: Reserva modificada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reserva'
+              example:
+                reservaId: 4c2e8f1a-7b3d-4a5e-9c6f-0d1e2f3a4b5c
+                viajeId: 9a1d7c3e-2b4f-4e6a-8c0d-5f1e2a3b4c5d
+                proveedor: aerolinea-andina
+                tipoReserva: vuelo
+                numeroReserva: XKQ7PL
+                inicio: '2026-12-10T09:30:00Z'
+                fin: '2026-12-10T11:45:00Z'
+                origen: Buenos Aires (EZE)
+                destino: Santiago (SCL)
+                estado: modificada
+                detalle:
+                  numeroVuelo: AN 1234
+                origenCambio: manual
+                actualizadoEn: '2026-11-20T14:10:00Z'
+        '400':
+          $ref: './comun.yaml#/components/responses/SolicitudInvalida'
+        '401':
+          $ref: './comun.yaml#/components/responses/NoAutenticado'
+        '403':
+          $ref: './comun.yaml#/components/responses/Prohibido'
+        '404':
+          $ref: './comun.yaml#/components/responses/NoEncontrado'
+        '409':
+          $ref: './comun.yaml#/components/responses/Conflicto'
+        '503':
+          $ref: './comun.yaml#/components/responses/NoDisponible'
+    delete:
+      operationId: eliminarReserva
+      summary: Eliminar una reserva a mano
+      description: >-
+        Baja manual de una reserva del usuario (UC-4). Se borra de la base principal, se invalida la
+        cache del panel y se publica ViajeActualizado con origenCambio "manual" y estado "cancelada"
+        (el evento no tiene un estado "eliminada"). Si el viaje queda sin reservas, también se borra.
+        Responde 409 si la reserva está en un viaje archivado.
+      tags: [reservas]
+      parameters:
+        - $ref: './comun.yaml#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/ReservaId'
+      responses:
+        '204':
+          description: Reserva eliminada.
+        '400':
+          $ref: './comun.yaml#/components/responses/SolicitudInvalida'
+        '401':
+          $ref: './comun.yaml#/components/responses/NoAutenticado'
+        '403':
+          $ref: './comun.yaml#/components/responses/Prohibido'
+        '404':
+          $ref: './comun.yaml#/components/responses/NoEncontrado'
+        '409':
+          $ref: './comun.yaml#/components/responses/Conflicto'
+        '503':
+          $ref: './comun.yaml#/components/responses/NoDisponible'
+
+  /interna/reservas:
+    servers:
+      - url: http://viajes:3004
+        description: Interno.
+    get:
+      operationId: listarReservasInterna
+      summary: Reservas de un usuario (interna)
+      description: >-
+        La usa el plug-in de consulta de estado del Asistente Virtual (Iteración 7). Recibe el JWT del
+        usuario propagado (ADR-019): usuarioId tiene que coincidir con el claim sub, si no responde
+        403. Devuelve las reservas de los viajes activos ordenadas por fecha de inicio, filtradas por
+        estado si se indica.
+      tags: [interna]
+      parameters:
+        - $ref: './comun.yaml#/components/parameters/XRequestId'
+        - name: usuarioId
+          in: query
+          required: true
+          description: Usuario dueño de las reservas. Tiene que ser el mismo del JWT.
+          schema:
+            type: string
+            format: uuid
+          example: 3b6f0c2e-5d1a-4c8e-9f7b-1a2b3c4d5e6f
+        - name: estado
+          in: query
+          required: false
+          description: Filtra por estado de la reserva.
+          schema:
+            $ref: './comun.yaml#/components/schemas/EstadoReserva'
+          example: confirmada
+      responses:
+        '200':
+          description: Reservas del usuario.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListaReservas'
+              examples:
+                reservas:
+                  $ref: '#/components/examples/ListaReservasConfirmadas'
+        '400':
+          $ref: './comun.yaml#/components/responses/SolicitudInvalida'
+        '401':
+          $ref: './comun.yaml#/components/responses/NoAutenticado'
+        '403':
+          $ref: './comun.yaml#/components/responses/Prohibido'
+        '503':
+          $ref: './comun.yaml#/components/responses/NoDisponible'
+
+  /interna/reservas/{numeroReserva}:
+    servers:
+      - url: http://viajes:3004
+        description: Interno.
+    get:
+      operationId: obtenerReservaPorNumeroInterna
+      summary: Reserva por número y proveedor (interna)
+      description: >-
+        Busca una reserva del usuario del JWT por proveedor + numeroReserva, la misma clave que usa
+        ReservaActualizada. La usan los plug-ins de consulta de estado y de reprogramación del
+        Asistente Virtual con el JWT del usuario propagado (ADR-019). Si la reserva no existe o es de
+        otro usuario, responde 404.
+      tags: [interna]
+      parameters:
+        - $ref: './comun.yaml#/components/parameters/XRequestId'
+        - name: numeroReserva
+          in: path
+          required: true
+          description: Número o código de la reserva tal como lo emite el proveedor.
+          schema:
+            type: string
+            minLength: 1
+          example: XKQ7PL
+        - name: proveedor
+          in: query
+          required: true
+          description: Identificador del proveedor de la reserva.
+          schema:
+            $ref: './comun.yaml#/components/schemas/Proveedor'
+          example: aerolinea-andina
+      responses:
+        '200':
+          description: Reserva encontrada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reserva'
+              examples:
+                vuelo:
+                  $ref: '#/components/examples/ReservaVueloManual'
+        '400':
+          $ref: './comun.yaml#/components/responses/SolicitudInvalida'
+        '401':
+          $ref: './comun.yaml#/components/responses/NoAutenticado'
+        '404':
+          $ref: './comun.yaml#/components/responses/NoEncontrado'
+        '503':
+          $ref: './comun.yaml#/components/responses/NoDisponible'
+
+  /interna/usuarios-con-viaje-proximo:
+    servers:
+      - url: http://viajes:3004
+        description: Interno.
+    get:
+      operationId: listarUsuariosConViajeProximo
+      summary: Usuarios con un viaje en curso o próximo (interna)
+      description: >-
+        La usa el examinador del Servicio de Correo para decidir qué buzones revisar cada 5 minutos y
+        cuáles cada 60 (Iteración 2, ADR-010). Devuelve los usuarios de la región con un viaje en
+        curso o que empieza dentro de los próximos `dias` días. La llama una tarea programada, sin
+        usuario: no lleva JWT y solo se puede alcanzar desde la red interna.
+      tags: [interna]
+      security: []
+      parameters:
+        - $ref: './comun.yaml#/components/parameters/XRequestId'
+        - name: dias
+          in: query
+          required: false
+          description: Ventana en días desde ahora.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 60
+            default: 7
+          example: 7
+      responses:
+        '200':
+          description: Usuarios con un viaje en curso o próximo.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UsuariosConViajeProximo'
+              example:
+                dias: 7
+                calculadoEn: '2026-12-05T03:00:00Z'
+                usuarioIds:
+                  - 3b6f0c2e-5d1a-4c8e-9f7b-1a2b3c4d5e6f
+                  - 5d7e9f1a-2b3c-4d5e-8f6a-7b8c9d0e1f2a
+        '400':
+          $ref: './comun.yaml#/components/responses/SolicitudInvalida'
+        '503':
+          $ref: './comun.yaml#/components/responses/NoDisponible'
+
+  /interna/archivado/ejecutar:
+    servers:
+      - url: http://viajes:3004
+        description: Interno.
+    post:
+      operationId: ejecutarArchivado
+      summary: Ejecutar ya la tarea de archivado (interna)
+      description: >-
+        Ejecuta en el momento la tarea de archivado, que normalmente corre todas las noches
+        (Iteración 2, UC-5). Sirve para las pruebas y la demo. Archiva los viajes cuya última reserva
+        ya terminó, invalida la cache del panel de cada usuario afectado y publica ViajeActualizado con
+        origenCambio "archivado" por cada reserva. No lleva JWT y solo se puede alcanzar desde la red
+        interna. Responde 409 si la tarea ya está corriendo.
+      tags: [interna]
+      security: []
+      parameters:
+        - $ref: './comun.yaml#/components/parameters/XRequestId'
+      responses:
+        '200':
+          description: La tarea terminó.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResultadoArchivado'
+              example:
+                viajesArchivados: 3
+                reservasArchivadas: 7
+                ejecutadoEn: '2026-12-15T03:00:00Z'
+        '409':
+          $ref: './comun.yaml#/components/responses/Conflicto'
+        '503':
+          $ref: './comun.yaml#/components/responses/NoDisponible'
+
+components:
+  securitySchemes:
+    bearerJWT:
+      $ref: './comun.yaml#/components/securitySchemes/bearerJWT'
+
+  parameters:
+    ViajeId:
+      name: viajeId
+      in: path
+      required: true
+      description: Identificador del viaje.
+      schema:
+        type: string
+        format: uuid
+      example: 9a1d7c3e-2b4f-4e6a-8c0d-5f1e2a3b4c5d
+    ReservaId:
+      name: reservaId
+      in: path
+      required: true
+      description: Identificador interno de la reserva en el Servicio de Viajes.
+      schema:
+        type: string
+        format: uuid
+      example: 4c2e8f1a-7b3d-4a5e-9c6f-0d1e2f3a4b5c
+
+  headers:
+    XOrigenDato:
+      description: >-
+        De dónde salió la respuesta del panel: de la cache del panel o de la read replica. Sirve para
+        medir QA-2 (ADR-004).
+      schema:
+        type: string
+        enum: [cache, replica]
+      example: cache
+
+  schemas:
+    OrigenCambio:
+      type: string
+      description: >-
+        Qué originó el último cambio de la reserva, igual que en ViajeActualizado: un correo, un aviso
+        del proveedor, una edición manual del usuario o el archivado.
+      enum: [correo, proveedor, manual, archivado]
+
+    Reserva:
+      type: object
+      description: >-
+        Reserva guardada en el Servicio de Viajes. Usa los mismos campos que los eventos
+        ReservaDetectada, ReservaActualizada y ViajeActualizado. origen es obligatorio para vuelos.
+      additionalProperties: false
+      required:
+        - reservaId
+        - viajeId
+        - proveedor
+        - tipoReserva
+        - numeroReserva
+        - inicio
+        - fin
+        - destino
+        - estado
+        - detalle
+        - origenCambio
+        - actualizadoEn
+      properties:
+        reservaId:
+          type: string
+          format: uuid
+        viajeId:
+          type: string
+          format: uuid
+          description: Viaje en el que está agrupada la reserva.
+        proveedor:
+          $ref: './comun.yaml#/components/schemas/Proveedor'
+        tipoReserva:
+          $ref: './comun.yaml#/components/schemas/TipoReserva'
+        numeroReserva:
+          type: string
+          minLength: 1
+          description: Número o código de la reserva tal como lo emite el proveedor.
+        inicio:
+          type: string
+          format: date-time
+          description: Salida del vuelo, entrada al hotel o retiro del auto.
+        fin:
+          type: string
+          format: date-time
+          description: Llegada del vuelo, salida del hotel o devolución del auto.
+        origen:
+          type: string
+          minLength: 1
+          description: Lugar de salida del vuelo o de retiro del auto. No aplica a hoteles.
+        destino:
+          type: string
+          minLength: 1
+          description: Llegada del vuelo, ubicación del hotel o lugar de devolución del auto.
+        estado:
+          $ref: './comun.yaml#/components/schemas/EstadoReserva'
+        detalle:
+          type: object
+          description: Datos propios del tipo de reserva y del proveedor. Forma libre.
+        origenCambio:
+          $ref: '#/components/schemas/OrigenCambio'
+        actualizadoEn:
+          type: string
+          format: date-time
+          description: Cuándo se guardó el último cambio.
+      if:
+        properties:
+          tipoReserva:
+            const: vuelo
+      then:
+        description: Los vuelos tienen que traer origen.
+        required: [origen]
+
+    NuevaReserva:
+      type: object
+      description: >-
+        Alta manual (UC-4). Mismos campos que ReservaDetectada, sin usuarioId (sale del JWT) ni
+        correoId. Sin viajeId, la reserva se agrupa sola.
+      additionalProperties: false
+      required: [proveedor, tipoReserva, numeroReserva, inicio, fin, destino]
+      properties:
+        viajeId:
+          type: string
+          format: uuid
+          description: Viaje del usuario donde agregarla. Si no viene, se agrupa sola.
+        proveedor:
+          $ref: './comun.yaml#/components/schemas/Proveedor'
+        tipoReserva:
+          $ref: './comun.yaml#/components/schemas/TipoReserva'
+        numeroReserva:
+          type: string
+          minLength: 1
+        inicio:
+          type: string
+          format: date-time
+        fin:
+          type: string
+          format: date-time
+        origen:
+          type: string
+          minLength: 1
+        destino:
+          type: string
+          minLength: 1
+        detalle:
+          type: object
+          description: Forma libre. Si no viene, se guarda vacío.
+      if:
+        properties:
+          tipoReserva:
+            const: vuelo
+      then:
+        description: Los vuelos tienen que traer origen.
+        required: [origen]
+
+    CambioReserva:
+      type: object
+      description: >-
+        Cambio manual (UC-4). Solo los campos que cambian, como en los cambios de ReservaActualizada,
+        más el estado y el viaje.
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        viajeId:
+          type: string
+          format: uuid
+          description: Mover la reserva a otro viaje activo del usuario.
+        inicio:
+          type: string
+          format: date-time
+        fin:
+          type: string
+          format: date-time
+        origen:
+          type: string
+          minLength: 1
+        destino:
+          type: string
+          minLength: 1
+        estado:
+          $ref: './comun.yaml#/components/schemas/EstadoReserva'
+        detalle:
+          type: object
+
+    Viaje:
+      type: object
+      description: >-
+        Viaje del usuario: agrupa sus reservas. destino, inicio y fin se calculan a partir de las
+        reservas.
+      additionalProperties: false
+      required: [viajeId, usuarioId, destino, inicio, fin, estado, reservas]
+      properties:
+        viajeId:
+          type: string
+          format: uuid
+        usuarioId:
+          type: string
+          format: uuid
+          description: Dueño del viaje.
+        destino:
+          type: string
+          minLength: 1
+          description: Destino principal del viaje.
+        inicio:
+          type: string
+          format: date-time
+          description: Inicio de la primera reserva.
+        fin:
+          type: string
+          format: date-time
+          description: Fin de la última reserva.
+        estado:
+          type: string
+          enum: [activo, archivado]
+        reservas:
+          type: array
+          description: Reservas del viaje, ordenadas por fecha de inicio.
+          items:
+            $ref: '#/components/schemas/Reserva'
+
+    Panel:
+      type: object
+      additionalProperties: false
+      required: [viajes]
+      properties:
+        viajes:
+          type: array
+          description: Viajes activos, ordenados por fecha de inicio.
+          items:
+            $ref: '#/components/schemas/Viaje'
+
+    ListaViajes:
+      type: object
+      additionalProperties: false
+      required: [viajes]
+      properties:
+        viajes:
+          type: array
+          items:
+            $ref: '#/components/schemas/Viaje'
+
+    ListaReservas:
+      type: object
+      additionalProperties: false
+      required: [reservas]
+      properties:
+        reservas:
+          type: array
+          items:
+            $ref: '#/components/schemas/Reserva'
+
+    PedidoCompartirRed:
+      type: object
+      additionalProperties: false
+      required: [red]
+      properties:
+        red:
+          type: string
+          minLength: 1
+          description: Identificador de la red social configurada en Integraciones.
+          example: redsocial
+
+    PublicacionRed:
+      type: object
+      additionalProperties: false
+      required: [red, url, publicadaEn]
+      properties:
+        red:
+          type: string
+          minLength: 1
+        url:
+          type: string
+          format: uri
+          description: URL de la publicación que devolvió la red social.
+        publicadaEn:
+          type: string
+          format: date-time
+
+    UsuariosConViajeProximo:
+      type: object
+      additionalProperties: false
+      required: [dias, calculadoEn, usuarioIds]
+      properties:
+        dias:
+          type: integer
+          minimum: 1
+        calculadoEn:
+          type: string
+          format: date-time
+        usuarioIds:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+            format: uuid
+
+    ResultadoArchivado:
+      type: object
+      additionalProperties: false
+      required: [viajesArchivados, reservasArchivadas, ejecutadoEn]
+      properties:
+        viajesArchivados:
+          type: integer
+          minimum: 0
+        reservasArchivadas:
+          type: integer
+          minimum: 0
+        ejecutadoEn:
+          type: string
+          format: date-time
+
+  examples:
+    ReservaVueloManual:
+      summary: Vuelo cargado a mano
+      value: &reservaVueloManual
+        reservaId: 4c2e8f1a-7b3d-4a5e-9c6f-0d1e2f3a4b5c
+        viajeId: 9a1d7c3e-2b4f-4e6a-8c0d-5f1e2a3b4c5d
+        proveedor: aerolinea-andina
+        tipoReserva: vuelo
+        numeroReserva: XKQ7PL
+        inicio: '2026-12-10T08:30:00Z'
+        fin: '2026-12-10T10:45:00Z'
+        origen: Buenos Aires (EZE)
+        destino: Santiago (SCL)
+        estado: confirmada
+        detalle:
+          numeroVuelo: AN 1234
+        origenCambio: manual
+        actualizadoEn: '2026-11-20T13:45:00Z'
+    ViajeSantiago:
+      summary: Viaje activo con vuelo, hotel y auto
+      value: &viajeSantiago
+        viajeId: 9a1d7c3e-2b4f-4e6a-8c0d-5f1e2a3b4c5d
+        usuarioId: 3b6f0c2e-5d1a-4c8e-9f7b-1a2b3c4d5e6f
+        destino: Santiago (SCL)
+        inicio: '2026-12-10T08:30:00Z'
+        fin: '2026-12-14T11:00:00Z'
+        estado: activo
+        reservas:
+          - reservaId: 4c2e8f1a-7b3d-4a5e-9c6f-0d1e2f3a4b5c
+            viajeId: 9a1d7c3e-2b4f-4e6a-8c0d-5f1e2a3b4c5d
+            proveedor: aerolinea-andina
+            tipoReserva: vuelo
+            numeroReserva: XKQ7PL
+            inicio: '2026-12-10T08:30:00Z'
+            fin: '2026-12-10T10:45:00Z'
+            origen: Buenos Aires (EZE)
+            destino: Santiago (SCL)
+            estado: confirmada
+            detalle:
+              numeroVuelo: AN 1234
+            origenCambio: correo
+            actualizadoEn: '2026-11-20T13:45:00Z'
+          - reservaId: 8f0b2d4e-3a5c-4e6f-9b8d-0c1e2f3a4b5d
+            viajeId: 9a1d7c3e-2b4f-4e6a-8c0d-5f1e2a3b4c5d
+            proveedor: rentadora-sur
+            tipoReserva: auto
+            numeroReserva: RS-77120
+            inicio: '2026-12-10T11:30:00Z'
+            fin: '2026-12-14T09:00:00Z'
+            origen: Aeropuerto de Santiago (SCL)
+            destino: Aeropuerto de Santiago (SCL)
+            estado: modificada
+            detalle:
+              modelo: Compacto
+            origenCambio: proveedor
+            actualizadoEn: '2026-11-25T09:12:00Z'
+          - reservaId: 6e8a0c2d-1f3b-4d5e-8a7c-9b0c1d2e3f4a
+            viajeId: 9a1d7c3e-2b4f-4e6a-8c0d-5f1e2a3b4c5d
+            proveedor: hotel-cordillera
+            tipoReserva: hotel
+            numeroReserva: HC-48213
+            inicio: '2026-12-10T15:00:00Z'
+            fin: '2026-12-14T11:00:00Z'
+            destino: Santiago
+            estado: confirmada
+            detalle:
+              habitacion: Doble
+            origenCambio: manual
+            actualizadoEn: '2026-11-21T18:02:00Z'
+    PanelSantiago:
+      summary: Panel con un viaje activo
+      value:
+        viajes:
+          - *viajeSantiago
+    ListaReservasConfirmadas:
+      summary: Reservas confirmadas del usuario
+      value:
+        reservas:
+          - *reservaVueloManual
+    ListaArchivados:
+      summary: Un viaje archivado
+      value:
+        viajes:
+          - viajeId: 2e4a6c8d-0f1b-4c3d-9e5f-7a8b9c0d1e2f
+            usuarioId: 3b6f0c2e-5d1a-4c8e-9f7b-1a2b3c4d5e6f
+            destino: Lima
+            inicio: '2026-07-03T22:10:00Z'
+            fin: '2026-07-09T10:00:00Z'
+            estado: archivado
+            reservas:
+              - reservaId: 1a3c5e7f-9b2d-4f6a-8c0e-2d4f6a8b0c1e
+                viajeId: 2e4a6c8d-0f1b-4c3d-9e5f-7a8b9c0d1e2f
+                proveedor: hotel-cordillera
+                tipoReserva: hotel
+                numeroReserva: HC-40017
+                inicio: '2026-07-03T22:10:00Z'
+                fin: '2026-07-09T10:00:00Z'
+                destino: Lima
+                estado: confirmada
+                detalle: {}
+                origenCambio: archivado
+                actualizadoEn: '2026-07-10T03:00:00Z'
