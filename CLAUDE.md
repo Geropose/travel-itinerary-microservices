@@ -38,6 +38,10 @@ componentes que no estén ahí.
 ## Configuración compartida
 
 - `tsconfig.base.json`: opciones estrictas (`strict`, `noUncheckedIndexedAccess`). Cada paquete o servicio
-  que tenga su propio `tsconfig.json` lo extiende.
+  que tenga su propio `tsconfig.json` lo extiende. El código se corre sin compilar (Node 24 o `tsx`): los
+  imports relativos llevan la extensión `.ts` y solo se usa sintaxis que Node puede borrar
+  (`erasableSyntaxOnly`: nada de `enum` ni propiedades en el constructor).
+- `packages/comun`: kit común de los servicios (servidor, Validador de Intercepción, broker, outbox, db,
+  http, logger, config). Ejemplos de uso en `packages/comun/README.md`.
 - `vitest.config.ts`: busca pruebas en `{src,test}/**/*.test.ts` de cada paquete, servicio y mock.
 - Requiere Node 24 (`.nvmrc`).
