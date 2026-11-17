@@ -1,0 +1,186 @@
+# Componentes comunes a todos los contratos REST (docs/CONVENCIONES.md, sección 4.3 y 4.4).
+# No es un contrato de servicio: cada specs/openapi/<servicio>.yaml los referencia con
+# $ref: './comun.yaml#/components/...'
+openapi: 3.1.0
+info:
+  title: Trotamundos — componentes comunes
+  version: 0.1.0
+  description: Esquemas, parámetros, respuestas y seguridad que comparten todos los servicios.
+paths: {}
+components:
+  securitySchemes:
+    bearerJWT:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >-
+        JWT firmado con RS256 por el Servicio de Autenticación (ADR-014). Claims: sub (usuarioId),
+        region, roles (usuario o analista), idioma, exp (15 minutos). Se valida con la clave pública
+        de GET /api/autenticacion/.well-known/jwks.json, sin usar la red en cada solicitud.
+
+  parameters:
+    XRequestId:
+      name: X-Request-Id
+      in: header
+      required: false
+      description: Identificador de la solicitud. Si no viene, el gateway lo crea y lo propaga.
+      schema:
+        type: string
+        format: uuid
+      example: 7f3c1e2a-9b4d-4c6e-8a1f-2d3e4f5a6b7c
+
+  headers:
+    XRequestId:
+      description: Identificador de la solicitud, el mismo que se usó en los logs.
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+    Problema:
+      type: object
+      description: Error en formato application/problem+json (RFC 7807).
+      additionalProperties: false
+      required: [type, title, status, requestId]
+      properties:
+        type:
+          type: string
+          description: URI que identifica el tipo de error.
+          example: https://trotamundos.example/errores/no-autorizado
+        title:
+          type: string
+          example: No autorizado
+        status:
+          type: integer
+          minimum: 400
+          maximum: 599
+          example: 401
+        detail:
+          type: string
+          example: Falta el token o venció.
+        requestId:
+          type: string
+          format: uuid
+          example: 7f3c1e2a-9b4d-4c6e-8a1f-2d3e4f5a6b7c
+        errores:
+          type: array
+          description: Detalle por campo, solo en errores de validación (400).
+          items:
+            type: object
+            additionalProperties: false
+            required: [campo, mensaje]
+            properties:
+              campo:
+                type: string
+              mensaje:
+                type: string
+
+    Salud:
+      type: object
+      additionalProperties: false
+      required: [estado]
+      properties:
+        estado:
+          type: string
+          enum: [ok, degradado]
+          example: ok
+
+    Region:
+      type: string
+      enum: [region-1, region-2]
+
+    Idioma:
+      type: string
+      enum: [es, en]
+
+    Proveedor:
+      type: string
+      description: Identificador del proveedor, el mismo en los eventos, Viajes e Integraciones.
+      example: aerolinea-andina
+
+    TipoReserva:
+      type: string
+      enum: [vuelo, hotel, auto]
+
+    EstadoReserva:
+      type: string
+      enum: [confirmada, modificada, cancelada]
+
+  responses:
+    Salud:
+      description: El servicio puede atender (base y broker conectados).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Salud'
+    NoDisponible:
+      description: El servicio o una dependencia no está disponible (503).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problema'
+          example:
+            type: https://trotamundos.example/errores/no-disponible
+            title: Servicio no disponible
+            status: 503
+            requestId: 7f3c1e2a-9b4d-4c6e-8a1f-2d3e4f5a6b7c
+    SolicitudInvalida:
+      description: El cuerpo o los parámetros no cumplen el contrato (400).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problema'
+          example:
+            type: https://trotamundos.example/errores/solicitud-invalida
+            title: Solicitud inválida
+            status: 400
+            requestId: 7f3c1e2a-9b4d-4c6e-8a1f-2d3e4f5a6b7c
+            errores:
+              - campo: email
+                mensaje: no es un email válido
+    NoAutenticado:
+      description: Falta el JWT, es inválido o venció (401).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problema'
+          example:
+            type: https://trotamundos.example/errores/no-autenticado
+            title: No autenticado
+            status: 401
+            requestId: 7f3c1e2a-9b4d-4c6e-8a1f-2d3e4f5a6b7c
+    Prohibido:
+      description: >-
+        El usuario no tiene permiso (403). La solicitud rechazada se guarda en el registro de
+        accesos (QA-9).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problema'
+          example:
+            type: https://trotamundos.example/errores/prohibido
+            title: Acceso denegado
+            status: 403
+            requestId: 7f3c1e2a-9b4d-4c6e-8a1f-2d3e4f5a6b7c
+    NoEncontrado:
+      description: El recurso no existe o no es del usuario (404).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problema'
+          example:
+            type: https://trotamundos.example/errores/no-encontrado
+            title: No encontrado
+            status: 404
+            requestId: 7f3c1e2a-9b4d-4c6e-8a1f-2d3e4f5a6b7c
+    Conflicto:
+      description: El cambio choca con el estado actual (409).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problema'
+          example:
+            type: https://trotamundos.example/errores/conflicto
+            title: Conflicto
+            status: 409
+            requestId: 7f3c1e2a-9b4d-4c6e-8a1f-2d3e4f5a6b7c
