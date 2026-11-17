@@ -1,0 +1,10 @@
+# Reglas de @redocly/cli para los contratos REST de specs/openapi/.
+extends:
+  - recommended
+
+rules:
+  # El prototipo no publica licencia ni servidores de producción.
+  info-license: off
+  no-server-example.com: off
+  # Las rutas internas no pasan por el gateway y no llevan bearerJWT.
+  security-defined: warn

@@ -18,12 +18,13 @@
     "format": "prettier --write .",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run --passWithNoTests",
-    "test:contratos": "vitest run --passWithNoTests contrato",
+    "test:contratos": "node infra/scripts/lint-contratos.mjs && vitest run --passWithNoTests contrato",
     "e2e": "vitest run --passWithNoTests --config tests/e2e/vitest.config.ts"
   },
   "devDependencies": {
     "@asyncapi/parser": "^3.6.6",
     "@eslint/js": "^10.0.1",
+    "@redocly/cli": "^2.79.0",
     "@types/node": "^24.19.2",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
