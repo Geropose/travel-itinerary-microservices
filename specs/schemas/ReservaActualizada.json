@@ -1,0 +1,48 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ReservaActualizada",
+  "description": "Campo 'datos' del evento ReservaActualizada, versión 1. Lo publican los adaptadores del Servicio de Integraciones cuando un proveedor informa un cambio o una cancelación; lo consumen los consumidores de eventos del Servicio de Viajes (Iteraciones 2 y 3). No trae usuarioId porque el proveedor no lo conoce: Viajes busca la reserva por proveedor + numeroReserva.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["proveedor", "numeroReserva", "estado", "cambios", "origenCambio"],
+  "properties": {
+    "proveedor": {
+      "description": "Identificador del proveedor que informó el cambio.",
+      "type": "string",
+      "minLength": 1
+    },
+    "numeroReserva": {
+      "description": "Número o código de la reserva tal como lo emite el proveedor.",
+      "type": "string",
+      "minLength": 1
+    },
+    "estado": {
+      "description": "Estado de la reserva después del cambio.",
+      "type": "string",
+      "enum": ["confirmada", "modificada", "cancelada"]
+    },
+    "cambios": {
+      "description": "Solo los campos que cambiaron, con su valor nuevo. Puede ir vacío si solo cambió el estado (por ejemplo, una cancelación).",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "inicio": { "type": "string", "format": "date-time" },
+        "fin": { "type": "string", "format": "date-time" },
+        "origen": { "type": "string", "minLength": 1 },
+        "destino": { "type": "string", "minLength": 1 },
+        "detalle": { "type": "object" }
+      }
+    },
+    "origenCambio": {
+      "description": "Quién originó el cambio. En este evento siempre es el proveedor.",
+      "type": "string",
+      "const": "proveedor"
+    }
+  },
+  "if": {
+    "properties": { "estado": { "const": "modificada" } }
+  },
+  "then": {
+    "properties": { "cambios": { "type": "object", "minProperties": 1 } }
+  }
+}

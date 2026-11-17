@@ -1,0 +1,19 @@
+{
+  "eventId": "3f1c2a9e-8b7d-4c6e-9a51-2d4f6b8e0c13",
+  "tipo": "ReservaDetectada",
+  "version": 1,
+  "ocurridoEn": "2026-11-20T13:45:00Z",
+  "region": "region-1",
+  "datos": {
+    "usuarioId": "6b1e7c2a-4f3d-4e8b-9c0a-1d2e3f4a5b6c",
+    "proveedor": "aerolinea-andina",
+    "tipoReserva": "vuelo",
+    "numeroReserva": "XKQ7PL",
+    "inicio": "2026-12-10T08:30:00-03:00",
+    "fin": "2026-12-10T10:40:00-03:00",
+    "origen": "EZE",
+    "destino": "SCL",
+    "detalle": { "numeroVuelo": "AN 1234", "asiento": "14C" },
+    "correoId": "18c4f2a9d7e3b001"
+  }
+}

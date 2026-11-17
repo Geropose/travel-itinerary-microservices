@@ -1,0 +1,88 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ViajeActualizado",
+  "description": "Campo 'datos' del evento ViajeActualizado, versión 1. Lo publica el gestor de viajes del Servicio de Viajes cada vez que guarda un cambio en una reserva (de un correo, de un proveedor, manual o por el archivado); lo consume el anonimizador del Servicio de Analítica de la misma región (Iteración 6, ADR-016). Lleva datos personales: no sale de la región del usuario.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "usuarioId",
+    "viajeId",
+    "reservaId",
+    "numeroReserva",
+    "proveedor",
+    "tipoReserva",
+    "destino",
+    "inicio",
+    "fin",
+    "estado",
+    "origenCambio"
+  ],
+  "properties": {
+    "usuarioId": {
+      "description": "Usuario dueño del viaje.",
+      "type": "string",
+      "format": "uuid"
+    },
+    "viajeId": {
+      "description": "Viaje en el que quedó agrupada la reserva.",
+      "type": "string",
+      "format": "uuid"
+    },
+    "reservaId": {
+      "description": "Identificador interno de la reserva en el Servicio de Viajes.",
+      "type": "string",
+      "format": "uuid"
+    },
+    "numeroReserva": {
+      "description": "Número o código de la reserva tal como lo emite el proveedor.",
+      "type": "string",
+      "minLength": 1
+    },
+    "proveedor": {
+      "description": "Identificador del proveedor de la reserva.",
+      "type": "string",
+      "minLength": 1
+    },
+    "tipoReserva": {
+      "description": "Tipo de reserva.",
+      "type": "string",
+      "enum": ["vuelo", "hotel", "auto"]
+    },
+    "origen": {
+      "description": "Lugar de salida del vuelo o de retiro del auto. Obligatorio para vuelos; no aplica a hoteles.",
+      "type": "string",
+      "minLength": 1
+    },
+    "destino": {
+      "description": "Lugar de llegada del vuelo, ubicación del hotel o lugar de devolución del auto.",
+      "type": "string",
+      "minLength": 1
+    },
+    "inicio": {
+      "description": "Salida del vuelo, entrada al hotel o retiro del auto (valor vigente después del cambio).",
+      "type": "string",
+      "format": "date-time"
+    },
+    "fin": {
+      "description": "Llegada del vuelo, salida del hotel o devolución del auto (valor vigente después del cambio).",
+      "type": "string",
+      "format": "date-time"
+    },
+    "estado": {
+      "description": "Estado de la reserva después del cambio.",
+      "type": "string",
+      "enum": ["confirmada", "modificada", "cancelada"]
+    },
+    "origenCambio": {
+      "description": "Qué originó el cambio: un correo, un aviso del proveedor, una edición manual del usuario o el archivado nocturno.",
+      "type": "string",
+      "enum": ["correo", "proveedor", "manual", "archivado"]
+    }
+  },
+  "if": {
+    "properties": { "tipoReserva": { "const": "vuelo" } }
+  },
+  "then": {
+    "required": ["origen"]
+  }
+}

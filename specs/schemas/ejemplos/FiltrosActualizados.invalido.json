@@ -1,0 +1,12 @@
+{
+  "eventId": "f5a7b9c1-3d4e-4f6a-8b8c-0d2e4f6a8b0c",
+  "tipo": "FiltrosActualizados",
+  "version": 1,
+  "ocurridoEn": "2026-11-18T21:03:00Z",
+  "region": "region-2",
+  "datos": {
+    "usuarioId": "0f9e8d7c-6b5a-4f3e-8d2c-1b0a9f8e7d6c",
+    "remitentesPermitidos": ["reservas@aerolinea-andina.com", "hotelesdelsur"],
+    "filtrosActivos": true
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "codigoReserva": "7c1a5ee1783e81c0570628f0e5f46d26a588aa3a8dbda1f87592ba5f9afe4465",
+  "region": "region-1",
+  "proveedor": "aerolinea-andina",
+  "tipoReserva": "vuelo",
+  "origen": "EZE",
+  "destino": "SCL",
+  "inicio": "2026-12-10T11:15:00-03:00",
+  "fin": "2026-12-10T13:25:00-03:00",
+  "estado": "modificada",
+  "origenCambio": "proveedor"
+}
