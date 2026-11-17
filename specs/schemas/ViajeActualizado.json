@@ -1,13 +1,10 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "ViajeActualizado",
-  "description": "Campo 'datos' del evento ViajeActualizado, versión 1. Lo publica el gestor de viajes del Servicio de Viajes cada vez que guarda un cambio en una reserva (de un correo, de un proveedor, manual o por el archivado); lo consume el anonimizador del Servicio de Analítica de la misma región (Iteración 6, ADR-016). Lleva datos personales: no sale de la región del usuario.",
+  "description": "Campo 'datos' del evento ViajeActualizado, versión 1. Lo publica el gestor de viajes del Servicio de Viajes cada vez que guarda un cambio en una reserva (de un correo, de un proveedor, manual o por el archivado); lo consume el anonimizador del Servicio de Analítica de la misma región (Iteración 6, ADR-016). No lleva identificadores del usuario ni del viaje: el anonimizador no los necesita. Lleva 'numeroReserva', que es un dato personal y no sale de la región; el anonimizador lo reemplaza por 'codigoReserva' (HMAC).",
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "usuarioId",
-    "viajeId",
-    "reservaId",
     "numeroReserva",
     "proveedor",
     "tipoReserva",
@@ -18,23 +15,8 @@
     "origenCambio"
   ],
   "properties": {
-    "usuarioId": {
-      "description": "Usuario dueño del viaje.",
-      "type": "string",
-      "format": "uuid"
-    },
-    "viajeId": {
-      "description": "Viaje en el que quedó agrupada la reserva.",
-      "type": "string",
-      "format": "uuid"
-    },
-    "reservaId": {
-      "description": "Identificador interno de la reserva en el Servicio de Viajes.",
-      "type": "string",
-      "format": "uuid"
-    },
     "numeroReserva": {
-      "description": "Número o código de la reserva tal como lo emite el proveedor.",
+      "description": "Número o código de la reserva tal como lo emite el proveedor. El anonimizador lo reemplaza por codigoReserva.",
       "type": "string",
       "minLength": 1
     },
@@ -80,7 +62,11 @@
     }
   },
   "if": {
-    "properties": { "tipoReserva": { "const": "vuelo" } }
+    "properties": {
+      "tipoReserva": {
+        "const": "vuelo"
+      }
+    }
   },
   "then": {
     "required": ["origen"]

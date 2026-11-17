@@ -13,7 +13,11 @@
     "fin": "2026-12-10T10:40:00-03:00",
     "origen": "EZE",
     "destino": "SCL",
-    "detalle": { "numeroVuelo": "AN 1234", "asiento": "14C" },
+    "estado": "confirmada",
+    "detalle": {
+      "numeroVuelo": "AN 1234",
+      "asiento": "14C"
+    },
     "correoId": "18c4f2a9d7e3b001"
   }
 }

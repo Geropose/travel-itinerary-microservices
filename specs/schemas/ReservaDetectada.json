@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "ReservaDetectada",
-  "description": "Campo 'datos' del evento ReservaDetectada, versión 1. Lo publican los procesadores del Servicio de Correo cuando extraen una reserva de un correo de viaje; lo consumen los consumidores de eventos del Servicio de Viajes (Iteración 2, ADR-002).",
+  "description": "Campo 'datos' del evento ReservaDetectada, versión 1. Lo publican los procesadores del Servicio de Correo cuando extraen una reserva de un correo de viaje (confirmación, cambio o cancelación); lo consumen los consumidores de eventos del Servicio de Viajes, que guardan la reserva con un upsert por 'proveedor' + 'numeroReserva': si ya existe la actualizan, y si no la crean y la agrupan en un viaje (Iteración 2, ADR-002).",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -12,6 +12,7 @@
     "inicio",
     "fin",
     "destino",
+    "estado",
     "detalle",
     "correoId"
   ],
@@ -56,6 +57,11 @@
       "type": "string",
       "minLength": 1
     },
+    "estado": {
+      "description": "Estado de la reserva según el correo: confirmada (correo de confirmación), modificada (correo de cambio) o cancelada (correo de cancelación).",
+      "type": "string",
+      "enum": ["confirmada", "modificada", "cancelada"]
+    },
     "detalle": {
       "description": "Datos propios del tipo de reserva y del proveedor (número de vuelo, habitación, modelo de auto, etc.). Forma libre.",
       "type": "object"
@@ -67,7 +73,11 @@
     }
   },
   "if": {
-    "properties": { "tipoReserva": { "const": "vuelo" } }
+    "properties": {
+      "tipoReserva": {
+        "const": "vuelo"
+      }
+    }
   },
   "then": {
     "required": ["origen"]

@@ -47,14 +47,14 @@
       "minLength": 1
     },
     "inicio": {
-      "description": "Salida del vuelo, entrada al hotel o retiro del auto.",
+      "description": "Día de salida del vuelo, entrada al hotel o retiro del auto. Solo la fecha, sin hora: la hora exacta junto con el proveedor y el destino ayudaría a identificar a la persona.",
       "type": "string",
-      "format": "date-time"
+      "format": "date"
     },
     "fin": {
-      "description": "Llegada del vuelo, salida del hotel o devolución del auto.",
+      "description": "Día de llegada del vuelo, salida del hotel o devolución del auto. Solo la fecha, sin hora.",
       "type": "string",
-      "format": "date-time"
+      "format": "date"
     },
     "estado": {
       "description": "Estado de la reserva después del cambio.",
@@ -68,7 +68,11 @@
     }
   },
   "if": {
-    "properties": { "tipoReserva": { "const": "vuelo" } }
+    "properties": {
+      "tipoReserva": {
+        "const": "vuelo"
+      }
+    }
   },
   "then": {
     "required": ["origen"]

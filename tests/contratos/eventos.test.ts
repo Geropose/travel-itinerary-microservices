@@ -31,8 +31,20 @@ const EVENTOS = [
   'ReservaActualizada',
   'FiltrosActualizados',
   'ViajeActualizado',
+  'AccesoRechazado',
 ] as const;
 type Evento = (typeof EVENTOS)[number];
+
+/** Microservicios con Validador de Intercepción propio: todos publican AccesoRechazado. */
+const MICROSERVICIOS = [
+  'autenticacion',
+  'usuarios',
+  'correo',
+  'viajes',
+  'integraciones',
+  'analitica',
+  'asistente',
+];
 
 /** Por qué tiene que fallar cada ejemplo inválido: palabra clave de JSON Schema y ubicación. */
 const MOTIVO_INVALIDO: Record<Evento | 'ViajeAnonimizado', { keyword: string; ruta: string }> = {
@@ -44,16 +56,19 @@ const MOTIVO_INVALIDO: Record<Evento | 'ViajeAnonimizado', { keyword: string; ru
   FiltrosActualizados: { keyword: 'pattern', ruta: '/datos/remitentesPermitidos/1' },
   // "archivado" es un origen de cambio, no un estado de la reserva.
   ViajeActualizado: { keyword: 'enum', ruta: '/datos/estado' },
+  // El validador solo rechaza con 401 o 403.
+  AccesoRechazado: { keyword: 'enum', ruta: '/datos/status' },
   // La fila anonimizada no puede llevar usuarioId.
   ViajeAnonimizado: { keyword: 'additionalProperties', ruta: '' },
 };
 
 /** Publicador y consumidor de cada evento, como en la tabla de docs/CONVENCIONES.md 4.5. */
-const TABLA: Record<Evento, { publica: string; consume: string }> = {
+const TABLA: Record<Evento, { publica: string | string[]; consume: string }> = {
   ReservaDetectada: { publica: 'correo', consume: 'viajes' },
   ReservaActualizada: { publica: 'integraciones', consume: 'viajes' },
   FiltrosActualizados: { publica: 'usuarios', consume: 'correo' },
   ViajeActualizado: { publica: 'viajes', consume: 'analitica' },
+  AccesoRechazado: { publica: MICROSERVICIOS, consume: 'gateway' },
 };
 
 function nuevoAjv(): Ajv {
@@ -155,12 +170,24 @@ describe('contrato de la fila anonimizada (ViajeAnonimizado)', () => {
     }
   });
 
-  it('usa los mismos tipos que ViajeActualizado en los campos que comparten', () => {
+  it('guarda solo el día de inicio y fin, sin la hora', () => {
+    for (const campo of ['inicio', 'fin']) {
+      expect(esquema.properties[campo], campo).toMatchObject({ type: 'string', format: 'date' });
+    }
+    expect(
+      validar({
+        ...leerJson<object>(`${dirEjemplos}ViajeAnonimizado.valido.json`),
+        inicio: '2026-12-10T11:15:00-03:00',
+      }),
+    ).toBe(false);
+  });
+
+  it('usa los mismos tipos que ViajeActualizado en los demás campos que comparten', () => {
     const viaje = leerEsquema('ViajeActualizado');
     const sobre = leerEsquema('Sobre');
     const sinDescripcion = (s: unknown) => ({ ...(s as object), description: undefined });
     for (const campo of Object.keys(esquema.properties)) {
-      if (campo === 'codigoReserva') continue;
+      if (['codigoReserva', 'inicio', 'fin'].includes(campo)) continue;
       const original = campo === 'region' ? sobre.properties[campo] : viaje.properties[campo];
       expect(sinDescripcion(esquema.properties[campo]), campo).toEqual(sinDescripcion(original));
     }

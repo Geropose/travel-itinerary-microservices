@@ -37,7 +37,9 @@ channels:
   ReservaDetectada:
     address: ReservaDetectada
     title: Reserva detectada en un correo
-    description: Una reserva nueva extraída de un correo de viaje (UC-1, Iteración 2).
+    description: >-
+      Una reserva extraída de un correo de viaje: confirmación, cambio o cancelación, según `estado`
+      (UC-1, Iteración 2).
     servers:
       - $ref: '#/servers/broker'
     messages:
@@ -61,7 +63,10 @@ channels:
   FiltrosActualizados:
     address: FiltrosActualizados
     title: Whitelist de remitentes actualizada
-    description: El usuario cambió sus filtros o su lista de remitentes seguros (UC-2, Iteración 5).
+    description: >-
+      El usuario cambió sus filtros o su lista de remitentes seguros (UC-2, Iteración 5). Estado
+      inicial: mientras Correo no recibió ningún FiltrosActualizados de un usuario, toma sus filtros
+      como inactivos y su lista como vacía, y procesa todos los correos de viaje.
     servers:
       - $ref: '#/servers/broker'
     messages:
@@ -74,13 +79,28 @@ channels:
     address: ViajeActualizado
     title: Reserva de un viaje guardada
     description: >-
-      El Servicio de Viajes guardó un cambio en una reserva (UC-7, Iteración 6). Lleva datos personales:
-      lo consume solo el anonimizador de la misma región.
+      El Servicio de Viajes guardó un cambio en una reserva (UC-7, Iteración 6). No lleva usuarioId,
+      viajeId ni reservaId, pero sí el número de reserva, que es un dato personal: lo consume solo el
+      anonimizador de la misma región.
     servers:
       - $ref: '#/servers/broker'
     messages:
       ViajeActualizado:
         $ref: '#/components/messages/ViajeActualizado'
+    bindings:
+      $ref: '#/components/channelBindings/exchangeEventos'
+
+  AccesoRechazado:
+    address: AccesoRechazado
+    title: Solicitud rechazada por un validador
+    description: >-
+      El Validador de Intercepción de un microservicio rechazó una solicitud con 401 o 403 (QA-8, QA-9,
+      Iteración 5). Lleva datos personales (usuarioId, ip): no sale de la región.
+    servers:
+      - $ref: '#/servers/broker'
+    messages:
+      AccesoRechazado:
+        $ref: '#/components/messages/AccesoRechazado'
     bindings:
       $ref: '#/components/channelBindings/exchangeEventos'
 
@@ -101,7 +121,9 @@ operations:
     action: receive
     channel:
       $ref: '#/channels/ReservaDetectada'
-    summary: Los consumidores de eventos de Viajes guardan la reserva y la agrupan en un viaje.
+    summary: >-
+      Los consumidores de eventos de Viajes hacen un upsert por proveedor + numeroReserva: si la reserva
+      no existe la crean y la agrupan en un viaje; si existe le aplican el estado y las fechas nuevas.
     messages:
       - $ref: '#/channels/ReservaDetectada/messages/ReservaDetectada'
     bindings:
@@ -128,7 +150,9 @@ operations:
       $ref: '#/channels/ReservaActualizada'
     summary: >-
       Los consumidores de eventos de Viajes buscan la reserva por proveedor + numeroReserva y aplican
-      el cambio.
+      el cambio. Si no la encuentran (por ejemplo, el usuario no tiene ese correo en Trotamundos),
+      ignoran el evento, lo registran en el log con el requestId y lo confirman (ack) sin reintentar
+      ni mandarlo a la cola de fallidos.
     messages:
       - $ref: '#/channels/ReservaActualizada/messages/ReservaActualizada'
     bindings:
@@ -190,6 +214,43 @@ operations:
     x-servicio: analitica
     x-componente: Anonimizador
     x-cola: analitica.ViajeActualizado
+
+  publicarAccesoRechazado:
+    action: send
+    channel:
+      $ref: '#/channels/AccesoRechazado'
+    summary: >-
+      El Validador de Intercepción de cada microservicio (módulo compartido de `packages/comun`)
+      publica cada solicitud que rechaza con 401 o 403, sin hacer esperar la respuesta. Los rechazos
+      del propio gateway no pasan por el broker: el gateway los guarda directo en el registro.
+    messages:
+      - $ref: '#/channels/AccesoRechazado/messages/AccesoRechazado'
+    bindings:
+      $ref: '#/components/operationBindings/publicar'
+    x-servicio:
+      - autenticacion
+      - usuarios
+      - correo
+      - viajes
+      - integraciones
+      - analitica
+      - asistente
+    x-componente: Validador de Intercepción
+
+  consumirAccesoRechazado:
+    action: receive
+    channel:
+      $ref: '#/channels/AccesoRechazado'
+    summary: >-
+      El registro de accesos del API Gateway guarda cada rechazo en la tabla `accesos_rechazados`
+      (fecha, servicio, ruta, usuarioId, motivo, ip, requestId) en menos de 1 s (QA-9).
+    messages:
+      - $ref: '#/channels/AccesoRechazado/messages/AccesoRechazado'
+    bindings:
+      $ref: '#/components/operationBindings/consumir'
+    x-servicio: gateway
+    x-componente: Registro de accesos
+    x-cola: gateway.AccesoRechazado
 
 components:
   messages:
@@ -284,6 +345,29 @@ components:
           summary: Viajes guardó el cambio de horario informado por la aerolínea.
           payload:
             $ref: '../schemas/ejemplos/ViajeActualizado.valido.json'
+
+    AccesoRechazado:
+      name: AccesoRechazado
+      title: AccesoRechazado v1
+      contentType: application/json
+      payload:
+        schemaFormat: application/schema+json;version=draft-07
+        schema:
+          allOf:
+            - $ref: '../schemas/Sobre.json'
+            - type: object
+              properties:
+                tipo:
+                  const: AccesoRechazado
+                version:
+                  const: 1
+                datos:
+                  $ref: '../schemas/AccesoRechazado.json'
+      examples:
+        - name: viajeDeOtroUsuario
+          summary: Viajes rechaza con 403 a un usuario que pide un viaje que no es suyo ni compartido.
+          payload:
+            $ref: '../schemas/ejemplos/AccesoRechazado.valido.json'
 
   schemas:
     ViajeAnonimizado:
