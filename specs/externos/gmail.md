@@ -115,10 +115,10 @@ Respuesta `200`: igual que el canje pero **sin** `refresh_token` (se sigue usand
 Formato OAuth 2.0 (RFC 6749, sección 5.2), código `400`:
 
 ```json
-{ "error": "invalid_grant", "error_description": "Bad Request" }
+{ "error": "invalid_grant", "error_description": "(texto libre para los logs)" }
 ```
 
-`invalid_grant`: código vencido o ya usado, o refresh token revocado. El adaptador marca la cuenta como
+`invalid_grant`: código vencido o ya usado, o refresh token revocado. El adaptador solo mira `error`; marca la cuenta como
 desconectada y el usuario tiene que volver a dar permiso (ADR-015, consecuencia "Malo").
 
 ### 1.5 Uso del token
