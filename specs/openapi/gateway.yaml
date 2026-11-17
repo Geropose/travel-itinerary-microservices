@@ -116,7 +116,8 @@ paths:
       summary: Estado del gateway
       description: >-
         Responde 200 si el gateway puede atender (tiene cargada la clave pública del JWKS y la base del
-        registro de accesos conectada), y 503 si no. La usan el monitor de salud (ping cada 5 s, ADR-007)
+        registro de accesos y el broker conectados; por el broker le llegan los AccesoRechazado de los
+        microservicios), y 503 si no. La usan el monitor de salud (ping cada 5 s, ADR-007)
         y el balanceador para dejar de enviar solicitudes a una instancia caída. Es pública.
       security: []
       parameters:
