@@ -40,7 +40,7 @@ security:
 paths:
   /health:
     get:
-      operationId: obtenerSalud
+      operationId: consultarSalud
       summary: Estado del servicio
       description: >-
         Pública, sin JWT. Responde 200 si el servicio puede atender (base de analítica y broker
@@ -185,8 +185,8 @@ paths:
         Requiere un JWT con el rol analista; si no lo tiene, responde 403 (Prohibido). Lanza la
         consulta del tipo pedido en segundo plano: los procesadores Map-Reduce se encienden, recorren
         bloques de la base de analítica en paralelo (map), juntan los resultados parciales (reduce) y
-        se apagan al terminar (Iteración 6, táctica 3). Responde enseguida con 202 y el idConsulta;
-        el estado y el resultado se piden a GET /consultas/ejecuciones/{idConsulta}. El cuerpo tiene
+        se apagan al terminar (Iteración 6, táctica 3). Responde enseguida con 202 y el consultaId;
+        el estado y el resultado se piden a GET /consultas/ejecuciones/{consultaId}. El cuerpo tiene
         que ser el del tipo de la ruta (destinos, cancelaciones o tendencias); si no coincide,
         responde 400. Si ya hay una ejecución en curso del mismo tipo con los mismos parámetros,
         responde 409 y no lanza otra (los procesadores cuestan mientras corren).
@@ -227,7 +227,7 @@ paths:
                   agruparPor: mes
       responses:
         '202':
-          description: La consulta quedó en cola; se sigue su estado con el idConsulta.
+          description: La consulta quedó en cola; se sigue su estado con el consultaId.
           headers:
             Location:
               description: Ruta de la ejecución, para consultar su estado.
@@ -241,7 +241,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ConsultaLanzada'
               example:
-                idConsulta: 3b9e2f4a-1c7d-4e8b-9a6f-5d2c1b0e9f8a
+                consultaId: 3b9e2f4a-1c7d-4e8b-9a6f-5d2c1b0e9f8a
                 tipo: cancelaciones
                 estado: pendiente
                 creadaEn: '2026-11-20T14:00:00Z'
@@ -254,7 +254,7 @@ paths:
         '409':
           description: >-
             Ya hay una ejecución en curso del mismo tipo con los mismos parámetros (409). El detail
-            indica su idConsulta para seguirla.
+            indica su consultaId para seguirla.
           content:
             application/problem+json:
               schema:
@@ -268,7 +268,7 @@ paths:
         '503':
           $ref: './comun.yaml#/components/responses/NoDisponible'
 
-  /consultas/ejecuciones/{idConsulta}:
+  /consultas/ejecuciones/{consultaId}:
     get:
       operationId: obtenerEjecucion
       summary: Estado y resultado de una consulta pesada
@@ -276,11 +276,11 @@ paths:
         Requiere un JWT con el rol analista; si no lo tiene, responde 403 (Prohibido). Devuelve el
         estado de la ejecución, cuántos procesadores Map-Reduce usa, cuánto tardó y, cuando terminó,
         el resultado (con el mismo formato que la consulta en el momento del mismo tipo). Si el
-        idConsulta no existe, responde 404.
+        consultaId no existe, responde 404.
       tags: [ejecuciones]
       parameters:
         - $ref: './comun.yaml#/components/parameters/XRequestId'
-        - name: idConsulta
+        - name: consultaId
           in: path
           required: true
           description: Identificador que devolvió POST /consultas/{tipo}/ejecutar.
@@ -302,7 +302,7 @@ paths:
                 enCurso:
                   summary: Ejecución en curso
                   value:
-                    idConsulta: 3b9e2f4a-1c7d-4e8b-9a6f-5d2c1b0e9f8a
+                    consultaId: 3b9e2f4a-1c7d-4e8b-9a6f-5d2c1b0e9f8a
                     tipo: cancelaciones
                     parametros:
                       desde: '2023-01-01'
@@ -317,7 +317,7 @@ paths:
                 terminada:
                   summary: Ejecución terminada con su resultado
                   value:
-                    idConsulta: 3b9e2f4a-1c7d-4e8b-9a6f-5d2c1b0e9f8a
+                    consultaId: 3b9e2f4a-1c7d-4e8b-9a6f-5d2c1b0e9f8a
                     tipo: cancelaciones
                     parametros:
                       desde: '2023-01-01'
@@ -356,7 +356,7 @@ paths:
                 fallida:
                   summary: Ejecución fallida
                   value:
-                    idConsulta: 5a1d3c7e-2b4f-4d6a-8e9c-0f1a2b3c4d5e
+                    consultaId: 5a1d3c7e-2b4f-4d6a-8e9c-0f1a2b3c4d5e
                     tipo: destinos
                     parametros:
                       desde: '2025-01-01'
@@ -706,9 +706,9 @@ components:
     ConsultaLanzada:
       type: object
       additionalProperties: false
-      required: [idConsulta, tipo, estado, creadaEn]
+      required: [consultaId, tipo, estado, creadaEn]
       properties:
-        idConsulta:
+        consultaId:
           type: string
           format: uuid
         tipo:
@@ -726,9 +726,9 @@ components:
         terminada trae iniciadaEn, terminadaEn, duracionMs y resultado; fallida trae terminadaEn,
         duracionMs y error.
       additionalProperties: false
-      required: [idConsulta, tipo, parametros, estado, procesadores, progreso, creadaEn]
+      required: [consultaId, tipo, parametros, estado, procesadores, progreso, creadaEn]
       properties:
-        idConsulta:
+        consultaId:
           type: string
           format: uuid
         tipo:

@@ -112,7 +112,7 @@ paths:
   /health:
     get:
       tags: [salud]
-      operationId: obtenerSalud
+      operationId: consultarSalud
       summary: Estado del gateway
       description: >-
         Responde 200 si el gateway puede atender (tiene cargada la clave pública del JWKS y la base del

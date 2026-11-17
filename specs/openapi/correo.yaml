@@ -76,13 +76,13 @@ paths:
               example:
                 cuentas:
                   - id: 3b1f0c9e-6a2d-4f5b-9c8e-1a2b3c4d5e6f
-                    proveedor: gmail
+                    proveedorCorreo: gmail
                     email: ana.garcia@gmail.com
                     estado: conectada
                     conectadaEn: '2026-11-28T12:00:05Z'
                     ultimaRevision: '2026-11-28T12:12:35Z'
                   - id: 9d8c7b6a-5f4e-4d3c-8b2a-1f0e9d8c7b6a
-                    proveedor: outlook
+                    proveedorCorreo: outlook
                     email: ana.garcia@outlook.com
                     estado: sin-permiso
                     conectadaEn: '2026-11-20T09:30:00Z'
@@ -94,7 +94,7 @@ paths:
         '503':
           $ref: './comun.yaml#/components/responses/NoDisponible'
 
-  /cuentas-correo/{proveedor}/conectar:
+  /cuentas-correo/{proveedorCorreo}/conectar:
     post:
       operationId: conectarCuentaCorreo
       summary: Empezar a conectar una cuenta de correo
@@ -108,7 +108,7 @@ paths:
       tags: [cuentas-correo]
       parameters:
         - $ref: './comun.yaml#/components/parameters/XRequestId'
-        - name: proveedor
+        - name: proveedorCorreo
           in: path
           required: true
           description: Proveedor de correo. Cada uno tiene su adaptador (ADR-003).
@@ -126,13 +126,13 @@ paths:
                 gmail:
                   summary: Gmail (mock en el puerto 4001)
                   value:
-                    proveedor: gmail
+                    proveedorCorreo: gmail
                     urlAutorizacion: http://localhost:4001/o/oauth2/v2/auth?client_id=trotamundos-local.apps.googleusercontent.com&redirect_uri=http%3A%2F%2Flocalhost%3A8000%2Fregion-1%2Fapi%2Fcorreo%2Foauth%2Fcallback&response_type=code&scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fgmail.readonly&access_type=offline&include_granted_scopes=true&state=eyJ1IjoiNmIxZTdjMmEiLCJyIjoicmVnaW9uLTEifQ.firma
                     stateVenceEn: '2026-11-28T12:10:00Z'
                 outlook:
                   summary: Outlook (mock en el puerto 4002)
                   value:
-                    proveedor: outlook
+                    proveedorCorreo: outlook
                     urlAutorizacion: http://localhost:4002/common/oauth2/v2.0/authorize?client_id=11112222-bbbb-3333-cccc-4444dddd5555&response_type=code&redirect_uri=http%3A%2F%2Flocalhost%3A8000%2Fregion-1%2Fapi%2Fcorreo%2Foauth%2Fcallback&response_mode=query&scope=offline_access%20https%3A%2F%2Fgraph.microsoft.com%2FMail.Read%20https%3A%2F%2Fgraph.microsoft.com%2FUser.Read&state=eyJ1IjoiNmIxZTdjMmEiLCJyIjoicmVnaW9uLTEifQ.firma
                     stateVenceEn: '2026-11-28T12:10:00Z'
         '400':
@@ -144,7 +144,7 @@ paths:
         '503':
           $ref: './comun.yaml#/components/responses/NoDisponible'
 
-  /cuentas-correo/{id}:
+  /cuentas-correo/{cuentaId}:
     delete:
       operationId: desconectarCuentaCorreo
       summary: Desconectar una cuenta de correo
@@ -156,7 +156,7 @@ paths:
       tags: [cuentas-correo]
       parameters:
         - $ref: './comun.yaml#/components/parameters/XRequestId'
-        - name: id
+        - name: cuentaId
           in: path
           required: true
           description: Id de la cuenta de correo (campo `id` de GET /cuentas-correo).
@@ -505,12 +505,12 @@ components:
     CuentaCorreo:
       type: object
       additionalProperties: false
-      required: [id, proveedor, email, estado, conectadaEn, ultimaRevision]
+      required: [id, proveedorCorreo, email, estado, conectadaEn, ultimaRevision]
       properties:
         id:
           type: string
           format: uuid
-        proveedor:
+        proveedorCorreo:
           $ref: '#/components/schemas/ProveedorCorreo'
         email:
           type: string
@@ -543,9 +543,9 @@ components:
     AutorizacionCorreo:
       type: object
       additionalProperties: false
-      required: [proveedor, urlAutorizacion, stateVenceEn]
+      required: [proveedorCorreo, urlAutorizacion, stateVenceEn]
       properties:
-        proveedor:
+        proveedorCorreo:
           $ref: '#/components/schemas/ProveedorCorreo'
         urlAutorizacion:
           type: string

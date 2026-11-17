@@ -35,7 +35,7 @@ tags:
 paths:
   /health:
     get:
-      operationId: obtenerSalud
+      operationId: consultarSalud
       summary: Estado del servicio
       description: >-
         Responde 200 si el servicio puede atender (base y broker conectados) y 503 si no. Lo
