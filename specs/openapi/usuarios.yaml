@@ -383,12 +383,13 @@ paths:
       summary: Crear la cuenta de un usuario recién registrado
       description: >-
         La llama el Servicio de Autenticación en POST /registro, después de crear la credencial. Si
-        responde un error, Autenticación deshace el registro. No hay JWT todavía (el usuario se está
-        registrando), por eso no lleva bearerJWT. La cuenta se crea con moneda USD, sin agencia
-        preferida y con la whitelist vacía y los filtros inactivos. La región tiene que ser la de
-        este servicio (CONST-6), si no responde 400.
+        responde un error, Autenticación deshace el registro. No hay JWT del usuario todavía (se está
+        registrando): lleva el token de servicio y solo acepta el servicio autenticacion. La cuenta
+        se crea con moneda USD, sin agencia preferida y con la whitelist vacía y los filtros
+        inactivos. La región tiene que ser la de este servicio (CONST-6), si no responde 400.
       tags: [interna]
-      security: []
+      security:
+        - tokenServicio: []
       parameters:
         - $ref: './comun.yaml#/components/parameters/XRequestId'
       requestBody:
@@ -421,6 +422,10 @@ paths:
                 creadoEn: '2026-11-16T22:00:00Z'
         '400':
           $ref: './comun.yaml#/components/responses/SolicitudInvalida'
+        '401':
+          $ref: './comun.yaml#/components/responses/NoAutenticado'
+        '403':
+          $ref: './comun.yaml#/components/responses/Prohibido'
         '409':
           $ref: './comun.yaml#/components/responses/Conflicto'
         '503':
@@ -475,6 +480,8 @@ components:
   securitySchemes:
     bearerJWT:
       $ref: './comun.yaml#/components/securitySchemes/bearerJWT'
+    tokenServicio:
+      $ref: './comun.yaml#/components/securitySchemes/tokenServicio'
 
   parameters:
     ViajeId:

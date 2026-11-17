@@ -461,9 +461,11 @@ paths:
         La usa el examinador del Servicio de Correo para decidir qué buzones revisar cada 5 minutos y
         cuáles cada 60 (Iteración 2, ADR-010). Devuelve los usuarios de la región con un viaje en
         curso o que empieza dentro de los próximos `dias` días. La llama una tarea programada, sin
-        usuario: no lleva JWT y solo se puede alcanzar desde la red interna.
+        usuario: lleva el token de servicio y solo acepta los servicios correo y pruebas. Además solo
+        se puede alcanzar desde la red interna.
       tags: [interna]
-      security: []
+      security:
+        - tokenServicio: []
       parameters:
         - $ref: './comun.yaml#/components/parameters/XRequestId'
         - name: dias
@@ -491,6 +493,10 @@ paths:
                   - 5d7e9f1a-2b3c-4d5e-8f6a-7b8c9d0e1f2a
         '400':
           $ref: './comun.yaml#/components/responses/SolicitudInvalida'
+        '401':
+          $ref: './comun.yaml#/components/responses/NoAutenticado'
+        '403':
+          $ref: './comun.yaml#/components/responses/Prohibido'
         '503':
           $ref: './comun.yaml#/components/responses/NoDisponible'
 
@@ -505,10 +511,11 @@ paths:
         Ejecuta en el momento la tarea de archivado, que normalmente corre todas las noches
         (Iteración 2, UC-5). Sirve para las pruebas y la demo. Archiva los viajes cuya última reserva
         ya terminó, invalida la cache del panel de cada usuario afectado y publica ViajeActualizado con
-        origenCambio "archivado" por cada reserva. No lleva JWT y solo se puede alcanzar desde la red
-        interna. Responde 409 si la tarea ya está corriendo.
+        origenCambio "archivado" por cada reserva. Lleva el token de servicio y solo acepta el servicio
+        pruebas; además solo se puede alcanzar desde la red interna. Responde 409 si la tarea ya está corriendo.
       tags: [interna]
-      security: []
+      security:
+        - tokenServicio: []
       parameters:
         - $ref: './comun.yaml#/components/parameters/XRequestId'
       responses:
@@ -522,6 +529,10 @@ paths:
                 viajesArchivados: 3
                 reservasArchivadas: 7
                 ejecutadoEn: '2026-12-15T03:00:00Z'
+        '401':
+          $ref: './comun.yaml#/components/responses/NoAutenticado'
+        '403':
+          $ref: './comun.yaml#/components/responses/Prohibido'
         '409':
           $ref: './comun.yaml#/components/responses/Conflicto'
         '503':
@@ -531,6 +542,8 @@ components:
   securitySchemes:
     bearerJWT:
       $ref: './comun.yaml#/components/securitySchemes/bearerJWT'
+    tokenServicio:
+      $ref: './comun.yaml#/components/securitySchemes/tokenServicio'
 
   parameters:
     ViajeId:

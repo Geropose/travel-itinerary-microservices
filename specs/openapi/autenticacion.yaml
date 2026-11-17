@@ -272,9 +272,13 @@ paths:
         La usa el Servicio de Autenticación de la otra región durante el inicio de sesión desde un
         dispositivo nuevo y el registro, para saber si una cuenta está en esta región (Iteración 6).
         Solo responde sí o no: no devuelve datos de la cuenta, así ningún dato personal sale de su
-        región (CONST-6). No tiene usuario autenticado: todavía no hay JWT.
+        región (CONST-6). No hay usuario autenticado todavía: lleva el token de servicio que emitió
+        la Autenticación de la otra región (sub autenticacion, region de la otra región), y se valida
+        con la clave pública de esa región (su /.well-known/jwks.json, descargada una vez). Solo
+        acepta el servicio autenticacion.
       tags: [interna]
-      security: []
+      security:
+        - tokenServicio: []
       servers:
         - url: http://autenticacion:3001
           description: Interno, dentro de la red de la región (sin gateway).
@@ -302,6 +306,59 @@ paths:
                 region: region-2
         '400':
           $ref: './comun.yaml#/components/responses/SolicitudInvalida'
+        '401':
+          $ref: './comun.yaml#/components/responses/NoAutenticado'
+        '403':
+          $ref: './comun.yaml#/components/responses/Prohibido'
+        '503':
+          $ref: './comun.yaml#/components/responses/NoDisponible'
+
+  /interna/tokens-servicio:
+    post:
+      operationId: emitirTokenServicio
+      summary: Emitir un token de servicio
+      description: >-
+        Emite el token de servicio (tokenServicio en comun.yaml) que usan las rutas internas sin
+        usuario: el registro, las tareas programadas y las pruebas. El servicio que llama manda su
+        nombre y su secreto (variable de entorno SECRETO_SERVICIO_<SERVICIO>, distinta en cada
+        región; en el repositorio solo va un valor de ejemplo en .env.example). El servicio pruebas
+        solo existe si está definida SECRETO_SERVICIO_PRUEBAS (entorno local y CI). El token dura 5
+        minutos; quien llama lo guarda y pide otro cuando está por vencer. La Autenticación no se
+        llama a sí misma: firma sus propios tokens de servicio. Si el nombre o el secreto no
+        coinciden responde 401 y lo publica como AccesoRechazado.
+      tags: [interna]
+      security: []
+      servers:
+        - url: http://autenticacion:3001
+          description: Interno, dentro de la red de la región (sin gateway).
+      parameters:
+        - $ref: './comun.yaml#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SolicitudTokenServicio'
+            example:
+              servicio: correo
+              secreto: secreto-de-ejemplo-correo-0123456789
+      responses:
+        '200':
+          description: Token emitido.
+          headers:
+            X-Request-Id:
+              $ref: './comun.yaml#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenServicioEmitido'
+              example:
+                tokenServicio: eyJhbGciOiJSUzI1NiIsImtpZCI6InIxLTIwMjYtMTEifQ.eyJzdWIiOiJjb3JyZW8iLCJyb2xlcyI6WyJzZXJ2aWNpbyJdLCJyZWdpb24iOiJyZWdpb24tMSJ9.ZmlybWE
+                expiraEn: 300
+        '400':
+          $ref: './comun.yaml#/components/responses/SolicitudInvalida'
+        '401':
+          $ref: './comun.yaml#/components/responses/NoAutenticado'
         '503':
           $ref: './comun.yaml#/components/responses/NoDisponible'
 
@@ -326,6 +383,8 @@ components:
   securitySchemes:
     bearerJWT:
       $ref: './comun.yaml#/components/securitySchemes/bearerJWT'
+    tokenServicio:
+      $ref: './comun.yaml#/components/securitySchemes/tokenServicio'
 
   responses:
     OtraRegion:
@@ -491,6 +550,42 @@ components:
           type: string
           description: Exponente RSA en base64url.
           example: AQAB
+
+    SolicitudTokenServicio:
+      type: object
+      additionalProperties: false
+      required: [servicio, secreto]
+      properties:
+        servicio:
+          type: string
+          description: Servicio que pide el token. Va en el claim sub.
+          enum:
+            - autenticacion
+            - usuarios
+            - correo
+            - viajes
+            - integraciones
+            - analitica
+            - asistente
+            - gateway
+            - pruebas
+        secreto:
+          type: string
+          description: Secreto del servicio (SECRETO_SERVICIO_<SERVICIO>).
+          minLength: 32
+          maxLength: 256
+
+    TokenServicioEmitido:
+      type: object
+      additionalProperties: false
+      required: [tokenServicio, expiraEn]
+      properties:
+        tokenServicio:
+          $ref: '#/components/schemas/Jwt'
+        expiraEn:
+          type: integer
+          description: Segundos hasta que vence (5 minutos).
+          const: 300
 
     ExistenciaCuenta:
       type: object

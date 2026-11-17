@@ -84,7 +84,7 @@ paths:
         `booking_reference` + `version`) se responde `200` con `estado: repetido` y no se publica
         otra vez. Un aviso con firma válida que no se puede traducir (falta `booking_reference`,
         `status` desconocido, segmentos vacíos sin cancelación) se guarda en `no_traducidos` con
-        el cuerpo original y se responde `200` con `estado: no-traducido`, así el proveedor no lo
+        el cuerpo sin datos personales y se responde `200` con `estado: no-traducido`, así el proveedor no lo
         reintenta (QA-6).
       tags: [webhooks]
       security: []
@@ -209,7 +209,8 @@ paths:
                   value: { estado: no-traducido }
         '400':
           description: >-
-            El cuerpo no es JSON. Igual se guarda en `no_traducidos` con el cuerpo crudo (QA-6).
+            El cuerpo no es JSON. Igual se guarda en `no_traducidos`, pero sin el cuerpo: solo su
+            tamaño (QA-6).
           content:
             application/problem+json:
               schema:
@@ -577,11 +578,12 @@ paths:
       summary: Listar los mensajes de proveedores que no se pudieron traducir
       description: >-
         Mensajes de proveedores (por webhook o por consulta periódica) que el adaptador no pudo
-        traducir, con el cuerpo original (ADR-003, QA-6: 99 % sin intervención manual). Sirve para
-        revisarlos a mano y para medir QA-6 en el prototipo. No hay un usuario detrás (la usan el
-        equipo y las pruebas), así que no lleva JWT. Ordenados del más nuevo al más viejo.
+        traducir, con el cuerpo sin datos personales (ADR-003, QA-6: 99 % sin intervención manual).
+        Sirve para revisarlos a mano y para medir QA-6 en el prototipo. No hay un usuario detrás (la
+        usan el equipo y las pruebas): lleva el token de servicio y solo acepta el servicio pruebas. Ordenados del más nuevo al más viejo.
       tags: [interna]
-      security: []
+      security:
+        - tokenServicio: []
       servers:
         - url: http://integraciones:3005
           description: Interno.
@@ -634,6 +636,10 @@ paths:
                     cuerpo: '{"reservationId":"HC-48299","status":"waitlisted"}'
         '400':
           $ref: './comun.yaml#/components/responses/SolicitudInvalida'
+        '401':
+          $ref: './comun.yaml#/components/responses/NoAutenticado'
+        '403':
+          $ref: './comun.yaml#/components/responses/Prohibido'
         '503':
           $ref: './comun.yaml#/components/responses/NoDisponible'
 
@@ -641,6 +647,8 @@ components:
   securitySchemes:
     bearerJWT:
       $ref: './comun.yaml#/components/securitySchemes/bearerJWT'
+    tokenServicio:
+      $ref: './comun.yaml#/components/securitySchemes/tokenServicio'
 
   responses:
     SoloUsuarios:
@@ -1003,7 +1011,11 @@ components:
           description: Por qué no se pudo traducir.
         cuerpo:
           type: string
-          description: Cuerpo original tal como llegó (puede no ser JSON válido).
+          description: >-
+            Cuerpo que llegó, sin datos personales. Antes de guardarlo, el adaptador reemplaza por
+            "[quitado]" los valores de los campos con datos personales que conoce del formato del
+            proveedor (nombres de pasajeros y huéspedes, emails, teléfonos). Si el cuerpo no es JSON
+            no se guarda: queda "[cuerpo no JSON de N bytes]".
 
     # --- Webhook de la aerolínea (formato original, specs/externos/aerolinea.md) ---
 

@@ -16,7 +16,22 @@ components:
       description: >-
         JWT firmado con RS256 por el Servicio de Autenticación (ADR-014). Claims: sub (usuarioId),
         region, roles (usuario o analista), idioma, exp (15 minutos). Se valida con la clave pública
-        de GET /api/autenticacion/.well-known/jwks.json, sin usar la red en cada solicitud.
+        de GET /api/autenticacion/.well-known/jwks.json, sin usar la red en cada solicitud. Un token
+        con el rol servicio (tokenServicio) no sirve en las rutas con bearerJWT: responden 403.
+
+    tokenServicio:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >-
+        Token de servicio, solo para las rutas internas que no tienen un usuario detrás (registro,
+        tareas programadas, pruebas). Donde hay un usuario se propaga su JWT (ADR-019). Es un JWT
+        firmado con RS256 por el Servicio de Autenticación de la región, con la misma clave que
+        bearerJWT, y se valida igual, sin usar la red. Lo emite POST /interna/tokens-servicio a cambio
+        del secreto del servicio que llama (variable de entorno SECRETO_SERVICIO_<SERVICIO>). Claims:
+        sub (nombre del servicio que llama), roles [servicio], region, exp (5 minutos). Cada ruta dice
+        qué servicios la pueden llamar: sin token o con un token inválido responde 401, y con el token
+        de otro servicio 403. Los dos rechazos se publican como AccesoRechazado (QA-9).
 
   parameters:
     XRequestId:

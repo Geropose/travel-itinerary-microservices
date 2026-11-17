@@ -65,6 +65,7 @@ Todas las rutas públicas pasan por el gateway con el prefijo del servicio: `/ap
 - Firmado con RS256 por el Servicio de Autenticación. La clave pública se publica en `GET /api/autenticacion/.well-known/jwks.json`. Los validadores la descargan una vez y verifican **sin usar la red** en cada solicitud.
 - Claims: `sub` (usuarioId, UUID), `region` (`region-1` o `region-2`), `roles` (`["usuario"]` o `["analista"]`), `idioma`, `exp` (**15 minutos**).
 - Token de renovación opaco (guardado con hash), válido 7 días, para pedir un JWT nuevo sin volver a escribir la contraseña.
+- **Token de servicio** (`tokenServicio` en `specs/openapi/comun.yaml`): solo para las rutas internas sin un usuario detrás (registro, tareas programadas, pruebas). Lo emite `POST /interna/tokens-servicio` de Autenticación a cambio del secreto del servicio (`SECRETO_SERVICIO_<SERVICIO>`). Claims: `sub` (nombre del servicio), `roles` (`["servicio"]`), `region`, `exp` (**5 minutos**). Cada ruta dice qué servicios la pueden llamar. Donde hay un usuario se propaga su JWT (ADR-019), nunca el token de servicio.
 
 ### 4.5 Eventos (ADR-002, ADR-016)
 
@@ -103,4 +104,5 @@ Todas las rutas públicas pasan por el gateway con el prefijo del servicio: `/ap
 - `usuario`: solo ve y cambia sus propios datos.
 - Itinerario compartido: lo ven el dueño y las personas designadas (Servicio de Usuarios, "Permisos de itinerarios").
 - `analista`: solo accede a `/api/analitica/...`, nunca a datos personales.
-- Toda solicitud rechazada se guarda de forma asíncrona en el registro de accesos (QA-9: menos de 1 s).
+- `servicio`: solo lo tiene el token de servicio. Sirve únicamente en las rutas internas que lo piden; en el resto responde 403.
+- Toda solicitud rechazada se guarda de forma asíncrona en el registro de accesos (QA-9: menos de 1 s). Los microservicios la publican como evento `AccesoRechazado`; el gateway guarda las suyas directo.
