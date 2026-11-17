@@ -32,7 +32,7 @@ componentes que no estén ahí.
 | `npm run format` | Formatea con Prettier |
 | `npm run typecheck` | TypeScript estricto sobre todo el repositorio |
 | `npm test` | Pruebas unitarias y de contrato (Vitest) |
-| `npm run test:contratos` | Solo las pruebas de contrato (archivos `*.contrato.test.ts`) |
+| `npm run test:contratos` | Valida los contratos REST de `specs/openapi/` con Redocly y corre las pruebas de contrato (`tests/contratos/` y archivos `*.contrato.test.ts`) |
 | `npm run e2e` | Pruebas de extremo a extremo de `tests/e2e`, contra el sistema levantado |
 
 ## Configuración compartida

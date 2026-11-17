@@ -28,3 +28,6 @@ jobs:
 
       - name: Pruebas
         run: npm test
+
+      - name: Contratos
+        run: npm run test:contratos
