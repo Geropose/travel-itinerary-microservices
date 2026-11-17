@@ -185,6 +185,10 @@ Campos obligatorios según Google: `reservationNumber`, `reservationStatus`, `un
     }
   },
   "pickupTime": "2026-12-10T11:30:00-03:00",
+  "potentialAction": {
+    "@type": "ConfirmAction",
+    "target": "https://rentadora-sur.example/confirmar?reserva=RS-77120"
+  },
   "dropoffLocation": {
     "@type": "Place",
     "name": "Rentadora Sur Aeropuerto SCL",
@@ -203,9 +207,9 @@ Campos obligatorios según Google: `reservationNumber`, `reservationStatus`, `un
 
 Campos obligatorios según Google: `reservationNumber`, `reservationStatus`, `underName.name`,
 `reservationFor` (`name`, `model`, `brand.name`, `rentalCompany.name`), `pickupLocation` (`name` y
-dirección), `pickupTime`, `dropoffLocation` (`name` y dirección), `dropoffTime`. La tabla de Google también
-marca `potentialAction` como obligatorio, pero su ejemplo básico no lo trae; los mocks no lo mandan y el
-procesador no lo necesita.
+dirección), `pickupTime`, `dropoffLocation` (`name` y dirección), `dropoffTime` y `potentialAction`
+(acción de confirmar, como en el ejemplo). El procesador no usa `potentialAction`, pero los mocks lo
+mandan para que el correo sea válido según Google.
 
 | Campo del evento | De dónde sale | Ejemplo |
 |---|---|---|
