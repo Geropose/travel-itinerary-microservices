@@ -1,0 +1,927 @@
+# Contrato REST del Servicio de Asistente Virtual (services/asistente, puerto 3007, dueño D).
+# Wiki: Iteracion-7 (UC-8, UC-6, QA-12, QA-4, QA-9), ADR-018 (plug-in) y ADR-019 (degradación controlada).
+openapi: 3.1.0
+info:
+  title: Trotamundos — Servicio de Asistente Virtual
+  version: 0.1.0
+  description: |
+    Chatbot de primer nivel de soporte (Iteración 7). Un núcleo de conversación guarda el contexto,
+    detecta la intención con reglas configurables y la pasa al plug-in que corresponde: consulta de
+    estado, reprogramación, problemas menores o derivación a la agencia (ADR-018). Los plug-ins llaman
+    a Viajes, Usuarios e Integraciones con el JWT del usuario, así que solo ven sus propios viajes
+    (QA-9). El historial se guarda en la región del usuario (CONST-6).
+
+    **Acceso a conversaciones.** Una conversación solo la ve el usuario que la creó (`sub` del JWT).
+    Si el `id` no existe o es de otro usuario se responde **404**, no 403: así no se revela que la
+    conversación existe. La solicitud rechazada igual se guarda en el registro de accesos (QA-9).
+    El **403** queda para un JWT sin el rol `usuario` (por ejemplo un `analista`, ADR-005).
+
+    **Respuestas lentas (QA-12).** Todo mensaje que no espera a un proveedor se responde en menos de
+    3 s con **200**. Si una reprogramación tarda más de 3 s, se responde **202** con
+    `estado: consultando` y el texto "estoy consultando con la aerolínea"; la ventana de chat pregunta
+    cada 2 s a `GET /conversaciones/{id}/mensajes?desde=` hasta que llega la respuesta y
+    `consultando` vuelve a `false`.
+
+    **Degradación controlada (ADR-019).** Si Viajes, Usuarios, Integraciones, el proveedor o la agencia
+    no responden en 2 s, el asistente **no** devuelve un error HTTP: responde **200** con un mensaje
+    de resultado `noDisponible`, que indica qué función y qué servicio fallaron, y con
+    `ofreceDerivar: true` cuando puede derivar el caso a la agencia. Los problemas menores se siguen
+    respondiendo porque están en la configuración del asistente. El **503** solo significa que el
+    asistente mismo no puede atender (su base no responde): la aplicación oculta el chat y muestra el
+    botón para contactar a la agencia.
+servers:
+  - url: http://localhost:8000/api/asistente
+    description: Público. Entra por el enrutador global y el API Gateway.
+  - url: http://asistente:3007
+    description: Interno, dentro de la red de la región (lo usa el monitor de salud).
+security:
+  - bearerJWT: []
+tags:
+  - name: conversaciones
+    description: Conversaciones del usuario con el asistente virtual (UC-8).
+  - name: salud
+    description: Estado del servicio para el monitor de salud (ADR-007).
+
+paths:
+  /health:
+    get:
+      operationId: consultarSalud
+      summary: Estado del servicio
+      description: >-
+        200 si el asistente puede atender (base conectada y reglas de intenciones cargadas), 503 si
+        no. No depende de Viajes ni de Integraciones: si ellos caen, el asistente degrada (ADR-019).
+      tags: [salud]
+      security: []
+      parameters:
+        - $ref: './comun.yaml#/components/parameters/XRequestId'
+      responses:
+        '200':
+          $ref: './comun.yaml#/components/responses/Salud'
+        '503':
+          $ref: './comun.yaml#/components/responses/NoDisponible'
+
+  /conversaciones:
+    post:
+      operationId: crearConversacion
+      summary: Abrir una conversación con el asistente
+      description: >-
+        Crea una conversación para el usuario del JWT, en su región. El idioma sale del claim
+        `idioma` salvo que el cuerpo indique otro. La conversación nace con el saludo del asistente.
+      tags: [conversaciones]
+      parameters:
+        - $ref: './comun.yaml#/components/parameters/XRequestId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NuevaConversacion'
+            example:
+              idioma: es
+      responses:
+        '201':
+          description: Conversación creada.
+          headers:
+            Location:
+              description: Ruta de la conversación creada.
+              schema:
+                type: string
+                format: uri-reference
+              example: /api/asistente/conversaciones/3b2f8c4e-6a1d-4e7b-9c3f-5d2a1b0e9f87
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Conversacion'
+              example:
+                conversacionId: 3b2f8c4e-6a1d-4e7b-9c3f-5d2a1b0e9f87
+                usuarioId: 9c1e5a7b-2d4f-4a6c-8e1b-3f5d7a9c2e4b
+                region: region-1
+                idioma: es
+                creadaEn: '2026-11-20T13:45:00Z'
+                actualizadaEn: '2026-11-20T13:45:00Z'
+                consultando: false
+                mensajes:
+                  - mensajeId: 0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d
+                    secuencia: 1
+                    autor: asistente
+                    texto: Hola, soy el asistente de Trotamundos. ¿En qué te ayudo?
+                    enviadoEn: '2026-11-20T13:45:00Z'
+                    resultado: respondido
+        '400':
+          $ref: './comun.yaml#/components/responses/SolicitudInvalida'
+        '401':
+          $ref: './comun.yaml#/components/responses/NoAutenticado'
+        '403':
+          $ref: './comun.yaml#/components/responses/Prohibido'
+        '503':
+          $ref: './comun.yaml#/components/responses/NoDisponible'
+
+  /conversaciones/{id}:
+    get:
+      operationId: obtenerConversacion
+      summary: Historial de una conversación
+      description: >-
+        Devuelve la conversación con todos sus mensajes, en orden de `secuencia`. Si el `id` no
+        existe o es de otro usuario responde 404 (ver la descripción general).
+      tags: [conversaciones]
+      parameters:
+        - $ref: '#/components/parameters/ConversacionId'
+        - $ref: './comun.yaml#/components/parameters/XRequestId'
+      responses:
+        '200':
+          description: Conversación con su historial.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Conversacion'
+              example:
+                conversacionId: 3b2f8c4e-6a1d-4e7b-9c3f-5d2a1b0e9f87
+                usuarioId: 9c1e5a7b-2d4f-4a6c-8e1b-3f5d7a9c2e4b
+                region: region-1
+                idioma: es
+                creadaEn: '2026-11-20T13:45:00Z'
+                actualizadaEn: '2026-11-20T13:45:09Z'
+                consultando: false
+                mensajes:
+                  - mensajeId: 0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d
+                    secuencia: 1
+                    autor: asistente
+                    texto: Hola, soy el asistente de Trotamundos. ¿En qué te ayudo?
+                    enviadoEn: '2026-11-20T13:45:00Z'
+                    resultado: respondido
+                  - mensajeId: 1b2c3d4e-5f6a-4b7c-9d8e-0f1a2b3c4d5e
+                    secuencia: 2
+                    autor: usuario
+                    texto: ¿Cuál es el estado de mi vuelo XKQ7PL?
+                    enviadoEn: '2026-11-20T13:45:08Z'
+                  - mensajeId: 2c3d4e5f-6a7b-4c8d-8e9f-1a2b3c4d5e6f
+                    secuencia: 3
+                    autor: asistente
+                    texto: Tu vuelo XKQ7PL de Buenos Aires a Mendoza sale el 2 de diciembre a las 10:30 y está confirmado.
+                    enviadoEn: '2026-11-20T13:45:09Z'
+                    intencion: estado
+                    resultado: respondido
+                    reservas:
+                      - proveedor: aerolinea-andina
+                        numeroReserva: XKQ7PL
+                        tipoReserva: vuelo
+                        estado: confirmada
+                        inicio: '2026-12-02T10:30:00Z'
+                        fin: '2026-12-02T12:20:00Z'
+                        origen: AEP
+                        destino: MDZ
+        '400':
+          $ref: './comun.yaml#/components/responses/SolicitudInvalida'
+        '401':
+          $ref: './comun.yaml#/components/responses/NoAutenticado'
+        '403':
+          $ref: './comun.yaml#/components/responses/Prohibido'
+        '404':
+          $ref: './comun.yaml#/components/responses/NoEncontrado'
+        '503':
+          $ref: './comun.yaml#/components/responses/NoDisponible'
+
+  /conversaciones/{id}/mensajes:
+    post:
+      operationId: enviarMensaje
+      summary: Enviar un mensaje al asistente
+      description: >-
+        Guarda el mensaje del usuario, detecta la intención y responde. 200 con la respuesta del
+        asistente cuando no hay que esperar a un proveedor (menos de 3 s, QA-12). 202 con
+        `estado: consultando` cuando una reprogramación tarda más de 3 s: la respuesta llega después
+        por `GET /conversaciones/{id}/mensajes?desde=`. Si una dependencia no responde, igual es 200
+        con `resultado: noDisponible` (degradación controlada, ADR-019). Si no entiende la consulta
+        repregunta, y al segundo intento fallido deriva el caso a la agencia.
+      tags: [conversaciones]
+      parameters:
+        - $ref: '#/components/parameters/ConversacionId'
+        - $ref: './comun.yaml#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NuevoMensaje'
+            example:
+              texto: Quiero cambiar mi vuelo XKQ7PL para el día siguiente
+      responses:
+        '200':
+          description: El asistente respondió.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaMensaje'
+              examples:
+                consultaDeEstado:
+                  summary: Plug-in de consulta de estado
+                  value:
+                    estado: respondido
+                    mensajeUsuario:
+                      mensajeId: 1b2c3d4e-5f6a-4b7c-9d8e-0f1a2b3c4d5e
+                      secuencia: 2
+                      autor: usuario
+                      texto: ¿Cuál es el estado de mi vuelo XKQ7PL?
+                      enviadoEn: '2026-11-20T13:45:08Z'
+                    respuesta:
+                      mensajeId: 2c3d4e5f-6a7b-4c8d-8e9f-1a2b3c4d5e6f
+                      secuencia: 3
+                      autor: asistente
+                      texto: Tu vuelo XKQ7PL de Buenos Aires a Mendoza sale el 2 de diciembre a las 10:30 y está confirmado.
+                      enviadoEn: '2026-11-20T13:45:09Z'
+                      intencion: estado
+                      resultado: respondido
+                      reservas:
+                        - proveedor: aerolinea-andina
+                          numeroReserva: XKQ7PL
+                          tipoReserva: vuelo
+                          estado: confirmada
+                          inicio: '2026-12-02T10:30:00Z'
+                          fin: '2026-12-02T12:20:00Z'
+                          origen: AEP
+                          destino: MDZ
+                opcionesDeReprogramacion:
+                  summary: Plug-in de reprogramación (el proveedor respondió en menos de 3 s)
+                  value:
+                    estado: respondido
+                    mensajeUsuario:
+                      mensajeId: 3d4e5f6a-7b8c-4d9e-9f0a-2b3c4d5e6f7a
+                      secuencia: 4
+                      autor: usuario
+                      texto: Quiero cambiar mi vuelo XKQ7PL para el día siguiente
+                      enviadoEn: '2026-11-20T13:46:00Z'
+                    respuesta:
+                      mensajeId: 4e5f6a7b-8c9d-4e0f-8a1b-3c4d5e6f7a8b
+                      secuencia: 5
+                      autor: asistente
+                      texto: La aerolínea ofrece estas opciones. ¿Cuál querés confirmar?
+                      enviadoEn: '2026-11-20T13:46:02Z'
+                      intencion: reprogramar
+                      resultado: opciones
+                      opciones:
+                        - opcionId: ocr_XKQ7PL_1
+                          proveedor: aerolinea-andina
+                          numeroReserva: XKQ7PL
+                          tipoReserva: vuelo
+                          inicio: '2026-12-03T10:30:00Z'
+                          fin: '2026-12-03T12:20:00Z'
+                          origen: AEP
+                          destino: MDZ
+                          descripcion: 3 de diciembre, 10:30, sin cargo
+                        - opcionId: ocr_XKQ7PL_2
+                          proveedor: aerolinea-andina
+                          numeroReserva: XKQ7PL
+                          tipoReserva: vuelo
+                          inicio: '2026-12-03T18:15:00Z'
+                          fin: '2026-12-03T20:05:00Z'
+                          origen: AEP
+                          destino: MDZ
+                          descripcion: 3 de diciembre, 18:15, sin cargo
+                problemaMenor:
+                  summary: Plug-in de problemas menores (respuesta configurada)
+                  value:
+                    estado: respondido
+                    mensajeUsuario:
+                      mensajeId: 5f6a7b8c-9d0e-4f1a-9b2c-4d5e6f7a8b9c
+                      secuencia: 6
+                      autor: usuario
+                      texto: ¿Cuánto equipaje puedo llevar?
+                      enviadoEn: '2026-11-20T13:47:00Z'
+                    respuesta:
+                      mensajeId: 6a7b8c9d-0e1f-4a2b-8c3d-5e6f7a8b9c0d
+                      secuencia: 7
+                      autor: asistente
+                      texto: En cabina podés llevar un bolso de hasta 8 kg. El equipaje despachado depende de la tarifa; lo ves en el correo de tu reserva.
+                      enviadoEn: '2026-11-20T13:47:00Z'
+                      intencion: problemaMenor
+                      resultado: respondido
+                repregunta:
+                  summary: El asistente no entendió (primer intento fallido)
+                  value:
+                    estado: respondido
+                    mensajeUsuario:
+                      mensajeId: 7b8c9d0e-1f2a-4b3c-9d4e-6f7a8b9c0d1e
+                      secuencia: 8
+                      autor: usuario
+                      texto: lo del otro día
+                      enviadoEn: '2026-11-20T13:48:00Z'
+                    respuesta:
+                      mensajeId: 8c9d0e1f-2a3b-4c4d-8e5f-7a8b9c0d1e2f
+                      secuencia: 9
+                      autor: asistente
+                      texto: No te entendí. ¿Querés saber el estado de un viaje, reprogramar una reserva o hablar con tu agencia?
+                      enviadoEn: '2026-11-20T13:48:00Z'
+                      intencion: desconocida
+                      resultado: repregunta
+                derivado:
+                  summary: Plug-in de derivación (caso creado en la agencia preferida)
+                  value:
+                    estado: respondido
+                    mensajeUsuario:
+                      mensajeId: 9d0e1f2a-3b4c-4d5e-9f6a-8b9c0d1e2f3a
+                      secuencia: 10
+                      autor: usuario
+                      texto: Quiero hablar con una persona
+                      enviadoEn: '2026-11-20T13:49:00Z'
+                    respuesta:
+                      mensajeId: 0e1f2a3b-4c5d-4e6f-8a7b-9c0d1e2f3a4b
+                      secuencia: 11
+                      autor: asistente
+                      texto: Le pasé tu consulta y el resumen de esta conversación a Viajes del Plata. Tu número de caso es 35436.
+                      enviadoEn: '2026-11-20T13:49:01Z'
+                      intencion: derivar
+                      resultado: derivado
+                      caso:
+                        agencia: viajes-del-plata
+                        numeroCaso: '35436'
+                viajesNoDisponible:
+                  summary: Degradación controlada, el Servicio de Viajes no respondió en 2 s
+                  value:
+                    estado: respondido
+                    mensajeUsuario:
+                      mensajeId: 1f2a3b4c-5d6e-4f7a-9b8c-0d1e2f3a4b5c
+                      secuencia: 12
+                      autor: usuario
+                      texto: ¿Cuál es el estado de mi hotel?
+                      enviadoEn: '2026-11-20T13:50:00Z'
+                    respuesta:
+                      mensajeId: 2a3b4c5d-6e7f-4a8b-8c9d-1e2f3a4b5c6d
+                      secuencia: 13
+                      autor: asistente
+                      texto: Ahora no puedo consultar tus viajes. ¿Querés que derive tu consulta a tu agencia?
+                      enviadoEn: '2026-11-20T13:50:02Z'
+                      intencion: estado
+                      resultado: noDisponible
+                      noDisponible:
+                        funcion: estado
+                        servicio: viajes
+                      ofreceDerivar: true
+        '202':
+          description: >-
+            La reprogramación tarda más de 3 s. El asistente sigue consultando en segundo plano y deja
+            la respuesta en el historial; la ventana de chat pregunta cada 2 s con
+            `GET /conversaciones/{id}/mensajes?desde=<secuencia de esta respuesta>`.
+          headers:
+            Retry-After:
+              description: Segundos que la ventana de chat espera antes de preguntar de nuevo.
+              schema:
+                type: integer
+                minimum: 1
+              example: 2
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaMensaje'
+              example:
+                estado: consultando
+                mensajeUsuario:
+                  mensajeId: 3d4e5f6a-7b8c-4d9e-9f0a-2b3c4d5e6f7a
+                  secuencia: 4
+                  autor: usuario
+                  texto: Quiero cambiar mi vuelo XKQ7PL para el día siguiente
+                  enviadoEn: '2026-11-20T13:46:00Z'
+                respuesta:
+                  mensajeId: 4e5f6a7b-8c9d-4e0f-8a1b-3c4d5e6f7a8b
+                  secuencia: 5
+                  autor: asistente
+                  texto: Estoy consultando con la aerolínea. Te muestro las opciones en cuanto lleguen.
+                  enviadoEn: '2026-11-20T13:46:03Z'
+                  intencion: reprogramar
+                  resultado: consultando
+        '400':
+          $ref: './comun.yaml#/components/responses/SolicitudInvalida'
+        '401':
+          $ref: './comun.yaml#/components/responses/NoAutenticado'
+        '403':
+          $ref: './comun.yaml#/components/responses/Prohibido'
+        '404':
+          $ref: './comun.yaml#/components/responses/NoEncontrado'
+        '503':
+          $ref: './comun.yaml#/components/responses/NoDisponible'
+
+    get:
+      operationId: listarMensajesNuevos
+      summary: Mensajes nuevos de una conversación
+      description: >-
+        Devuelve los mensajes con `secuencia` mayor que `desde`, en orden. La ventana de chat lo
+        llama cada 2 s mientras `consultando` sea `true` y deja de preguntar cuando pasa a `false` o
+        cuando se cierra el chat. Si no hay mensajes nuevos devuelve la lista vacía.
+      tags: [conversaciones]
+      parameters:
+        - $ref: '#/components/parameters/ConversacionId'
+        - name: desde
+          in: query
+          required: false
+          description: >-
+            Última `secuencia` que la ventana ya tiene. Se usa la secuencia y no una fecha para no
+            depender de los relojes de las distintas instancias del asistente.
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+          example: 5
+        - $ref: './comun.yaml#/components/parameters/XRequestId'
+      responses:
+        '200':
+          description: Mensajes posteriores a `desde`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListaMensajes'
+              examples:
+                llegaronLasOpciones:
+                  summary: La aerolínea respondió después del aviso de "consultando"
+                  value:
+                    consultando: false
+                    ultimaSecuencia: 6
+                    mensajes:
+                      - mensajeId: 5a6b7c8d-9e0f-4a1b-8c2d-3e4f5a6b7c8d
+                        secuencia: 6
+                        autor: asistente
+                        texto: La aerolínea ofrece esta opción. ¿La confirmás?
+                        enviadoEn: '2026-11-20T13:46:07Z'
+                        intencion: reprogramar
+                        resultado: opciones
+                        opciones:
+                          - opcionId: ocr_XKQ7PL_1
+                            proveedor: aerolinea-andina
+                            numeroReserva: XKQ7PL
+                            tipoReserva: vuelo
+                            inicio: '2026-12-03T10:30:00Z'
+                            fin: '2026-12-03T12:20:00Z'
+                            origen: AEP
+                            destino: MDZ
+                            descripcion: 3 de diciembre, 10:30, sin cargo
+                todaviaConsultando:
+                  summary: Sin mensajes nuevos, la consulta sigue en curso
+                  value:
+                    consultando: true
+                    ultimaSecuencia: 5
+                    mensajes: []
+        '400':
+          $ref: './comun.yaml#/components/responses/SolicitudInvalida'
+        '401':
+          $ref: './comun.yaml#/components/responses/NoAutenticado'
+        '403':
+          $ref: './comun.yaml#/components/responses/Prohibido'
+        '404':
+          $ref: './comun.yaml#/components/responses/NoEncontrado'
+        '503':
+          $ref: './comun.yaml#/components/responses/NoDisponible'
+
+  /conversaciones/{id}/confirmaciones:
+    post:
+      operationId: confirmarReprogramacion
+      summary: Confirmar una opción de reprogramación
+      description: >-
+        El usuario elige una de las opciones que el asistente mostró en esta conversación. El
+        asistente solo acepta un `opcionId` que vino de Integraciones en la última oferta pendiente
+        (nunca una opción inventada) y recién entonces pide aplicarla
+        (`POST /interna/reprogramaciones/aplicar`). El cambio vuelve a entrar como `ReservaActualizada`.
+        La confirmación queda en el historial como mensaje del usuario con el campo `confirmacion`.
+        Igual que en `enviarMensaje`: 202 si aplicar tarda más de 3 s, y 200 con
+        `resultado: noDisponible` si Integraciones o el proveedor no responden en 2 s.
+      tags: [conversaciones]
+      parameters:
+        - $ref: '#/components/parameters/ConversacionId'
+        - $ref: './comun.yaml#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Confirmacion'
+            example:
+              opcionId: ocr_XKQ7PL_1
+      responses:
+        '200':
+          description: El asistente respondió a la confirmación.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaMensaje'
+              examples:
+                reprogramado:
+                  summary: El proveedor aplicó el cambio
+                  value:
+                    estado: respondido
+                    mensajeUsuario:
+                      mensajeId: 6b7c8d9e-0f1a-4b2c-9d3e-4f5a6b7c8d9e
+                      secuencia: 7
+                      autor: usuario
+                      texto: Confirmo la opción del 3 de diciembre, 10:30
+                      enviadoEn: '2026-11-20T13:46:30Z'
+                      confirmacion:
+                        opcionId: ocr_XKQ7PL_1
+                    respuesta:
+                      mensajeId: 7c8d9e0f-1a2b-4c3d-8e4f-5a6b7c8d9e0f
+                      secuencia: 8
+                      autor: asistente
+                      texto: Listo, tu vuelo XKQ7PL ahora sale el 3 de diciembre a las 10:30. Lo vas a ver actualizado en tu panel.
+                      enviadoEn: '2026-11-20T13:46:32Z'
+                      intencion: reprogramar
+                      resultado: reprogramado
+                opcionRechazada:
+                  summary: La opción ya no está disponible en el proveedor
+                  value:
+                    estado: respondido
+                    mensajeUsuario:
+                      mensajeId: 6b7c8d9e-0f1a-4b2c-9d3e-4f5a6b7c8d9e
+                      secuencia: 7
+                      autor: usuario
+                      texto: Confirmo la opción del 3 de diciembre, 10:30
+                      enviadoEn: '2026-11-20T13:46:30Z'
+                      confirmacion:
+                        opcionId: ocr_XKQ7PL_1
+                    respuesta:
+                      mensajeId: 7c8d9e0f-1a2b-4c3d-8e4f-5a6b7c8d9e0f
+                      secuencia: 8
+                      autor: asistente
+                      texto: La aerolínea ya no ofrece esa opción. ¿Querés que derive tu caso a tu agencia?
+                      enviadoEn: '2026-11-20T13:46:32Z'
+                      intencion: reprogramar
+                      resultado: opcionRechazada
+                      ofreceDerivar: true
+                integracionesNoDisponible:
+                  summary: Degradación controlada, Integraciones no respondió en 2 s
+                  value:
+                    estado: respondido
+                    mensajeUsuario:
+                      mensajeId: 6b7c8d9e-0f1a-4b2c-9d3e-4f5a6b7c8d9e
+                      secuencia: 7
+                      autor: usuario
+                      texto: Confirmo la opción del 3 de diciembre, 10:30
+                      enviadoEn: '2026-11-20T13:46:30Z'
+                      confirmacion:
+                        opcionId: ocr_XKQ7PL_1
+                    respuesta:
+                      mensajeId: 7c8d9e0f-1a2b-4c3d-8e4f-5a6b7c8d9e0f
+                      secuencia: 8
+                      autor: asistente
+                      texto: Ahora no puedo reprogramar reservas. No se cambió nada. ¿Querés que derive tu caso a tu agencia?
+                      enviadoEn: '2026-11-20T13:46:32Z'
+                      intencion: reprogramar
+                      resultado: noDisponible
+                      noDisponible:
+                        funcion: reprogramar
+                        servicio: integraciones
+                      ofreceDerivar: true
+        '202':
+          description: >-
+            Aplicar el cambio tarda más de 3 s. La respuesta llega por
+            `GET /conversaciones/{id}/mensajes?desde=`.
+          headers:
+            Retry-After:
+              description: Segundos que la ventana de chat espera antes de preguntar de nuevo.
+              schema:
+                type: integer
+                minimum: 1
+              example: 2
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaMensaje'
+              example:
+                estado: consultando
+                mensajeUsuario:
+                  mensajeId: 6b7c8d9e-0f1a-4b2c-9d3e-4f5a6b7c8d9e
+                  secuencia: 7
+                  autor: usuario
+                  texto: Confirmo la opción del 3 de diciembre, 10:30
+                  enviadoEn: '2026-11-20T13:46:30Z'
+                  confirmacion:
+                    opcionId: ocr_XKQ7PL_1
+                respuesta:
+                  mensajeId: 7c8d9e0f-1a2b-4c3d-8e4f-5a6b7c8d9e0f
+                  secuencia: 8
+                  autor: asistente
+                  texto: Estoy confirmando el cambio con la aerolínea. Te aviso en cuanto responda.
+                  enviadoEn: '2026-11-20T13:46:33Z'
+                  intencion: reprogramar
+                  resultado: consultando
+        '400':
+          $ref: './comun.yaml#/components/responses/SolicitudInvalida'
+        '401':
+          $ref: './comun.yaml#/components/responses/NoAutenticado'
+        '403':
+          $ref: './comun.yaml#/components/responses/Prohibido'
+        '404':
+          $ref: './comun.yaml#/components/responses/NoEncontrado'
+        '409':
+          $ref: '#/components/responses/OpcionNoPendiente'
+        '503':
+          $ref: './comun.yaml#/components/responses/NoDisponible'
+
+components:
+  securitySchemes:
+    bearerJWT:
+      $ref: './comun.yaml#/components/securitySchemes/bearerJWT'
+
+  parameters:
+    ConversacionId:
+      name: id
+      in: path
+      required: true
+      description: Identificador de la conversación (`conversacionId`).
+      schema:
+        type: string
+        format: uuid
+      example: 3b2f8c4e-6a1d-4e7b-9c3f-5d2a1b0e9f87
+
+  responses:
+    OpcionNoPendiente:
+      description: >-
+        El `opcionId` no está entre las opciones pendientes de esta conversación: nunca se ofreció,
+        ya se confirmó otra, las opciones vencieron o todavía se está consultando al proveedor (409).
+      content:
+        application/problem+json:
+          schema:
+            $ref: './comun.yaml#/components/schemas/Problema'
+          example:
+            type: https://trotamundos.example/errores/opcion-no-pendiente
+            title: La opción no está pendiente
+            status: 409
+            detail: La opción ocr_XKQ7PL_9 no está entre las opciones ofrecidas en esta conversación.
+            requestId: 7f3c1e2a-9b4d-4c6e-8a1f-2d3e4f5a6b7c
+
+  schemas:
+    NuevaConversacion:
+      type: object
+      additionalProperties: false
+      description: Cuerpo opcional para abrir una conversación.
+      properties:
+        idioma:
+          $ref: './comun.yaml#/components/schemas/Idioma'
+
+    NuevoMensaje:
+      type: object
+      additionalProperties: false
+      required: [texto]
+      properties:
+        texto:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: Lo que escribió el usuario.
+          example: ¿Cuál es el estado de mi vuelo XKQ7PL?
+
+    Confirmacion:
+      type: object
+      additionalProperties: false
+      required: [opcionId]
+      properties:
+        opcionId:
+          $ref: '#/components/schemas/OpcionId'
+
+    Conversacion:
+      type: object
+      additionalProperties: false
+      required:
+        [conversacionId, usuarioId, region, idioma, creadaEn, actualizadaEn, consultando, mensajes]
+      properties:
+        conversacionId:
+          type: string
+          format: uuid
+        usuarioId:
+          type: string
+          format: uuid
+          description: Dueño de la conversación (`sub` del JWT).
+        region:
+          $ref: './comun.yaml#/components/schemas/Region'
+        idioma:
+          $ref: './comun.yaml#/components/schemas/Idioma'
+        creadaEn:
+          type: string
+          format: date-time
+        actualizadaEn:
+          type: string
+          format: date-time
+        consultando:
+          type: boolean
+          description: >-
+            `true` mientras el asistente espera a un proveedor (después de un 202). La ventana de chat
+            lo usa para retomar la consulta cada 2 s si se recarga la página.
+        mensajes:
+          type: array
+          description: Todos los mensajes, ordenados por `secuencia`.
+          items:
+            $ref: '#/components/schemas/Mensaje'
+
+    Mensaje:
+      type: object
+      additionalProperties: false
+      required: [mensajeId, secuencia, autor, texto, enviadoEn]
+      description: >-
+        Un mensaje del historial. Los campos `intencion`, `resultado`, `reservas`, `opciones`, `caso`,
+        `noDisponible` y `ofreceDerivar` solo aparecen en mensajes del asistente; `confirmacion` solo
+        en mensajes del usuario enviados por `confirmarReprogramacion`.
+      properties:
+        mensajeId:
+          type: string
+          format: uuid
+        secuencia:
+          type: integer
+          minimum: 1
+          description: Número creciente dentro de la conversación; es el valor que usa `desde`.
+        autor:
+          type: string
+          enum: [usuario, asistente]
+        texto:
+          type: string
+          description: >-
+            Texto del mensaje. Los del asistente salen de las reglas de intenciones en el idioma de
+            la conversación (configuración externa, QA-11).
+        enviadoEn:
+          type: string
+          format: date-time
+        intencion:
+          $ref: '#/components/schemas/Intencion'
+        resultado:
+          $ref: '#/components/schemas/ResultadoMensaje'
+        confirmacion:
+          $ref: '#/components/schemas/Confirmacion'
+        reservas:
+          type: array
+          description: Reservas que respondió el plug-in de consulta de estado (desde Viajes).
+          items:
+            $ref: '#/components/schemas/ReservaResumen'
+        opciones:
+          type: array
+          minItems: 1
+          description: Opciones de reprogramación de Integraciones, pendientes de confirmación.
+          items:
+            $ref: '#/components/schemas/OpcionReprogramacion'
+        caso:
+          $ref: '#/components/schemas/CasoDerivado'
+        noDisponible:
+          $ref: '#/components/schemas/FuncionNoDisponible'
+        ofreceDerivar:
+          type: boolean
+          description: >-
+            `true` cuando el asistente ofrece derivar el caso a la agencia (ADR-019). Si el usuario
+            responde que sí, el plug-in de derivación crea el caso.
+
+    Intencion:
+      type: string
+      description: >-
+        Intención detectada por el núcleo de conversación; cada una la atiende un plug-in (ADR-018).
+        `desconocida`: no se entendió el mensaje.
+      enum: [estado, reprogramar, problemaMenor, derivar, desconocida]
+
+    ResultadoMensaje:
+      type: string
+      description: |
+        Qué pasó con el mensaje del usuario:
+        - `respondido`: respuesta final (estado, problema menor, saludo).
+        - `repregunta`: no se entendió; al segundo intento fallido se deriva.
+        - `consultando`: se espera al proveedor (más de 3 s); la respuesta llega por polling.
+        - `opciones`: se muestran opciones de reprogramación y se espera la confirmación.
+        - `reprogramado`: el proveedor aplicó la opción confirmada.
+        - `opcionRechazada`: el proveedor ya no acepta la opción; se ofrece derivar.
+        - `derivado`: se creó el caso en la agencia preferida.
+        - `noDisponible`: degradación controlada, una dependencia no respondió (ADR-019).
+      enum:
+        [
+          respondido,
+          repregunta,
+          consultando,
+          opciones,
+          reprogramado,
+          opcionRechazada,
+          derivado,
+          noDisponible,
+        ]
+
+    OpcionId:
+      type: string
+      minLength: 1
+      maxLength: 128
+      description: >-
+        Identificador opaco de una opción de reprogramación, generado por Integraciones en
+        `POST /interna/reprogramaciones/opciones` y aceptado por `POST /interna/reprogramaciones/aplicar`.
+        El asistente no lo interpreta.
+      example: ocr_XKQ7PL_1
+
+    OpcionReprogramacion:
+      type: object
+      additionalProperties: false
+      required: [opcionId, proveedor, numeroReserva, tipoReserva, inicio, fin, destino]
+      properties:
+        opcionId:
+          $ref: '#/components/schemas/OpcionId'
+        proveedor:
+          $ref: './comun.yaml#/components/schemas/Proveedor'
+        numeroReserva:
+          type: string
+          example: XKQ7PL
+        tipoReserva:
+          $ref: './comun.yaml#/components/schemas/TipoReserva'
+        inicio:
+          type: string
+          format: date-time
+          description: Nuevo inicio si se aplica la opción.
+        fin:
+          type: string
+          format: date-time
+          description: Nuevo fin si se aplica la opción.
+        origen:
+          type: string
+          description: Solo en vuelos.
+          example: AEP
+        destino:
+          type: string
+          example: MDZ
+        descripcion:
+          type: string
+          description: Texto corto para mostrar en el botón de la opción.
+          example: 3 de diciembre, 10:30, sin cargo
+
+    ReservaResumen:
+      type: object
+      additionalProperties: false
+      required: [proveedor, numeroReserva, tipoReserva, estado, inicio, fin, destino]
+      properties:
+        proveedor:
+          $ref: './comun.yaml#/components/schemas/Proveedor'
+        numeroReserva:
+          type: string
+          example: XKQ7PL
+        tipoReserva:
+          $ref: './comun.yaml#/components/schemas/TipoReserva'
+        estado:
+          $ref: './comun.yaml#/components/schemas/EstadoReserva'
+        inicio:
+          type: string
+          format: date-time
+        fin:
+          type: string
+          format: date-time
+        origen:
+          type: string
+          description: Solo en vuelos.
+          example: AEP
+        destino:
+          type: string
+          example: MDZ
+
+    CasoDerivado:
+      type: object
+      additionalProperties: false
+      required: [agencia, numeroCaso]
+      description: Caso creado en la agencia preferida a través de Integraciones (UC-6).
+      properties:
+        agencia:
+          type: string
+          description: Identificador de la agencia preferida del usuario (lo da Usuarios).
+          example: viajes-del-plata
+        numeroCaso:
+          type: string
+          description: Número de caso que devolvió la agencia.
+          example: '35436'
+
+    FuncionNoDisponible:
+      type: object
+      additionalProperties: false
+      required: [funcion, servicio]
+      description: Qué función quedó apagada por la degradación controlada y por qué (ADR-019).
+      properties:
+        funcion:
+          type: string
+          enum: [estado, reprogramar, derivar]
+          description: Los problemas menores nunca quedan apagados (sus respuestas son configuración).
+        servicio:
+          type: string
+          enum: [viajes, usuarios, integraciones, proveedor, agencia]
+          description: Dependencia que no respondió en 2 s o respondió 503.
+
+    RespuestaMensaje:
+      type: object
+      additionalProperties: false
+      required: [estado, mensajeUsuario, respuesta]
+      properties:
+        estado:
+          type: string
+          enum: [respondido, consultando]
+          description: >-
+            `respondido` con 200; `consultando` con 202 (la respuesta definitiva llega por
+            `GET /conversaciones/{id}/mensajes?desde=`).
+        mensajeUsuario:
+          $ref: '#/components/schemas/Mensaje'
+        respuesta:
+          $ref: '#/components/schemas/Mensaje'
+
+    ListaMensajes:
+      type: object
+      additionalProperties: false
+      required: [mensajes, consultando, ultimaSecuencia]
+      properties:
+        mensajes:
+          type: array
+          items:
+            $ref: '#/components/schemas/Mensaje'
+        consultando:
+          type: boolean
+          description: Si es `true`, la ventana de chat vuelve a preguntar en 2 s.
+        ultimaSecuencia:
+          type: integer
+          minimum: 0
+          description: Secuencia del último mensaje de la conversación; el próximo `desde`.

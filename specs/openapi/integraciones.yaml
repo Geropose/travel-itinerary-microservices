@@ -1,0 +1,1190 @@
+# Contrato REST del Servicio de Integraciones (dueño D).
+# Wiki: Iteración 3 (adaptadores de proveedores de viaje, agencias y redes sociales; ADR-003) e
+# Iteración 7 (reprogramaciones y derivación a la agencia desde el asistente; ADR-019).
+# Los formatos de los terceros están en specs/externos/: el webhook recibe el formato original de la
+# aerolínea (nombres en inglés) y las rutas internas usan los nombres de Trotamundos; el adaptador traduce.
+openapi: 3.1.0
+info:
+  title: Trotamundos — Servicio de Integraciones
+  version: 0.1.0
+  description: >-
+    Intermediario entre Trotamundos y los terceros (patrón Adapter, ADR-003). Hay un adaptador por
+    proveedor de viaje, por agencia y por red social, configurados en `proveedores.yaml`. Los
+    proveedores que avisan cambios llaman al webhook público; los que no avisan se consultan cada 2
+    minutos (eso no es una ruta). Cada cambio traducido se publica como el evento `ReservaActualizada`
+    (specs/schemas/ReservaActualizada.json) con el outbox. Las rutas `/interna/...` solo se usan
+    entre servicios (Asistente Virtual y Viajes), no pasan por el gateway y reciben el JWT del usuario
+    propagado (ADR-019). Si un tercero no responde dentro del tiempo máximo (2 s por defecto,
+    CONVENCIONES 4.3) o responde `503`, la ruta responde `503`, así quien llama puede degradar de
+    forma controlada (ADR-019).
+
+servers:
+  - url: http://localhost:8000/api/integraciones
+    description: Público, entra por el enrutador global y el API Gateway.
+  - url: http://integraciones:3005
+    description: Interno, solo entre servicios de la misma región.
+
+security:
+  - bearerJWT: []
+
+tags:
+  - name: salud
+    description: Estado del servicio para el monitor de salud (ADR-007).
+  - name: webhooks
+    description: Avisos de los proveedores que informan sus cambios (Iteración 3, UC-3, QA-1).
+  - name: interna
+    description: >-
+      Rutas entre servicios. No pasan por el gateway; se publican solo en el servidor interno.
+
+paths:
+  /health:
+    get:
+      operationId: consultarSalud
+      summary: Estado del servicio
+      description: >-
+        Responde `200` si el servicio puede atender (base y broker conectados) y `503` si no
+        (CONVENCIONES 4.3). No consulta a los terceros: un proveedor caído no deja al servicio sin
+        salud.
+      tags: [salud]
+      security: []
+      parameters:
+        - $ref: './comun.yaml#/components/parameters/XRequestId'
+      responses:
+        '200':
+          $ref: './comun.yaml#/components/responses/Salud'
+        '503':
+          $ref: './comun.yaml#/components/responses/NoDisponible'
+
+  /webhooks/proveedores/{proveedor}:
+    post:
+      operationId: recibirAvisoProveedor
+      summary: Recibir el aviso de cambio de un proveedor
+      description: >-
+        La llama el proveedor que avisa sus cambios (en el prototipo, solo `aerolinea-andina`;
+        formato en specs/externos/aerolinea.md, inspirado en los webhooks de Duffel). Es pública:
+        no lleva JWT, se autentica con la firma HMAC.
+
+
+        **Verificación de la firma.** La cabecera `X-Webhook-Signature` tiene la forma
+        `t=<segundos epoch>,v1=<firma>`. El adaptador calcula
+        `HMAC-SHA256(secreto, t + "." + cuerpo)` sobre el cuerpo **tal como llegó** (los bytes
+        crudos, sin volver a serializar el JSON), en hexadecimal en minúsculas, y lo compara con
+        `v1` en tiempo constante. El secreto es uno por proveedor y sale de una variable de
+        entorno. Responde `401` y no guarda ni publica nada si falta la cabecera, si no tiene el
+        formato `t=...,v1=...`, si la firma no coincide o si `t` difiere en más de 5 minutos de la
+        hora actual.
+
+
+        **Procesamiento.** Con la firma válida, el adaptador traduce el aviso a
+        `ReservaActualizada.datos` (`proveedor` sale de la URL, `numeroReserva` de
+        `booking_reference`, `estado` de `status`, `cambios` comparando `segments` con `removed`)
+        y guarda el evento `ReservaActualizada` (specs/schemas/ReservaActualizada.json) en el
+        outbox, en la misma transacción; el publicador lo envía al broker y Viajes lo consume.
+        Responde en menos de 5 segundos. Un aviso repetido (mismo `proveedor` +
+        `booking_reference` + `version`) se responde `200` con `estado: repetido` y no se publica
+        otra vez. Un aviso con firma válida que no se puede traducir (falta `booking_reference`,
+        `status` desconocido, segmentos vacíos sin cancelación) se guarda en `no_traducidos` con
+        el cuerpo original y se responde `200` con `estado: no-traducido`, así el proveedor no lo
+        reintenta (QA-6).
+      tags: [webhooks]
+      security: []
+      parameters:
+        - name: proveedor
+          in: path
+          required: true
+          description: Identificador del proveedor en Trotamundos (configuración de adaptadores).
+          schema:
+            $ref: './comun.yaml#/components/schemas/Proveedor'
+          example: aerolinea-andina
+        - name: X-Webhook-Signature
+          in: header
+          required: true
+          description: >-
+            Firma del aviso, `t=<segundos epoch>,v1=<HMAC-SHA256 en hexadecimal>`. Si falta o es
+            inválida, la respuesta es `401`.
+          schema:
+            type: string
+            pattern: '^t=\d+,v1=[0-9a-f]{64}$'
+          example: t=1795857150,v1=5d1f8e0c3b7a4e2f9c6d8b1a0e3f5c7d9b2a4c6e8f0a1b3d5c7e9f1a3b5d7c9e
+        - $ref: './comun.yaml#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        description: Aviso en el formato original de la aerolínea (nombres en inglés, `snake_case`).
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AvisoAerolinea'
+            examples:
+              cambioDeHorario:
+                summary: La aerolínea cambió el horario del vuelo
+                value:
+                  id: wev_0000AN0000000042
+                  type: order.airline_initiated_change_detected
+                  created_at: '2026-11-28T09:12:30Z'
+                  idempotency_key: XKQ7PL-v2
+                  data:
+                    object:
+                      order:
+                        id: ord_0000AN000XKQ7PL
+                        booking_reference: XKQ7PL
+                        status: changed
+                        version: 2
+                        updated_at: '2026-11-28T09:12:30Z'
+                        cancelled_at: null
+                        owner: { iata_code: AN, name: Aerolínea Andina }
+                        passengers:
+                          - { id: pas_0001, given_name: Ana, family_name: García }
+                        segments:
+                          - id: seg_0002
+                            marketing_carrier: { iata_code: AN }
+                            marketing_carrier_flight_number: '1234'
+                            origin: { iata_code: EZE, city_name: Buenos Aires }
+                            destination: { iata_code: SCL, city_name: Santiago }
+                            departing_at: '2026-12-10T11:15:00-03:00'
+                            arriving_at: '2026-12-10T13:25:00-03:00'
+                            seat: 14C
+                      removed:
+                        - id: seg_0001
+                          marketing_carrier: { iata_code: AN }
+                          marketing_carrier_flight_number: '1234'
+                          origin: { iata_code: EZE, city_name: Buenos Aires }
+                          destination: { iata_code: SCL, city_name: Santiago }
+                          departing_at: '2026-12-10T08:30:00-03:00'
+                          arriving_at: '2026-12-10T10:40:00-03:00'
+                          seat: 14C
+                      added:
+                        - id: seg_0002
+                          marketing_carrier: { iata_code: AN }
+                          marketing_carrier_flight_number: '1234'
+                          origin: { iata_code: EZE, city_name: Buenos Aires }
+                          destination: { iata_code: SCL, city_name: Santiago }
+                          departing_at: '2026-12-10T11:15:00-03:00'
+                          arriving_at: '2026-12-10T13:25:00-03:00'
+                          seat: 14C
+              cancelacion:
+                summary: La aerolínea canceló el vuelo
+                value:
+                  id: wev_0000AN0000000043
+                  type: order.airline_initiated_change_detected
+                  created_at: '2026-11-28T09:15:00Z'
+                  idempotency_key: XKQ7PL-v3
+                  data:
+                    object:
+                      order:
+                        id: ord_0000AN000XKQ7PL
+                        booking_reference: XKQ7PL
+                        status: cancelled
+                        version: 3
+                        updated_at: '2026-11-28T09:15:00Z'
+                        cancelled_at: '2026-11-28T09:15:00Z'
+                        owner: { iata_code: AN, name: Aerolínea Andina }
+                        passengers:
+                          - { id: pas_0001, given_name: Ana, family_name: García }
+                        segments: []
+                      removed:
+                        - id: seg_0002
+                          marketing_carrier: { iata_code: AN }
+                          marketing_carrier_flight_number: '1234'
+                          origin: { iata_code: EZE, city_name: Buenos Aires }
+                          destination: { iata_code: SCL, city_name: Santiago }
+                          departing_at: '2026-12-10T11:15:00-03:00'
+                          arriving_at: '2026-12-10T13:25:00-03:00'
+                          seat: 14C
+                      added: []
+      responses:
+        '200':
+          description: >-
+            Aviso recibido. `aceptado`: se guardó `ReservaActualizada` en el outbox. `repetido`: ya
+            se había procesado ese cambio. `no-traducido`: se guardó en `no_traducidos`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AvisoRecibido'
+              examples:
+                aceptado:
+                  value: { estado: aceptado }
+                repetido:
+                  value: { estado: repetido }
+                noTraducido:
+                  value: { estado: no-traducido }
+        '400':
+          description: >-
+            El cuerpo no es JSON. Igual se guarda en `no_traducidos` con el cuerpo crudo (QA-6).
+          content:
+            application/problem+json:
+              schema:
+                $ref: './comun.yaml#/components/schemas/Problema'
+              example:
+                type: https://trotamundos.example/errores/solicitud-invalida
+                title: Solicitud inválida
+                status: 400
+                detail: El cuerpo del aviso no es JSON.
+                requestId: 7f3c1e2a-9b4d-4c6e-8a1f-2d3e4f5a6b7c
+        '401':
+          description: >-
+            Falta `X-Webhook-Signature`, no tiene el formato `t=...,v1=...`, la firma no coincide
+            o `t` tiene más de 5 minutos de diferencia. No se guarda ni se publica nada.
+          content:
+            application/problem+json:
+              schema:
+                $ref: './comun.yaml#/components/schemas/Problema'
+              example:
+                type: https://trotamundos.example/errores/firma-invalida
+                title: Firma inválida
+                status: 401
+                detail: La firma del aviso no coincide.
+                requestId: 7f3c1e2a-9b4d-4c6e-8a1f-2d3e4f5a6b7c
+        '404':
+          description: >-
+            El proveedor de la URL no está configurado o no avisa cambios (por ejemplo
+            `hotel-cordillera`, que se consulta cada 2 minutos).
+          content:
+            application/problem+json:
+              schema:
+                $ref: './comun.yaml#/components/schemas/Problema'
+              example:
+                type: https://trotamundos.example/errores/no-encontrado
+                title: No encontrado
+                status: 404
+                detail: El proveedor hotel-cordillera no recibe avisos por webhook.
+                requestId: 7f3c1e2a-9b4d-4c6e-8a1f-2d3e4f5a6b7c
+        '503':
+          $ref: './comun.yaml#/components/responses/NoDisponible'
+
+  /interna/reprogramaciones/opciones:
+    post:
+      operationId: pedirOpcionesReprogramacion
+      summary: Pedir al proveedor las opciones para reprogramar una reserva
+      description: >-
+        La usa el plug-in de reprogramación del Asistente Virtual (Iteración 7, UC-8) con el JWT
+        del usuario. El adaptador del proveedor pide las opciones (en la aerolínea,
+        `POST /air/order_change_requests`) y las traduce. Una reserva cancelada también puede pedir
+        opciones (reubicación). Si el proveedor no ofrece reprogramación (hotel y rentadora en el
+        prototipo) o no tiene opciones, responde `200` con `opciones` vacío y el asistente ofrece
+        derivar el caso a la agencia. Integraciones recuerda las opciones que devolvió, así
+        `aplicar` solo acepta una de ellas. No verifica que la reserva sea del usuario (Integraciones
+        no guarda reservas): lo verifica el asistente consultando antes a Viajes con el mismo JWT.
+      tags: [interna]
+      servers:
+        - url: http://integraciones:3005
+          description: Interno.
+      parameters:
+        - $ref: './comun.yaml#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SolicitudOpciones'
+            example:
+              proveedor: aerolinea-andina
+              numeroReserva: XKQ7PL
+      responses:
+        '200':
+          description: Opciones que ofrece el proveedor (de 0 a 3 en el mock de la aerolínea).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpcionesReprogramacion'
+              examples:
+                conOpciones:
+                  value:
+                    proveedor: aerolinea-andina
+                    numeroReserva: XKQ7PL
+                    opciones:
+                      - opcionId: oco_0000AN0000000101
+                        venceEn: '2026-11-28T09:50:00Z'
+                        costo: { monto: '0.00', moneda: USD }
+                        inicio: '2026-12-10T14:00:00-03:00'
+                        fin: '2026-12-10T16:10:00-03:00'
+                        origen: EZE
+                        destino: SCL
+                        detalle: { numeroVuelo: AN 1240 }
+                sinOpciones:
+                  value:
+                    proveedor: aerolinea-andina
+                    numeroReserva: XKQ7PL
+                    opciones: []
+        '400':
+          $ref: './comun.yaml#/components/responses/SolicitudInvalida'
+        '401':
+          $ref: './comun.yaml#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SoloUsuarios'
+        '404':
+          description: El proveedor no está configurado o no tiene esa reserva.
+          content:
+            application/problem+json:
+              schema:
+                $ref: './comun.yaml#/components/schemas/Problema'
+              example:
+                type: https://trotamundos.example/errores/no-encontrado
+                title: No encontrado
+                status: 404
+                detail: Aerolínea Andina no tiene la reserva XKQ7PX.
+                requestId: 7f3c1e2a-9b4d-4c6e-8a1f-2d3e4f5a6b7c
+        '502':
+          $ref: '#/components/responses/ErrorTercero'
+        '503':
+          $ref: '#/components/responses/TerceroNoDisponible'
+
+  /interna/reprogramaciones/aplicar:
+    post:
+      operationId: aplicarReprogramacion
+      summary: Aplicar una de las opciones de reprogramación
+      description: >-
+        La usa el plug-in de reprogramación del Asistente Virtual solo después de que el usuario
+        confirma la opción (Iteración 7). `opcionId` tiene que ser una de las opciones que devolvió
+        `POST /interna/reprogramaciones/opciones` para esa misma reserva; si no, `404`. El
+        adaptador la aplica en el proveedor (en la aerolínea, `POST /air/order_changes`). El cambio
+        de la reserva no se devuelve acá: el proveedor lo avisa después (webhook `order.updated`),
+        vuelve a entrar como `ReservaActualizada` y Viajes lo guarda. Si se repite el pedido de una
+        opción que ya se aplicó desde Trotamundos, responde `200` con el mismo resultado
+        (idempotente).
+      tags: [interna]
+      servers:
+        - url: http://integraciones:3005
+          description: Interno.
+      parameters:
+        - $ref: './comun.yaml#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SolicitudAplicar'
+            example:
+              proveedor: aerolinea-andina
+              numeroReserva: XKQ7PL
+              opcionId: oco_0000AN0000000101
+      responses:
+        '200':
+          description: El proveedor confirmó la reprogramación.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResultadoReprogramacion'
+              example:
+                proveedor: aerolinea-andina
+                numeroReserva: XKQ7PL
+                opcionId: oco_0000AN0000000101
+                estado: aplicada
+                aplicadaEn: '2026-11-28T09:21:10Z'
+        '400':
+          $ref: './comun.yaml#/components/responses/SolicitudInvalida'
+        '401':
+          $ref: './comun.yaml#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SoloUsuarios'
+        '404':
+          description: >-
+            El proveedor no está configurado, o `opcionId` no es una de las opciones ofrecidas para
+            esa reserva.
+          content:
+            application/problem+json:
+              schema:
+                $ref: './comun.yaml#/components/schemas/Problema'
+              example:
+                type: https://trotamundos.example/errores/no-encontrado
+                title: No encontrado
+                status: 404
+                detail: La opción oco_0000AN0000000999 no se ofreció para la reserva XKQ7PL.
+                requestId: 7f3c1e2a-9b4d-4c6e-8a1f-2d3e4f5a6b7c
+        '409':
+          description: >-
+            La opción venció (`venceEn` pasado) o ya se usó para otro cambio (la aerolínea responde
+            `422 offer_no_longer_available`). Hay que pedir opciones de nuevo.
+          content:
+            application/problem+json:
+              schema:
+                $ref: './comun.yaml#/components/schemas/Problema'
+              example:
+                type: https://trotamundos.example/errores/opcion-vencida
+                title: La opción ya no está disponible
+                status: 409
+                detail: La opción oco_0000AN0000000101 venció. Pedí opciones de nuevo.
+                requestId: 7f3c1e2a-9b4d-4c6e-8a1f-2d3e4f5a6b7c
+        '502':
+          $ref: '#/components/responses/ErrorTercero'
+        '503':
+          $ref: '#/components/responses/TerceroNoDisponible'
+
+  /interna/agencias/casos:
+    post:
+      operationId: crearCasoAgencia
+      summary: Derivar el problema del usuario a su agencia
+      description: >-
+        La usa el plug-in de derivación del Asistente Virtual (Iteración 7, UC-6, ADR-019) con el
+        JWT del usuario. El adaptador de la agencia crea el caso (en el mock,
+        `POST /api/v2/tickets`, inspirado en Zendesk; ver specs/externos/agencia.md): `resumen` va
+        al asunto y al comienzo del texto, y `conversacion` sigue debajo, una línea por mensaje.
+        `usuarioId` tiene que ser el `sub` del JWT. Si la agencia no responde a tiempo o responde
+        `503`, se responde `503` y el asistente avisa al usuario.
+      tags: [interna]
+      servers:
+        - url: http://integraciones:3005
+          description: Interno.
+      parameters:
+        - $ref: './comun.yaml#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SolicitudCaso'
+            example:
+              agencia: viajes-del-plata
+              usuarioId: 6b1e7c2a-4f3d-4e8b-9c0a-1d2e3f4a5b6c
+              resumen: >-
+                La aerolínea canceló el vuelo AN 1234 del 10/12 (reserva XKQ7PL, Aerolínea Andina).
+                No hay opciones de reprogramación disponibles y el usuario pidió hablar con una
+                persona.
+              conversacion:
+                - autor: usuario
+                  texto: Me cancelaron el vuelo a Santiago, ¿qué hago?
+                  enviadoEn: '2026-11-28T09:30:05Z'
+                - autor: asistente
+                  texto: Busqué opciones de reprogramación con Aerolínea Andina y no hay vuelos disponibles.
+                  enviadoEn: '2026-11-28T09:30:09Z'
+                - autor: usuario
+                  texto: Quiero hablar con mi agencia.
+                  enviadoEn: '2026-11-28T09:31:02Z'
+      responses:
+        '201':
+          description: La agencia creó el caso.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CasoCreado'
+              example:
+                agencia: viajes-del-plata
+                numeroCaso: '35436'
+                creadoEn: '2026-11-28T09:31:12Z'
+        '400':
+          $ref: './comun.yaml#/components/responses/SolicitudInvalida'
+        '401':
+          $ref: './comun.yaml#/components/responses/NoAutenticado'
+        '403':
+          description: >-
+            `usuarioId` no es el `sub` del JWT, o el JWT no tiene el rol `usuario`. La solicitud
+            rechazada se guarda en el registro de accesos (QA-9).
+          content:
+            application/problem+json:
+              schema:
+                $ref: './comun.yaml#/components/schemas/Problema'
+              example:
+                type: https://trotamundos.example/errores/prohibido
+                title: Acceso denegado
+                status: 403
+                detail: No se puede derivar un caso a nombre de otro usuario.
+                requestId: 7f3c1e2a-9b4d-4c6e-8a1f-2d3e4f5a6b7c
+        '404':
+          description: La agencia no está configurada.
+          content:
+            application/problem+json:
+              schema:
+                $ref: './comun.yaml#/components/schemas/Problema'
+              example:
+                type: https://trotamundos.example/errores/no-encontrado
+                title: No encontrado
+                status: 404
+                detail: No hay un adaptador para la agencia viajes-del-sur.
+                requestId: 7f3c1e2a-9b4d-4c6e-8a1f-2d3e4f5a6b7c
+        '502':
+          $ref: '#/components/responses/ErrorTercero'
+        '503':
+          $ref: '#/components/responses/TerceroNoDisponible'
+
+  /interna/redes/publicar:
+    post:
+      operationId: publicarItinerario
+      summary: Publicar un itinerario en una red social
+      description: >-
+        La usa Viajes cuando el usuario comparte un viaje en una red social
+        (`POST /viajes/{viajeId}/compartir-red`), con el JWT del usuario (Iteración 3, QA-7:
+        menos de 3 s). El adaptador de la red arma el texto (título con destino y fechas, una línea
+        por reserva, recortado a 500 caracteres) en el idioma del claim `idioma` del JWT y lo
+        publica (en el mock, `POST /api/v1/statuses`, inspirado en Mastodon; ver
+        specs/externos/redsocial.md) con una `Idempotency-Key` propia por pedido. El itinerario no
+        lleva números de reserva.
+      tags: [interna]
+      servers:
+        - url: http://integraciones:3005
+          description: Interno.
+      parameters:
+        - $ref: './comun.yaml#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SolicitudPublicacion'
+            example:
+              red: redsocial
+              itinerario:
+                viajeId: 3f8a2c1e-7b4d-4e9a-8c6f-1a2b3c4d5e6f
+                destino: Santiago
+                inicio: '2026-12-10T08:30:00-03:00'
+                fin: '2026-12-14T11:00:00-03:00'
+                reservas:
+                  - tipoReserva: vuelo
+                    descripcion: Vuelo AN 1234
+                    inicio: '2026-12-10T08:30:00-03:00'
+                    fin: '2026-12-10T10:40:00-03:00'
+                    origen: Buenos Aires (EZE)
+                    destino: Santiago (SCL)
+                  - tipoReserva: hotel
+                    descripcion: Hotel Cordillera
+                    inicio: '2026-12-10T15:00:00-03:00'
+                    fin: '2026-12-14T11:00:00-03:00'
+      responses:
+        '201':
+          description: La red social publicó el itinerario.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Publicacion'
+              example:
+                red: redsocial
+                url: https://redsocial.example/@ana_garcia/103254962155278888
+                publicadaEn: '2026-11-28T15:04:47Z'
+        '400':
+          $ref: './comun.yaml#/components/responses/SolicitudInvalida'
+        '401':
+          $ref: './comun.yaml#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SoloUsuarios'
+        '404':
+          description: La red social no está configurada.
+          content:
+            application/problem+json:
+              schema:
+                $ref: './comun.yaml#/components/schemas/Problema'
+              example:
+                type: https://trotamundos.example/errores/no-encontrado
+                title: No encontrado
+                status: 404
+                detail: No hay un adaptador para la red otra-red.
+                requestId: 7f3c1e2a-9b4d-4c6e-8a1f-2d3e4f5a6b7c
+        '502':
+          $ref: '#/components/responses/ErrorTercero'
+        '503':
+          $ref: '#/components/responses/TerceroNoDisponible'
+
+  /interna/no-traducidos:
+    get:
+      operationId: listarNoTraducidos
+      summary: Listar los mensajes de proveedores que no se pudieron traducir
+      description: >-
+        Mensajes de proveedores (por webhook o por consulta periódica) que el adaptador no pudo
+        traducir, con el cuerpo original (ADR-003, QA-6: 99 % sin intervención manual). Sirve para
+        revisarlos a mano y para medir QA-6 en el prototipo. No hay un usuario detrás (la usan el
+        equipo y las pruebas), así que no lleva JWT. Ordenados del más nuevo al más viejo.
+      tags: [interna]
+      security: []
+      servers:
+        - url: http://integraciones:3005
+          description: Interno.
+      parameters:
+        - name: proveedor
+          in: query
+          required: false
+          description: Solo los mensajes de este proveedor.
+          schema:
+            $ref: './comun.yaml#/components/schemas/Proveedor'
+          example: hotel-cordillera
+        - name: desde
+          in: query
+          required: false
+          description: Solo los mensajes recibidos en este momento o después.
+          schema:
+            type: string
+            format: date-time
+          example: '2026-11-28T00:00:00Z'
+        - name: limite
+          in: query
+          required: false
+          description: Cantidad máxima de mensajes.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+        - $ref: './comun.yaml#/components/parameters/XRequestId'
+      responses:
+        '200':
+          description: Mensajes no traducidos (puede ir vacío).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListaNoTraducidos'
+              example:
+                mensajes:
+                  - id: 9d2e4f6a-1b3c-4d5e-8f7a-0b1c2d3e4f5a
+                    proveedor: aerolinea-andina
+                    via: webhook
+                    recibidoEn: '2026-11-28T09:40:00Z'
+                    motivo: Falta booking_reference.
+                    cuerpo: '{"id":"wev_0000AN0000000050","type":"order.airline_initiated_change_detected","created_at":"2026-11-28T09:40:00Z","idempotency_key":"-v1","data":{"object":{"order":{"id":"ord_0000AN000000000","status":"changed","version":1}}}}'
+                  - id: 1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d
+                    proveedor: hotel-cordillera
+                    via: consulta
+                    recibidoEn: '2026-11-28T09:36:00Z'
+                    motivo: 'status desconocido: waitlisted.'
+                    cuerpo: '{"reservationId":"HC-48299","status":"waitlisted"}'
+        '400':
+          $ref: './comun.yaml#/components/responses/SolicitudInvalida'
+        '503':
+          $ref: './comun.yaml#/components/responses/NoDisponible'
+
+components:
+  securitySchemes:
+    bearerJWT:
+      $ref: './comun.yaml#/components/securitySchemes/bearerJWT'
+
+  responses:
+    SoloUsuarios:
+      description: >-
+        El JWT no tiene el rol `usuario` (por ejemplo, es de un analista). La solicitud rechazada se
+        guarda en el registro de accesos (QA-9).
+      content:
+        application/problem+json:
+          schema:
+            $ref: './comun.yaml#/components/schemas/Problema'
+          example:
+            type: https://trotamundos.example/errores/prohibido
+            title: Acceso denegado
+            status: 403
+            requestId: 7f3c1e2a-9b4d-4c6e-8a1f-2d3e4f5a6b7c
+    ErrorTercero:
+      description: >-
+        El tercero respondió algo inesperado: un error que no es de los previstos (por ejemplo
+        `401` porque la clave de API configurada es inválida) o una respuesta que el adaptador no
+        pudo traducir (502).
+      content:
+        application/problem+json:
+          schema:
+            $ref: './comun.yaml#/components/schemas/Problema'
+          example:
+            type: https://trotamundos.example/errores/error-tercero
+            title: Error del tercero
+            status: 502
+            detail: Aerolínea Andina rechazó la clave de API.
+            requestId: 7f3c1e2a-9b4d-4c6e-8a1f-2d3e4f5a6b7c
+    TerceroNoDisponible:
+      description: >-
+        El tercero no está disponible: respondió `503` o no respondió dentro del tiempo máximo (2 s
+        por defecto, CONVENCIONES 4.3). Quien llama degrada de forma controlada (ADR-019). También
+        se usa si el propio servicio no puede atender.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './comun.yaml#/components/schemas/Problema'
+          example:
+            type: https://trotamundos.example/errores/tercero-no-disponible
+            title: Tercero no disponible
+            status: 503
+            detail: Aerolínea Andina no respondió a tiempo.
+            requestId: 7f3c1e2a-9b4d-4c6e-8a1f-2d3e4f5a6b7c
+
+  schemas:
+    NumeroReserva:
+      type: string
+      minLength: 1
+      description: Número o código de la reserva tal como lo emite el proveedor.
+      example: XKQ7PL
+
+    # --- Reprogramaciones (Iteración 7) ---
+
+    SolicitudOpciones:
+      type: object
+      additionalProperties: false
+      required: [proveedor, numeroReserva]
+      properties:
+        proveedor:
+          $ref: './comun.yaml#/components/schemas/Proveedor'
+        numeroReserva:
+          $ref: '#/components/schemas/NumeroReserva'
+
+    OpcionesReprogramacion:
+      type: object
+      additionalProperties: false
+      required: [proveedor, numeroReserva, opciones]
+      properties:
+        proveedor:
+          $ref: './comun.yaml#/components/schemas/Proveedor'
+        numeroReserva:
+          $ref: '#/components/schemas/NumeroReserva'
+        opciones:
+          type: array
+          description: Vacío si el proveedor no ofrece reprogramación o no tiene opciones.
+          items:
+            $ref: '#/components/schemas/OpcionReprogramacion'
+
+    OpcionReprogramacion:
+      type: object
+      description: >-
+        Una opción del proveedor, traducida. En la aerolínea, `inicio` es el `departing_at` del
+        primer segmento nuevo y `fin` el `arriving_at` del último.
+      additionalProperties: false
+      required: [opcionId, venceEn, costo, inicio, fin]
+      properties:
+        opcionId:
+          type: string
+          minLength: 1
+          description: Identificador de la opción en el proveedor (en la aerolínea, el de la oferta).
+          example: oco_0000AN0000000101
+        venceEn:
+          type: string
+          format: date-time
+          description: Hasta cuándo se puede aplicar.
+        costo:
+          $ref: '#/components/schemas/Costo'
+        inicio:
+          type: string
+          format: date-time
+        fin:
+          type: string
+          format: date-time
+        origen:
+          type: string
+          minLength: 1
+          description: Código IATA del aeropuerto de salida (solo vuelos).
+          example: EZE
+        destino:
+          type: string
+          minLength: 1
+          description: Código IATA del aeropuerto de llegada (solo vuelos).
+          example: SCL
+        detalle:
+          type: object
+          additionalProperties: false
+          properties:
+            numeroVuelo:
+              type: string
+              description: Código de la aerolínea y número de vuelo, como en `ReservaActualizada`.
+              example: AN 1240
+
+    Costo:
+      type: object
+      description: Lo que cobra el proveedor por el cambio.
+      additionalProperties: false
+      required: [monto, moneda]
+      properties:
+        monto:
+          type: string
+          pattern: '^\d+\.\d{2}$'
+          description: Importe decimal como texto, para no perder precisión.
+          example: '0.00'
+        moneda:
+          type: string
+          pattern: '^[A-Z]{3}$'
+          description: Código ISO 4217.
+          example: USD
+
+    SolicitudAplicar:
+      type: object
+      additionalProperties: false
+      required: [proveedor, numeroReserva, opcionId]
+      properties:
+        proveedor:
+          $ref: './comun.yaml#/components/schemas/Proveedor'
+        numeroReserva:
+          $ref: '#/components/schemas/NumeroReserva'
+        opcionId:
+          type: string
+          minLength: 1
+          example: oco_0000AN0000000101
+
+    ResultadoReprogramacion:
+      type: object
+      additionalProperties: false
+      required: [proveedor, numeroReserva, opcionId, estado, aplicadaEn]
+      properties:
+        proveedor:
+          $ref: './comun.yaml#/components/schemas/Proveedor'
+        numeroReserva:
+          $ref: '#/components/schemas/NumeroReserva'
+        opcionId:
+          type: string
+          minLength: 1
+        estado:
+          type: string
+          enum: [aplicada]
+          description: >-
+            El proveedor confirmó el cambio. La reserva actualizada llega después como
+            `ReservaActualizada`.
+        aplicadaEn:
+          type: string
+          format: date-time
+
+    # --- Agencias (Iteración 3 y 7) ---
+
+    SolicitudCaso:
+      type: object
+      additionalProperties: false
+      required: [agencia, usuarioId, resumen, conversacion]
+      properties:
+        agencia:
+          type: string
+          minLength: 1
+          description: Identificador de la agencia preferida del usuario (perfil en Usuarios).
+          example: viajes-del-plata
+        usuarioId:
+          type: string
+          format: uuid
+          description: Tiene que ser el `sub` del JWT.
+        resumen:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: Resumen del problema que arma el asistente.
+        conversacion:
+          type: array
+          description: >-
+            Mensajes de la conversación con el asistente, en orden. Puede ir vacío si el usuario
+            pidió la agencia sin conversar.
+          maxItems: 200
+          items:
+            $ref: '#/components/schemas/MensajeConversacion'
+
+    MensajeConversacion:
+      type: object
+      additionalProperties: false
+      required: [autor, texto, enviadoEn]
+      properties:
+        autor:
+          type: string
+          enum: [usuario, asistente]
+        texto:
+          type: string
+          minLength: 1
+          maxLength: 4000
+        enviadoEn:
+          type: string
+          format: date-time
+
+    CasoCreado:
+      type: object
+      additionalProperties: false
+      required: [agencia, numeroCaso, creadoEn]
+      properties:
+        agencia:
+          type: string
+          example: viajes-del-plata
+        numeroCaso:
+          type: string
+          minLength: 1
+          description: Número de caso que da la agencia; el asistente se lo muestra al usuario.
+          example: '35436'
+        creadoEn:
+          type: string
+          format: date-time
+
+    # --- Redes sociales (Iteración 3) ---
+
+    SolicitudPublicacion:
+      type: object
+      additionalProperties: false
+      required: [red, itinerario]
+      properties:
+        red:
+          type: string
+          minLength: 1
+          description: Identificador de la red social (configuración de adaptadores).
+          example: redsocial
+        itinerario:
+          $ref: '#/components/schemas/Itinerario'
+
+    Itinerario:
+      type: object
+      description: Lo que se publica de un viaje. No lleva números de reserva ni datos personales.
+      additionalProperties: false
+      required: [viajeId, destino, inicio, fin, reservas]
+      properties:
+        viajeId:
+          type: string
+          format: uuid
+        destino:
+          type: string
+          minLength: 1
+          description: Destino principal del viaje, para el título.
+          example: Santiago
+        inicio:
+          type: string
+          format: date-time
+        fin:
+          type: string
+          format: date-time
+        reservas:
+          type: array
+          minItems: 1
+          description: En orden cronológico; una línea de la publicación por reserva.
+          items:
+            $ref: '#/components/schemas/ReservaItinerario'
+
+    ReservaItinerario:
+      type: object
+      additionalProperties: false
+      required: [tipoReserva, descripcion, inicio]
+      properties:
+        tipoReserva:
+          $ref: './comun.yaml#/components/schemas/TipoReserva'
+        descripcion:
+          type: string
+          minLength: 1
+          maxLength: 200
+          example: Vuelo AN 1234
+        inicio:
+          type: string
+          format: date-time
+        fin:
+          type: string
+          format: date-time
+        origen:
+          type: string
+          minLength: 1
+          description: Solo vuelos.
+        destino:
+          type: string
+          minLength: 1
+          description: Solo vuelos.
+
+    Publicacion:
+      type: object
+      additionalProperties: false
+      required: [red, url, publicadaEn]
+      properties:
+        red:
+          type: string
+          example: redsocial
+        url:
+          type: string
+          format: uri
+          description: URL pública de la publicación, para mostrarle al usuario.
+        publicadaEn:
+          type: string
+          format: date-time
+
+    # --- No traducidos (QA-6) ---
+
+    ListaNoTraducidos:
+      type: object
+      additionalProperties: false
+      required: [mensajes]
+      properties:
+        mensajes:
+          type: array
+          items:
+            $ref: '#/components/schemas/MensajeNoTraducido'
+
+    MensajeNoTraducido:
+      type: object
+      additionalProperties: false
+      required: [id, proveedor, via, recibidoEn, motivo, cuerpo]
+      properties:
+        id:
+          type: string
+          format: uuid
+        proveedor:
+          $ref: './comun.yaml#/components/schemas/Proveedor'
+        via:
+          type: string
+          enum: [webhook, consulta]
+          description: >-
+            `webhook` si lo mandó el proveedor; `consulta` si salió de la consulta periódica (cada
+            2 minutos).
+        recibidoEn:
+          type: string
+          format: date-time
+        motivo:
+          type: string
+          minLength: 1
+          description: Por qué no se pudo traducir.
+        cuerpo:
+          type: string
+          description: Cuerpo original tal como llegó (puede no ser JSON válido).
+
+    # --- Webhook de la aerolínea (formato original, specs/externos/aerolinea.md) ---
+
+    AvisoRecibido:
+      type: object
+      additionalProperties: false
+      required: [estado]
+      properties:
+        estado:
+          type: string
+          enum: [aceptado, repetido, no-traducido]
+
+    AvisoAerolinea:
+      type: object
+      description: >-
+        Aviso de la aerolínea, con los nombres originales. Un aviso con firma válida que no cumple
+        este esquema no se rechaza: va a `no_traducidos` (ver la descripción de la operación).
+      additionalProperties: false
+      required: [id, type, created_at, idempotency_key, data]
+      properties:
+        id:
+          type: string
+          example: wev_0000AN0000000042
+        type:
+          type: string
+          enum: [order.airline_initiated_change_detected, order.updated]
+          description: >-
+            `order.airline_initiated_change_detected`: la aerolínea cambió o canceló el vuelo.
+            `order.updated`: se aplicó una reprogramación pedida por Trotamundos.
+        created_at:
+          type: string
+          format: date-time
+        idempotency_key:
+          type: string
+          example: XKQ7PL-v2
+        data:
+          type: object
+          additionalProperties: false
+          required: [object]
+          properties:
+            object:
+              type: object
+              additionalProperties: false
+              required: [order, removed, added]
+              properties:
+                order:
+                  $ref: '#/components/schemas/OrdenAerolinea'
+                removed:
+                  type: array
+                  description: Segmentos que ya no están.
+                  items:
+                    $ref: '#/components/schemas/SegmentoAerolinea'
+                added:
+                  type: array
+                  description: Segmentos nuevos. Vacío en una cancelación.
+                  items:
+                    $ref: '#/components/schemas/SegmentoAerolinea'
+
+    OrdenAerolinea:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          id,
+          booking_reference,
+          status,
+          version,
+          updated_at,
+          cancelled_at,
+          owner,
+          passengers,
+          segments,
+        ]
+      properties:
+        id:
+          type: string
+          example: ord_0000AN000XKQ7PL
+        booking_reference:
+          type: string
+          minLength: 1
+          description: Código de reserva (PNR). Es el `numeroReserva` de Trotamundos.
+          example: XKQ7PL
+        status:
+          type: string
+          enum: [confirmed, changed, cancelled]
+          description: '`confirmed` → `confirmada`, `changed` → `modificada`, `cancelled` → `cancelada`.'
+        version:
+          type: integer
+          minimum: 1
+          description: Sube en 1 con cada cambio; con `booking_reference` sirve para descartar repetidos.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        cancelled_at:
+          type: [string, 'null']
+          format: date-time
+        owner:
+          type: object
+          additionalProperties: false
+          required: [iata_code, name]
+          properties:
+            iata_code:
+              type: string
+              example: AN
+            name:
+              type: string
+              example: Aerolínea Andina
+        passengers:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, given_name, family_name]
+            properties:
+              id:
+                type: string
+              given_name:
+                type: string
+              family_name:
+                type: string
+        segments:
+          type: array
+          description: Vuelos de la reserva, en orden. Vacío solo en una cancelación.
+          items:
+            $ref: '#/components/schemas/SegmentoAerolinea'
+
+    SegmentoAerolinea:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          id,
+          marketing_carrier,
+          marketing_carrier_flight_number,
+          origin,
+          destination,
+          departing_at,
+          arriving_at,
+        ]
+      properties:
+        id:
+          type: string
+          example: seg_0001
+        marketing_carrier:
+          type: object
+          additionalProperties: false
+          required: [iata_code]
+          properties:
+            iata_code:
+              type: string
+              example: AN
+        marketing_carrier_flight_number:
+          type: string
+          example: '1234'
+        origin:
+          $ref: '#/components/schemas/AeropuertoAerolinea'
+        destination:
+          $ref: '#/components/schemas/AeropuertoAerolinea'
+        departing_at:
+          type: string
+          format: date-time
+          description: Con la diferencia horaria del aeropuerto (ISO 8601).
+        arriving_at:
+          type: string
+          format: date-time
+        seat:
+          type: string
+          example: 14C
+
+    AeropuertoAerolinea:
+      type: object
+      additionalProperties: false
+      required: [iata_code, city_name]
+      properties:
+        iata_code:
+          type: string
+          pattern: '^[A-Z]{3}$'
+          example: EZE
+        city_name:
+          type: string
+          example: Buenos Aires

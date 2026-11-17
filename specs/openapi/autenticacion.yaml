@@ -1,0 +1,505 @@
+# Contrato REST del Servicio de Autenticación (wiki: Iteración 5, táctica 1; ADR-014; Iteración 6,
+# enrutador global). Las rutas van sin el prefijo /api/autenticacion que agrega el gateway.
+openapi: 3.1.0
+info:
+  title: Trotamundos — Servicio de Autenticación
+  version: 0.1.0
+  description: >-
+    Valida las credenciales de los usuarios, guarda las contraseñas con hash y genera el JWT firmado
+    con RS256 (ADR-014). El JWT dura 15 minutos y se renueva con un token de renovación opaco,
+    guardado con hash y válido 7 días (docs/CONVENCIONES.md 4.4). Cada región tiene su propia
+    instancia y solo guarda las cuentas de sus usuarios (CONST-6): si un inicio de sesión llega a una
+    región que no tiene la cuenta, responde 307 con la región correcta (Iteración 6).
+
+servers:
+  - url: http://localhost:8000/api/autenticacion
+    description: Público, a través del enrutador global y el API Gateway.
+  - url: http://autenticacion:3001
+    description: Interno, dentro de la red de la región (sin gateway).
+
+security:
+  - bearerJWT: []
+
+tags:
+  - name: autenticacion
+    description: Registro, inicio y cierre de sesión, renovación del JWT y clave pública.
+  - name: interna
+    description: Rutas que solo usan otros servicios; no pasan por el gateway.
+  - name: salud
+    description: Estado del servicio para el monitor de salud (ADR-007).
+
+paths:
+  /registro:
+    post:
+      operationId: registrarCuenta
+      summary: Registrar una cuenta nueva
+      description: >-
+        Crea la cuenta en la región indicada en el cuerpo: guarda el email y el hash de la contraseña
+        y crea también la cuenta en el Servicio de Usuarios con una llamada interna (nombre, región e
+        idioma). El rol inicial es `usuario`. Si la región del cuerpo no es la de esta instancia,
+        responde 307 hacia la otra región para que la cuenta se guarde en su región (CONST-6).
+      tags: [autenticacion]
+      security: []
+      parameters:
+        - $ref: './comun.yaml#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SolicitudRegistro'
+            example:
+              email: ana@correo.example
+              contrasena: viajar-es-lindo-2026
+              nombre: Ana Pérez
+              region: region-1
+              idioma: es
+      responses:
+        '201':
+          description: Cuenta creada.
+          headers:
+            X-Request-Id:
+              $ref: './comun.yaml#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CuentaCreada'
+              example:
+                usuarioId: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+        '307':
+          $ref: '#/components/responses/OtraRegion'
+        '400':
+          $ref: './comun.yaml#/components/responses/SolicitudInvalida'
+        '409':
+          description: Ya existe una cuenta con ese email (en esta región o en la otra).
+          content:
+            application/problem+json:
+              schema:
+                $ref: './comun.yaml#/components/schemas/Problema'
+              example:
+                type: https://trotamundos.example/errores/conflicto
+                title: El email ya está registrado
+                status: 409
+                detail: Ya existe una cuenta con ese email.
+                requestId: 7f3c1e2a-9b4d-4c6e-8a1f-2d3e4f5a6b7c
+        '503':
+          $ref: './comun.yaml#/components/responses/NoDisponible'
+
+  /login:
+    post:
+      operationId: iniciarSesion
+      summary: Iniciar sesión
+      description: >-
+        Verifica el email y la contraseña y devuelve un JWT (15 minutos), un token de renovación (7
+        días) y la región de la cuenta, que la aplicación recuerda para los próximos inicios de sesión
+        (Iteración 6). Si la cuenta no está en esta región pero sí en la otra (consulta a
+        `GET /interna/cuentas/existe` de la otra región), responde 307 con la región correcta: pasa
+        cuando se inicia sesión desde un dispositivo nuevo, que todavía no conoce su región.
+      tags: [autenticacion]
+      security: []
+      parameters:
+        - $ref: './comun.yaml#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SolicitudLogin'
+            example:
+              email: ana@correo.example
+              contrasena: viajar-es-lindo-2026
+      responses:
+        '200':
+          description: Sesión iniciada.
+          headers:
+            X-Request-Id:
+              $ref: './comun.yaml#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Sesion'
+              example:
+                jwt: eyJhbGciOiJSUzI1NiIsImtpZCI6InIxLTIwMjYtMTEifQ.eyJzdWIiOiIzZmE4NWY2NC01NzE3LTQ1NjItYjNmYy0yYzk2M2Y2NmFmYTYiLCJyZWdpb24iOiJyZWdpb24tMSIsInJvbGVzIjpbInVzdWFyaW8iXSwiaWRpb21hIjoiZXMiLCJleHAiOjE3OTU2OTAzMDB9.c2lnbmF0dXJh
+                tokenRenovacion: Qm9yZGVyLXRva2VuLWRlLXJlbm92YWNpb24tZWplbXBsbw
+                region: region-1
+        '307':
+          $ref: '#/components/responses/OtraRegion'
+        '400':
+          $ref: './comun.yaml#/components/responses/SolicitudInvalida'
+        '401':
+          description: >-
+            El email o la contraseña son incorrectos, o la cuenta no existe en ninguna región. No se
+            indica cuál de los dos falló.
+          content:
+            application/problem+json:
+              schema:
+                $ref: './comun.yaml#/components/schemas/Problema'
+              example:
+                type: https://trotamundos.example/errores/credenciales-incorrectas
+                title: Credenciales incorrectas
+                status: 401
+                detail: El email o la contraseña no son correctos.
+                requestId: 7f3c1e2a-9b4d-4c6e-8a1f-2d3e4f5a6b7c
+        '503':
+          $ref: './comun.yaml#/components/responses/NoDisponible'
+
+  /renovar:
+    post:
+      operationId: renovarJwt
+      summary: Pedir un JWT nuevo con el token de renovación
+      description: >-
+        Devuelve un JWT nuevo sin volver a pedir la contraseña, mientras el token de renovación siga
+        vigente (7 días) y no se haya cerrado la sesión. Es pública porque el JWT anterior puede
+        estar vencido.
+      tags: [autenticacion]
+      security: []
+      parameters:
+        - $ref: './comun.yaml#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SolicitudRenovacion'
+            example:
+              tokenRenovacion: Qm9yZGVyLXRva2VuLWRlLXJlbm92YWNpb24tZWplbXBsbw
+      responses:
+        '200':
+          description: JWT nuevo.
+          headers:
+            X-Request-Id:
+              $ref: './comun.yaml#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JwtRenovado'
+              example:
+                jwt: eyJhbGciOiJSUzI1NiIsImtpZCI6InIxLTIwMjYtMTEifQ.eyJzdWIiOiIzZmE4NWY2NC01NzE3LTQ1NjItYjNmYy0yYzk2M2Y2NmFmYTYiLCJyZWdpb24iOiJyZWdpb24tMSIsInJvbGVzIjpbInVzdWFyaW8iXSwiaWRpb21hIjoiZXMiLCJleHAiOjE3OTU2OTEyMDB9.c2lnbmF0dXJh
+        '400':
+          $ref: './comun.yaml#/components/responses/SolicitudInvalida'
+        '401':
+          description: El token de renovación no existe, venció o ya se cerró la sesión.
+          content:
+            application/problem+json:
+              schema:
+                $ref: './comun.yaml#/components/schemas/Problema'
+              example:
+                type: https://trotamundos.example/errores/token-renovacion-invalido
+                title: Token de renovación inválido
+                status: 401
+                detail: El token de renovación venció. Hay que iniciar sesión de nuevo.
+                requestId: 7f3c1e2a-9b4d-4c6e-8a1f-2d3e4f5a6b7c
+        '503':
+          $ref: './comun.yaml#/components/responses/NoDisponible'
+
+  /logout:
+    post:
+      operationId: cerrarSesion
+      summary: Cerrar sesión
+      description: >-
+        Invalida el token de renovación indicado. El JWT vigente sigue sirviendo hasta que vence (como
+        máximo 15 minutos, ADR-014). Es idempotente: si el token ya estaba invalidado responde 204
+        igual. Si el token es de otro usuario (no coincide con el `sub` del JWT) responde 403.
+      tags: [autenticacion]
+      parameters:
+        - $ref: './comun.yaml#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SolicitudRenovacion'
+            example:
+              tokenRenovacion: Qm9yZGVyLXRva2VuLWRlLXJlbm92YWNpb24tZWplbXBsbw
+      responses:
+        '204':
+          description: Sesión cerrada; el token de renovación ya no sirve.
+          headers:
+            X-Request-Id:
+              $ref: './comun.yaml#/components/headers/XRequestId'
+        '400':
+          $ref: './comun.yaml#/components/responses/SolicitudInvalida'
+        '401':
+          $ref: './comun.yaml#/components/responses/NoAutenticado'
+        '403':
+          $ref: './comun.yaml#/components/responses/Prohibido'
+        '503':
+          $ref: './comun.yaml#/components/responses/NoDisponible'
+
+  /.well-known/jwks.json:
+    get:
+      operationId: obtenerClavesPublicas
+      summary: Obtener la clave pública para validar los JWT
+      description: >-
+        Publica las claves públicas RS256 en formato JWKS (RFC 7517). Los validadores de intercepción
+        del gateway y de cada servicio las descargan una vez (y de nuevo si aparece un `kid`
+        desconocido) y verifican los JWT sin usar la red en cada solicitud (ADR-014, QA-9).
+      tags: [autenticacion]
+      security: []
+      parameters:
+        - $ref: './comun.yaml#/components/parameters/XRequestId'
+      responses:
+        '200':
+          description: Claves públicas vigentes.
+          headers:
+            X-Request-Id:
+              $ref: './comun.yaml#/components/headers/XRequestId'
+            Cache-Control:
+              description: Cuánto tiempo pueden guardar las claves los validadores.
+              schema:
+                type: string
+              example: public, max-age=3600
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Jwks'
+              example:
+                keys:
+                  - kty: RSA
+                    use: sig
+                    alg: RS256
+                    kid: r1-2026-11
+                    n: u1SU1LfVLPHCozMxH2Mo4lgOEePzNm0tRgeLezV6ffAt0gunVTLw7onLRnrq0_IzW7yWR7QkrmBL7jTKEn5u-qKhbwKfBstIs-bMY2Zkp18gnTxKLxoS2tFczGkPLPgizskuemMghRniWaoLcyehkd3qqGElvW_VDL5AaWTg0nLVkjRo9z-40RQzuVaE8AkAFmxZzow3x-VJYKdjykkJ0iT9wCS0DRTXu269V264Vf_3jvredZiKRkgwlL9xNAwxXFg0x_XFw005UWVRIkdgcKWTjpBP2dPwVZ4WWC-9aGVd-Gyn1o0CLelf4rEjGoXbAAEgAqeGUxrcIlbjXfbcmw
+                    e: AQAB
+        '503':
+          $ref: './comun.yaml#/components/responses/NoDisponible'
+
+  /interna/cuentas/existe:
+    get:
+      operationId: existeCuenta
+      summary: Indicar si la cuenta existe en esta región
+      description: >-
+        La usa el Servicio de Autenticación de la otra región durante el inicio de sesión desde un
+        dispositivo nuevo y el registro, para saber si una cuenta está en esta región (Iteración 6).
+        Solo responde sí o no: no devuelve datos de la cuenta, así ningún dato personal sale de su
+        región (CONST-6). No tiene usuario autenticado: todavía no hay JWT.
+      tags: [interna]
+      security: []
+      servers:
+        - url: http://autenticacion:3001
+          description: Interno, dentro de la red de la región (sin gateway).
+      parameters:
+        - $ref: './comun.yaml#/components/parameters/XRequestId'
+        - name: email
+          in: query
+          required: true
+          description: Email de la cuenta que se busca.
+          schema:
+            $ref: '#/components/schemas/Email'
+          example: ana@correo.example
+      responses:
+        '200':
+          description: Resultado de la búsqueda en esta región.
+          headers:
+            X-Request-Id:
+              $ref: './comun.yaml#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExistenciaCuenta'
+              example:
+                existe: true
+                region: region-2
+        '400':
+          $ref: './comun.yaml#/components/responses/SolicitudInvalida'
+        '503':
+          $ref: './comun.yaml#/components/responses/NoDisponible'
+
+  /health:
+    get:
+      operationId: consultarSalud
+      summary: Consultar el estado del servicio
+      description: >-
+        Responde 200 si el servicio puede atender (base de datos conectada y claves de firma
+        cargadas) y 503 si no. Lo usa el monitor de salud (ADR-007).
+      tags: [salud]
+      security: []
+      parameters:
+        - $ref: './comun.yaml#/components/parameters/XRequestId'
+      responses:
+        '200':
+          $ref: './comun.yaml#/components/responses/Salud'
+        '503':
+          $ref: './comun.yaml#/components/responses/NoDisponible'
+
+components:
+  securitySchemes:
+    bearerJWT:
+      $ref: './comun.yaml#/components/securitySchemes/bearerJWT'
+
+  responses:
+    OtraRegion:
+      description: >-
+        La cuenta (o la región pedida en el registro) es de la otra región. `Location` apunta a la
+        misma ruta en la región correcta; el cliente repite la solicitud ahí con el mismo cuerpo y
+        recuerda la región para los próximos inicios de sesión (Iteración 6).
+      headers:
+        Location:
+          required: true
+          description: URL de la misma operación en la región correcta.
+          schema:
+            type: string
+            format: uri
+          example: http://localhost:8082/api/autenticacion/login
+        X-Request-Id:
+          $ref: './comun.yaml#/components/headers/XRequestId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/RedireccionRegion'
+          example:
+            region: region-2
+
+  schemas:
+    Email:
+      type: string
+      format: email
+      maxLength: 254
+      example: ana@correo.example
+
+    Contrasena:
+      type: string
+      description: Contraseña en texto plano; solo viaja por HTTPS y se guarda con hash (ADR-014).
+      minLength: 8
+      maxLength: 128
+      writeOnly: true
+      example: viajar-es-lindo-2026
+
+    Jwt:
+      type: string
+      description: >-
+        JWT firmado con RS256. Claims: sub (usuarioId), region, roles, idioma, exp (15 minutos).
+      pattern: '^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$'
+
+    TokenRenovacion:
+      type: string
+      description: Token opaco en base64url, válido 7 días. El servicio guarda solo su hash.
+      minLength: 32
+      maxLength: 128
+      pattern: '^[A-Za-z0-9_-]+$'
+
+    SolicitudRegistro:
+      type: object
+      additionalProperties: false
+      required: [email, contrasena, nombre, region, idioma]
+      properties:
+        email:
+          $ref: '#/components/schemas/Email'
+        contrasena:
+          $ref: '#/components/schemas/Contrasena'
+        nombre:
+          type: string
+          minLength: 1
+          maxLength: 100
+          example: Ana Pérez
+        region:
+          $ref: './comun.yaml#/components/schemas/Region'
+        idioma:
+          $ref: './comun.yaml#/components/schemas/Idioma'
+
+    CuentaCreada:
+      type: object
+      additionalProperties: false
+      required: [usuarioId]
+      properties:
+        usuarioId:
+          type: string
+          format: uuid
+          example: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+
+    SolicitudLogin:
+      type: object
+      additionalProperties: false
+      required: [email, contrasena]
+      properties:
+        email:
+          $ref: '#/components/schemas/Email'
+        contrasena:
+          $ref: '#/components/schemas/Contrasena'
+
+    Sesion:
+      type: object
+      additionalProperties: false
+      required: [jwt, tokenRenovacion, region]
+      properties:
+        jwt:
+          $ref: '#/components/schemas/Jwt'
+        tokenRenovacion:
+          $ref: '#/components/schemas/TokenRenovacion'
+        region:
+          $ref: './comun.yaml#/components/schemas/Region'
+
+    SolicitudRenovacion:
+      type: object
+      additionalProperties: false
+      required: [tokenRenovacion]
+      properties:
+        tokenRenovacion:
+          $ref: '#/components/schemas/TokenRenovacion'
+
+    JwtRenovado:
+      type: object
+      additionalProperties: false
+      required: [jwt]
+      properties:
+        jwt:
+          $ref: '#/components/schemas/Jwt'
+
+    RedireccionRegion:
+      type: object
+      additionalProperties: false
+      required: [region]
+      properties:
+        region:
+          $ref: './comun.yaml#/components/schemas/Region'
+
+    Jwks:
+      type: object
+      description: JSON Web Key Set (RFC 7517) con las claves públicas de firma.
+      additionalProperties: false
+      required: [keys]
+      properties:
+        keys:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/ClavePublica'
+
+    ClavePublica:
+      type: object
+      description: Clave pública RSA en formato JWK.
+      additionalProperties: false
+      required: [kty, use, alg, kid, n, e]
+      properties:
+        kty:
+          type: string
+          const: RSA
+        use:
+          type: string
+          const: sig
+        alg:
+          type: string
+          const: RS256
+        kid:
+          type: string
+          description: Identificador de la clave; viaja en el encabezado del JWT.
+          example: r1-2026-11
+        n:
+          type: string
+          description: Módulo RSA en base64url.
+        e:
+          type: string
+          description: Exponente RSA en base64url.
+          example: AQAB
+
+    ExistenciaCuenta:
+      type: object
+      additionalProperties: false
+      required: [existe, region]
+      properties:
+        existe:
+          type: boolean
+          example: true
+        region:
+          description: Región que responde (la de esta instancia).
+          $ref: './comun.yaml#/components/schemas/Region'

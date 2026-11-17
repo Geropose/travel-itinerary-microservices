@@ -1,0 +1,898 @@
+# Contrato REST del Servicio de Analítica (Iteración 6, ADR-016, ADR-017).
+# Componente "Consultas del equipo de datos": recibe las consultas a través del API Gateway con el
+# rol analista y las resuelve sobre la base de analítica, que solo guarda filas anonimizadas
+# (specs/schemas/ViajeAnonimizado.json). Las consultas pesadas se ejecutan con los procesadores
+# Map-Reduce. Ninguna respuesta lleva datos personales: solo campos de la fila anonimizada y agregados.
+openapi: 3.1.0
+info:
+  title: Trotamundos — Servicio de Analítica
+  version: 0.1.0
+  description: >-
+    Consultas del equipo de datos sobre el histórico anonimizado de los viajes de todas las regiones
+    (UC-7). La base de analítica se alimenta del evento ViajeActualizado a través del anonimizador
+    de cada región (Service Data Replication, ADR-016), así que los datos llegan con unos minutos de
+    atraso. Ninguna respuesta incluye usuarioId, viajeId, reservaId, numeroReserva, nombre ni correo:
+    solo los campos de la fila anonimizada (codigoReserva, region, proveedor, tipoReserva, origen,
+    destino, inicio, fin, estado, origenCambio) y agregados. Todas las rutas, salvo GET /health,
+    exigen un JWT con el rol analista (docs/CONVENCIONES.md 4.6).
+
+servers:
+  - url: http://localhost:8000/api/analitica
+    description: Público, a través del enrutador global y el API Gateway.
+  - url: http://analitica:3006
+    description: Interno, dentro de la red de la región.
+
+tags:
+  - name: consultas
+    description: >-
+      Consultas del equipo de datos que responden en el momento sobre la base de analítica
+      (destinos, cancelaciones y tendencias).
+  - name: ejecuciones
+    description: >-
+      Consultas pesadas que corren en segundo plano con los procesadores Map-Reduce (táctica 3 de la
+      Iteración 6). Se lanzan con POST y se sigue su estado con GET.
+  - name: salud
+    description: Estado del servicio para el monitor de salud (ADR-007).
+
+security:
+  - bearerJWT: []
+
+paths:
+  /health:
+    get:
+      operationId: obtenerSalud
+      summary: Estado del servicio
+      description: >-
+        Pública, sin JWT. Responde 200 si el servicio puede atender (base de analítica y broker
+        conectados) y 503 si no (docs/CONVENCIONES.md 4.3).
+      tags: [salud]
+      security: []
+      parameters:
+        - $ref: './comun.yaml#/components/parameters/XRequestId'
+      responses:
+        '200':
+          $ref: './comun.yaml#/components/responses/Salud'
+        '503':
+          $ref: './comun.yaml#/components/responses/NoDisponible'
+
+  /consultas/destinos:
+    get:
+      operationId: consultarDestinos
+      summary: Destinos más reservados
+      description: >-
+        Requiere un JWT con el rol analista; si no lo tiene, responde 403 (Prohibido). Cuenta las
+        reservas (por codigoReserva) cuyo inicio cae entre desde y hasta, ambos incluidos, y que no
+        están canceladas, agrupadas por destino y ordenadas de mayor a menor. Junta los datos de
+        todas las regiones.
+      tags: [consultas]
+      parameters:
+        - $ref: './comun.yaml#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/Desde'
+        - $ref: '#/components/parameters/Hasta'
+        - $ref: '#/components/parameters/Limite'
+      responses:
+        '200':
+          description: Destinos ordenados por cantidad de reservas.
+          headers:
+            X-Request-Id:
+              $ref: './comun.yaml#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResultadoDestinos'
+              examples:
+                destinos:
+                  $ref: '#/components/examples/ResultadoDestinos'
+        '400':
+          $ref: '#/components/responses/ParametrosInvalidos'
+        '401':
+          $ref: './comun.yaml#/components/responses/NoAutenticado'
+        '403':
+          $ref: './comun.yaml#/components/responses/Prohibido'
+        '503':
+          $ref: './comun.yaml#/components/responses/NoDisponible'
+
+  /consultas/cancelaciones:
+    get:
+      operationId: consultarCancelaciones
+      summary: Tasa de cancelación por proveedor o destino
+      description: >-
+        Requiere un JWT con el rol analista; si no lo tiene, responde 403 (Prohibido). Toma las
+        reservas (por codigoReserva) cuyo inicio cae entre desde y hasta, ambos incluidos, las agrupa
+        por proveedor o por destino y calcula qué parte quedó en estado cancelada. Junta los datos de
+        todas las regiones.
+      tags: [consultas]
+      parameters:
+        - $ref: './comun.yaml#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/Desde'
+        - $ref: '#/components/parameters/Hasta'
+        - name: agruparPor
+          in: query
+          required: true
+          description: Campo de la fila anonimizada por el que se agrupan las reservas.
+          schema:
+            $ref: '#/components/schemas/AgrupacionCancelaciones'
+          example: proveedor
+      responses:
+        '200':
+          description: Tasa de cancelación de cada grupo y del total.
+          headers:
+            X-Request-Id:
+              $ref: './comun.yaml#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResultadoCancelaciones'
+              examples:
+                cancelaciones:
+                  $ref: '#/components/examples/ResultadoCancelaciones'
+        '400':
+          $ref: '#/components/responses/ParametrosInvalidos'
+        '401':
+          $ref: './comun.yaml#/components/responses/NoAutenticado'
+        '403':
+          $ref: './comun.yaml#/components/responses/Prohibido'
+        '503':
+          $ref: './comun.yaml#/components/responses/NoDisponible'
+
+  /consultas/tendencias:
+    get:
+      operationId: consultarTendencias
+      summary: Reservas por mes
+      description: >-
+        Requiere un JWT con el rol analista; si no lo tiene, responde 403 (Prohibido). Cuenta las
+        reservas (por codigoReserva) cuyo inicio cae en cada mes del año pedido, con el detalle por
+        tipo de reserva y cuántas quedaron canceladas. Devuelve los 12 meses, aunque alguno tenga
+        cero reservas. Junta los datos de todas las regiones.
+      tags: [consultas]
+      parameters:
+        - $ref: './comun.yaml#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/Anio'
+        - name: agruparPor
+          in: query
+          required: false
+          description: Período por el que se agrupan las reservas. Por ahora solo mes.
+          schema:
+            $ref: '#/components/schemas/AgrupacionTendencias'
+          example: mes
+      responses:
+        '200':
+          description: Reservas de cada mes del año.
+          headers:
+            X-Request-Id:
+              $ref: './comun.yaml#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResultadoTendencias'
+              examples:
+                tendencias:
+                  $ref: '#/components/examples/ResultadoTendencias'
+        '400':
+          $ref: '#/components/responses/ParametrosInvalidos'
+        '401':
+          $ref: './comun.yaml#/components/responses/NoAutenticado'
+        '403':
+          $ref: './comun.yaml#/components/responses/Prohibido'
+        '503':
+          $ref: './comun.yaml#/components/responses/NoDisponible'
+
+  /consultas/{tipo}/ejecutar:
+    post:
+      operationId: ejecutarConsulta
+      summary: Lanzar una consulta pesada con Map-Reduce
+      description: >-
+        Requiere un JWT con el rol analista; si no lo tiene, responde 403 (Prohibido). Lanza la
+        consulta del tipo pedido en segundo plano: los procesadores Map-Reduce se encienden, recorren
+        bloques de la base de analítica en paralelo (map), juntan los resultados parciales (reduce) y
+        se apagan al terminar (Iteración 6, táctica 3). Responde enseguida con 202 y el idConsulta;
+        el estado y el resultado se piden a GET /consultas/ejecuciones/{idConsulta}. El cuerpo tiene
+        que ser el del tipo de la ruta (destinos, cancelaciones o tendencias); si no coincide,
+        responde 400. Si ya hay una ejecución en curso del mismo tipo con los mismos parámetros,
+        responde 409 y no lanza otra (los procesadores cuestan mientras corren).
+      tags: [ejecuciones]
+      parameters:
+        - $ref: './comun.yaml#/components/parameters/XRequestId'
+        - name: tipo
+          in: path
+          required: true
+          description: Tipo de consulta a ejecutar.
+          schema:
+            $ref: '#/components/schemas/TipoConsulta'
+          example: cancelaciones
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ParametrosConsulta'
+            examples:
+              destinos:
+                summary: Destinos más reservados de 2025
+                value:
+                  desde: '2025-01-01'
+                  hasta: '2025-12-31'
+                  limite: 20
+              cancelaciones:
+                summary: Cancelaciones por proveedor de tres años, con 50 procesadores
+                value:
+                  desde: '2023-01-01'
+                  hasta: '2025-12-31'
+                  agruparPor: proveedor
+                  procesadores: 50
+              tendencias:
+                summary: Reservas por mes de 2025
+                value:
+                  anio: 2025
+                  agruparPor: mes
+      responses:
+        '202':
+          description: La consulta quedó en cola; se sigue su estado con el idConsulta.
+          headers:
+            Location:
+              description: Ruta de la ejecución, para consultar su estado.
+              schema:
+                type: string
+              example: /api/analitica/consultas/ejecuciones/3b9e2f4a-1c7d-4e8b-9a6f-5d2c1b0e9f8a
+            X-Request-Id:
+              $ref: './comun.yaml#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsultaLanzada'
+              example:
+                idConsulta: 3b9e2f4a-1c7d-4e8b-9a6f-5d2c1b0e9f8a
+                tipo: cancelaciones
+                estado: pendiente
+                creadaEn: '2026-11-20T14:00:00Z'
+        '400':
+          $ref: '#/components/responses/ParametrosInvalidos'
+        '401':
+          $ref: './comun.yaml#/components/responses/NoAutenticado'
+        '403':
+          $ref: './comun.yaml#/components/responses/Prohibido'
+        '409':
+          description: >-
+            Ya hay una ejecución en curso del mismo tipo con los mismos parámetros (409). El detail
+            indica su idConsulta para seguirla.
+          content:
+            application/problem+json:
+              schema:
+                $ref: './comun.yaml#/components/schemas/Problema'
+              example:
+                type: https://trotamundos.example/errores/conflicto
+                title: Consulta ya en curso
+                status: 409
+                detail: Ya se está ejecutando la consulta 3b9e2f4a-1c7d-4e8b-9a6f-5d2c1b0e9f8a con los mismos parámetros.
+                requestId: 7f3c1e2a-9b4d-4c6e-8a1f-2d3e4f5a6b7c
+        '503':
+          $ref: './comun.yaml#/components/responses/NoDisponible'
+
+  /consultas/ejecuciones/{idConsulta}:
+    get:
+      operationId: obtenerEjecucion
+      summary: Estado y resultado de una consulta pesada
+      description: >-
+        Requiere un JWT con el rol analista; si no lo tiene, responde 403 (Prohibido). Devuelve el
+        estado de la ejecución, cuántos procesadores Map-Reduce usa, cuánto tardó y, cuando terminó,
+        el resultado (con el mismo formato que la consulta en el momento del mismo tipo). Si el
+        idConsulta no existe, responde 404.
+      tags: [ejecuciones]
+      parameters:
+        - $ref: './comun.yaml#/components/parameters/XRequestId'
+        - name: idConsulta
+          in: path
+          required: true
+          description: Identificador que devolvió POST /consultas/{tipo}/ejecutar.
+          schema:
+            type: string
+            format: uuid
+          example: 3b9e2f4a-1c7d-4e8b-9a6f-5d2c1b0e9f8a
+      responses:
+        '200':
+          description: Estado de la ejecución y, si terminó, su resultado.
+          headers:
+            X-Request-Id:
+              $ref: './comun.yaml#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ejecucion'
+              examples:
+                enCurso:
+                  summary: Ejecución en curso
+                  value:
+                    idConsulta: 3b9e2f4a-1c7d-4e8b-9a6f-5d2c1b0e9f8a
+                    tipo: cancelaciones
+                    parametros:
+                      desde: '2023-01-01'
+                      hasta: '2025-12-31'
+                      agruparPor: proveedor
+                      procesadores: 50
+                    estado: enCurso
+                    procesadores: 50
+                    progreso: 0.4
+                    creadaEn: '2026-11-20T14:00:00Z'
+                    iniciadaEn: '2026-11-20T14:00:05Z'
+                terminada:
+                  summary: Ejecución terminada con su resultado
+                  value:
+                    idConsulta: 3b9e2f4a-1c7d-4e8b-9a6f-5d2c1b0e9f8a
+                    tipo: cancelaciones
+                    parametros:
+                      desde: '2023-01-01'
+                      hasta: '2025-12-31'
+                      agruparPor: proveedor
+                      procesadores: 50
+                    estado: terminada
+                    procesadores: 50
+                    progreso: 1
+                    creadaEn: '2026-11-20T14:00:00Z'
+                    iniciadaEn: '2026-11-20T14:00:05Z'
+                    terminadaEn: '2026-11-20T14:03:41Z'
+                    duracionMs: 216000
+                    resultado:
+                      desde: '2023-01-01'
+                      hasta: '2025-12-31'
+                      agruparPor: proveedor
+                      total:
+                        reservas: 30000
+                        canceladas: 1800
+                        tasaCancelacion: 0.06
+                      grupos:
+                        - clave: rentadora-sur
+                          reservas: 6000
+                          canceladas: 540
+                          tasaCancelacion: 0.09
+                        - clave: aerolinea-andina
+                          reservas: 15000
+                          canceladas: 900
+                          tasaCancelacion: 0.06
+                        - clave: hotel-cordillera
+                          reservas: 9000
+                          canceladas: 360
+                          tasaCancelacion: 0.04
+                      generadoEn: '2026-11-20T14:03:41Z'
+                fallida:
+                  summary: Ejecución fallida
+                  value:
+                    idConsulta: 5a1d3c7e-2b4f-4d6a-8e9c-0f1a2b3c4d5e
+                    tipo: destinos
+                    parametros:
+                      desde: '2025-01-01'
+                      hasta: '2025-12-31'
+                    estado: fallida
+                    procesadores: 12
+                    progreso: 0.75
+                    creadaEn: '2026-11-20T15:00:00Z'
+                    iniciadaEn: '2026-11-20T15:00:04Z'
+                    terminadaEn: '2026-11-20T15:01:10Z'
+                    duracionMs: 66000
+                    error: Se perdió la conexión con la base de analítica.
+        '400':
+          $ref: '#/components/responses/ParametrosInvalidos'
+        '401':
+          $ref: './comun.yaml#/components/responses/NoAutenticado'
+        '403':
+          $ref: './comun.yaml#/components/responses/Prohibido'
+        '404':
+          $ref: './comun.yaml#/components/responses/NoEncontrado'
+        '503':
+          $ref: './comun.yaml#/components/responses/NoDisponible'
+
+components:
+  securitySchemes:
+    bearerJWT:
+      $ref: './comun.yaml#/components/securitySchemes/bearerJWT'
+
+  parameters:
+    Desde:
+      name: desde
+      in: query
+      required: true
+      description: Primer día del período, incluido. Se compara con el inicio de cada reserva.
+      schema:
+        type: string
+        format: date
+      example: '2025-01-01'
+    Hasta:
+      name: hasta
+      in: query
+      required: true
+      description: >-
+        Último día del período, incluido. Tiene que ser igual o posterior a desde; si no, responde
+        400.
+      schema:
+        type: string
+        format: date
+      example: '2025-12-31'
+    Limite:
+      name: limite
+      in: query
+      required: false
+      description: Cantidad máxima de destinos a devolver.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 10
+      example: 10
+    Anio:
+      name: anio
+      in: query
+      required: true
+      description: Año a analizar.
+      schema:
+        $ref: '#/components/schemas/Anio'
+      example: 2025
+
+  responses:
+    ParametrosInvalidos:
+      description: >-
+        Los parámetros o el cuerpo no cumplen el contrato (400): falta un parámetro, una fecha es
+        inválida, hasta es anterior a desde, o el cuerpo no corresponde al tipo de la ruta.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './comun.yaml#/components/schemas/Problema'
+          example:
+            type: https://trotamundos.example/errores/solicitud-invalida
+            title: Solicitud inválida
+            status: 400
+            requestId: 7f3c1e2a-9b4d-4c6e-8a1f-2d3e4f5a6b7c
+            errores:
+              - campo: hasta
+                mensaje: tiene que ser igual o posterior a desde
+
+  schemas:
+    Anio:
+      type: integer
+      minimum: 2000
+      maximum: 2100
+      example: 2025
+
+    Proporcion:
+      type: number
+      minimum: 0
+      maximum: 1
+      description: Valor entre 0 y 1.
+
+    TipoConsulta:
+      type: string
+      enum: [destinos, cancelaciones, tendencias]
+
+    AgrupacionCancelaciones:
+      type: string
+      enum: [proveedor, destino]
+
+    AgrupacionTendencias:
+      type: string
+      enum: [mes]
+      default: mes
+
+    Procesadores:
+      type: integer
+      minimum: 1
+      maximum: 50
+      description: >-
+        Cantidad de procesadores Map-Reduce a encender. Si no viene, el servicio la elige según el
+        tamaño del período. El máximo de 50 sale de QA-5 (Iteración 6).
+
+    EstadoEjecucion:
+      type: string
+      enum: [pendiente, enCurso, terminada, fallida]
+      description: >-
+        pendiente: en cola, los procesadores todavía no arrancaron. enCurso: los procesadores están
+        recorriendo los datos. terminada: hay resultado. fallida: no se pudo terminar (ver error).
+
+    ParametrosDestinos:
+      type: object
+      additionalProperties: false
+      required: [desde, hasta]
+      properties:
+        desde:
+          type: string
+          format: date
+        hasta:
+          type: string
+          format: date
+        limite:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 10
+        procesadores:
+          $ref: '#/components/schemas/Procesadores'
+
+    ParametrosCancelaciones:
+      type: object
+      additionalProperties: false
+      required: [desde, hasta, agruparPor]
+      properties:
+        desde:
+          type: string
+          format: date
+        hasta:
+          type: string
+          format: date
+        agruparPor:
+          $ref: '#/components/schemas/AgrupacionCancelaciones'
+        procesadores:
+          $ref: '#/components/schemas/Procesadores'
+
+    ParametrosTendencias:
+      type: object
+      additionalProperties: false
+      required: [anio]
+      properties:
+        anio:
+          $ref: '#/components/schemas/Anio'
+        agruparPor:
+          $ref: '#/components/schemas/AgrupacionTendencias'
+        procesadores:
+          $ref: '#/components/schemas/Procesadores'
+
+    ParametrosConsulta:
+      description: >-
+        Parámetros de una consulta pesada. Son los mismos que los de la consulta en el momento del
+        mismo tipo, más procesadores. El tipo de la ruta decide cuál de los tres corresponde.
+      oneOf:
+        - $ref: '#/components/schemas/ParametrosDestinos'
+        - $ref: '#/components/schemas/ParametrosCancelaciones'
+        - $ref: '#/components/schemas/ParametrosTendencias'
+
+    DestinoReservado:
+      type: object
+      additionalProperties: false
+      required: [destino, reservas, proporcion]
+      properties:
+        destino:
+          type: string
+          minLength: 1
+          description: Destino de la fila anonimizada.
+          example: SCL
+        reservas:
+          type: integer
+          minimum: 0
+          description: Reservas no canceladas con ese destino.
+          example: 1840
+        proporcion:
+          allOf:
+            - $ref: '#/components/schemas/Proporcion'
+          description: Parte del total de reservas del período que va a ese destino.
+          example: 0.184
+
+    ResultadoDestinos:
+      type: object
+      additionalProperties: false
+      required: [desde, hasta, totalReservas, destinos, generadoEn]
+      properties:
+        desde:
+          type: string
+          format: date
+        hasta:
+          type: string
+          format: date
+        totalReservas:
+          type: integer
+          minimum: 0
+          description: Reservas no canceladas de todo el período, de todos los destinos.
+        destinos:
+          type: array
+          description: Destinos ordenados de más a menos reservas, hasta el límite pedido.
+          items:
+            $ref: '#/components/schemas/DestinoReservado'
+        generadoEn:
+          type: string
+          format: date-time
+          description: Momento en que se calculó el resultado.
+
+    TasaCancelacion:
+      type: object
+      additionalProperties: false
+      required: [reservas, canceladas, tasaCancelacion]
+      properties:
+        reservas:
+          type: integer
+          minimum: 0
+          description: Reservas del grupo, canceladas o no.
+        canceladas:
+          type: integer
+          minimum: 0
+          description: Reservas del grupo en estado cancelada.
+        tasaCancelacion:
+          allOf:
+            - $ref: '#/components/schemas/Proporcion'
+          description: canceladas / reservas (0 si el grupo no tiene reservas).
+
+    GrupoCancelaciones:
+      type: object
+      additionalProperties: false
+      required: [clave, reservas, canceladas, tasaCancelacion]
+      properties:
+        clave:
+          type: string
+          minLength: 1
+          description: Valor del campo agrupado (un proveedor o un destino).
+          example: aerolinea-andina
+        reservas:
+          type: integer
+          minimum: 0
+        canceladas:
+          type: integer
+          minimum: 0
+        tasaCancelacion:
+          $ref: '#/components/schemas/Proporcion'
+
+    ResultadoCancelaciones:
+      type: object
+      additionalProperties: false
+      required: [desde, hasta, agruparPor, total, grupos, generadoEn]
+      properties:
+        desde:
+          type: string
+          format: date
+        hasta:
+          type: string
+          format: date
+        agruparPor:
+          $ref: '#/components/schemas/AgrupacionCancelaciones'
+        total:
+          $ref: '#/components/schemas/TasaCancelacion'
+        grupos:
+          type: array
+          description: Un elemento por proveedor o destino, ordenados de mayor a menor tasa.
+          items:
+            $ref: '#/components/schemas/GrupoCancelaciones'
+        generadoEn:
+          type: string
+          format: date-time
+
+    ReservasPorTipo:
+      type: object
+      additionalProperties: false
+      required: [vuelo, hotel, auto]
+      description: Reservas separadas por tipoReserva.
+      properties:
+        vuelo:
+          type: integer
+          minimum: 0
+        hotel:
+          type: integer
+          minimum: 0
+        auto:
+          type: integer
+          minimum: 0
+
+    TendenciaMes:
+      type: object
+      additionalProperties: false
+      required: [mes, reservas, canceladas, porTipoReserva]
+      properties:
+        mes:
+          type: integer
+          minimum: 1
+          maximum: 12
+        reservas:
+          type: integer
+          minimum: 0
+          description: Reservas cuyo inicio cae en el mes, canceladas o no.
+        canceladas:
+          type: integer
+          minimum: 0
+        porTipoReserva:
+          $ref: '#/components/schemas/ReservasPorTipo'
+
+    ResultadoTendencias:
+      type: object
+      additionalProperties: false
+      required: [anio, agruparPor, periodos, generadoEn]
+      properties:
+        anio:
+          $ref: '#/components/schemas/Anio'
+        agruparPor:
+          $ref: '#/components/schemas/AgrupacionTendencias'
+        periodos:
+          type: array
+          minItems: 12
+          maxItems: 12
+          description: Los 12 meses del año, de enero a diciembre.
+          items:
+            $ref: '#/components/schemas/TendenciaMes'
+        generadoEn:
+          type: string
+          format: date-time
+
+    ConsultaLanzada:
+      type: object
+      additionalProperties: false
+      required: [idConsulta, tipo, estado, creadaEn]
+      properties:
+        idConsulta:
+          type: string
+          format: uuid
+        tipo:
+          $ref: '#/components/schemas/TipoConsulta'
+        estado:
+          $ref: '#/components/schemas/EstadoEjecucion'
+        creadaEn:
+          type: string
+          format: date-time
+
+    Ejecucion:
+      type: object
+      description: >-
+        Estado de una consulta pesada. Según el estado vienen más campos: enCurso trae iniciadaEn;
+        terminada trae iniciadaEn, terminadaEn, duracionMs y resultado; fallida trae terminadaEn,
+        duracionMs y error.
+      additionalProperties: false
+      required: [idConsulta, tipo, parametros, estado, procesadores, progreso, creadaEn]
+      properties:
+        idConsulta:
+          type: string
+          format: uuid
+        tipo:
+          $ref: '#/components/schemas/TipoConsulta'
+        parametros:
+          $ref: '#/components/schemas/ParametrosConsulta'
+        estado:
+          $ref: '#/components/schemas/EstadoEjecucion'
+        procesadores:
+          type: integer
+          minimum: 0
+          maximum: 50
+          description: >-
+            Procesadores Map-Reduce asignados a la ejecución (0 mientras está pendiente). Al terminar,
+            los que se usaron.
+        progreso:
+          allOf:
+            - $ref: '#/components/schemas/Proporcion'
+          description: Parte de los bloques de datos ya procesados.
+        creadaEn:
+          type: string
+          format: date-time
+        iniciadaEn:
+          type: string
+          format: date-time
+          description: Cuándo arrancaron los procesadores. No viene mientras está pendiente.
+        terminadaEn:
+          type: string
+          format: date-time
+          description: Solo cuando está terminada o fallida.
+        duracionMs:
+          type: integer
+          minimum: 0
+          description: >-
+            Milisegundos entre iniciadaEn y terminadaEn. Solo cuando está terminada o fallida.
+        resultado:
+          description: >-
+            Solo cuando está terminada. Mismo formato que la consulta en el momento del mismo tipo.
+          oneOf:
+            - $ref: '#/components/schemas/ResultadoDestinos'
+            - $ref: '#/components/schemas/ResultadoCancelaciones'
+            - $ref: '#/components/schemas/ResultadoTendencias'
+        error:
+          type: string
+          description: Motivo del fallo. Solo cuando está fallida.
+
+  examples:
+    ResultadoDestinos:
+      summary: Destinos más reservados de 2025
+      value:
+        desde: '2025-01-01'
+        hasta: '2025-12-31'
+        totalReservas: 10000
+        destinos:
+          - destino: SCL
+            reservas: 1840
+            proporcion: 0.184
+          - destino: MAD
+            reservas: 1210
+            proporcion: 0.121
+          - destino: Bariloche
+            reservas: 950
+            proporcion: 0.095
+        generadoEn: '2026-11-20T14:00:02Z'
+    ResultadoCancelaciones:
+      summary: Tasa de cancelación por proveedor
+      value:
+        desde: '2023-01-01'
+        hasta: '2025-12-31'
+        agruparPor: proveedor
+        total:
+          reservas: 30000
+          canceladas: 1800
+          tasaCancelacion: 0.06
+        grupos:
+          - clave: rentadora-sur
+            reservas: 6000
+            canceladas: 540
+            tasaCancelacion: 0.09
+          - clave: aerolinea-andina
+            reservas: 15000
+            canceladas: 900
+            tasaCancelacion: 0.06
+          - clave: hotel-cordillera
+            reservas: 9000
+            canceladas: 360
+            tasaCancelacion: 0.04
+        generadoEn: '2026-11-20T14:03:41Z'
+    ResultadoTendencias:
+      summary: Reservas por mes de 2025
+      value:
+        anio: 2025
+        agruparPor: mes
+        periodos:
+          - {
+              mes: 1,
+              reservas: 1200,
+              canceladas: 70,
+              porTipoReserva: { vuelo: 600, hotel: 400, auto: 200 },
+            }
+          - {
+              mes: 2,
+              reservas: 1100,
+              canceladas: 60,
+              porTipoReserva: { vuelo: 550, hotel: 370, auto: 180 },
+            }
+          - {
+              mes: 3,
+              reservas: 800,
+              canceladas: 45,
+              porTipoReserva: { vuelo: 400, hotel: 270, auto: 130 },
+            }
+          - {
+              mes: 4,
+              reservas: 700,
+              canceladas: 40,
+              porTipoReserva: { vuelo: 350, hotel: 230, auto: 120 },
+            }
+          - {
+              mes: 5,
+              reservas: 600,
+              canceladas: 35,
+              porTipoReserva: { vuelo: 300, hotel: 200, auto: 100 },
+            }
+          - {
+              mes: 6,
+              reservas: 650,
+              canceladas: 38,
+              porTipoReserva: { vuelo: 330, hotel: 210, auto: 110 },
+            }
+          - {
+              mes: 7,
+              reservas: 1000,
+              canceladas: 55,
+              porTipoReserva: { vuelo: 500, hotel: 330, auto: 170 },
+            }
+          - {
+              mes: 8,
+              reservas: 750,
+              canceladas: 42,
+              porTipoReserva: { vuelo: 380, hotel: 250, auto: 120 },
+            }
+          - {
+              mes: 9,
+              reservas: 600,
+              canceladas: 33,
+              porTipoReserva: { vuelo: 300, hotel: 200, auto: 100 },
+            }
+          - {
+              mes: 10,
+              reservas: 650,
+              canceladas: 36,
+              porTipoReserva: { vuelo: 320, hotel: 220, auto: 110 },
+            }
+          - {
+              mes: 11,
+              reservas: 700,
+              canceladas: 40,
+              porTipoReserva: { vuelo: 350, hotel: 230, auto: 120 },
+            }
+          - {
+              mes: 12,
+              reservas: 1250,
+              canceladas: 75,
+              porTipoReserva: { vuelo: 620, hotel: 420, auto: 210 },
+            }
+        generadoEn: '2026-11-20T14:00:02Z'

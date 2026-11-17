@@ -1,0 +1,98 @@
+# Contrato REST del API Gateway (docs/CONVENCIONES.md 4.2 y 4.3; wiki: Iteracion-1, Iteracion-5, ADR-005).
+# El gateway no tiene negocio propio: solo documenta GET /health. Las rutas que enruta las documenta
+# cada servicio en su propio specs/openapi/<servicio>.yaml.
+openapi: 3.1.0
+info:
+  title: Trotamundos — API Gateway
+  version: 0.1.0
+  description: |
+    Único punto de entrada a los microservicios de cada región (Iteración 1, CRN-1). Recibe las
+    solicitudes que le pasa el balanceador (nginx) de su región, que a su vez las recibe del enrutador
+    global, y las envía al servicio interno que corresponde según el prefijo. No tiene negocio propio:
+    la única ruta propia es `GET /health`. Las rutas de cada servicio están en su propio contrato
+    (`specs/openapi/<servicio>.yaml`), escritas **sin** el prefijo `/api/<servicio>`.
+
+    ## Tabla de enrutamiento
+
+    El gateway quita el prefijo y envía el resto de la ruta al servicio de su misma región
+    (por ejemplo, `GET /api/usuarios/perfil` llega a `GET http://usuarios:3002/perfil`).
+
+    | Prefijo público | Servicio interno | Contrato |
+    |---|---|---|
+    | `/api/autenticacion/*` | `http://autenticacion:3001` | `autenticacion.yaml` |
+    | `/api/usuarios/*` | `http://usuarios:3002` | `usuarios.yaml` |
+    | `/api/correo/*` | `http://correo:3003` | `correo.yaml` |
+    | `/api/viajes/*` | `http://viajes:3004` | `viajes.yaml` |
+    | `/api/integraciones/*` | `http://integraciones:3005` | `integraciones.yaml` |
+    | `/api/analitica/*` | `http://analitica:3006` | `analitica.yaml` |
+    | `/api/asistente/*` | `http://asistente:3007` | `asistente.yaml` |
+
+    - Las rutas `/interna/...` de cada servicio (tag `interna` en su contrato) **no** se exponen: son
+      solo para llamadas entre servicios. Si alguien pide `/api/<servicio>/interna/...` desde afuera, el
+      gateway responde `404` (problem+json) y registra el intento en el registro de accesos.
+    - Un prefijo que no está en la tabla responde `404` (problem+json).
+    - Si el servicio interno no responde dentro del tiempo máximo (2 s por defecto, configurable por
+      entorno), el gateway responde `503` (problem+json).
+    - El gateway propaga el header `Authorization` tal como llegó: cada servicio vuelve a validar el JWT
+      (defensa en profundidad, ADR-005 e Iteración 5).
+
+    ## Validador de Intercepción (ADR-005, ADR-014)
+
+    Antes de enrutar, el gateway aplica a cada solicitud el Validador de Intercepción de
+    `packages/comun`, el mismo que usa cada microservicio:
+
+    1. **X-Request-Id:** si la solicitud no lo trae, lo crea (UUID). Lo propaga al servicio interno, lo
+       devuelve en la respuesta y lo usa en todas las líneas de log.
+    2. **Rutas públicas:** las operaciones con `security: []` en el contrato de su servicio (por ejemplo
+       registro, login, renovación y JWKS de Autenticación, el callback OAuth y los avisos push de
+       Correo, y los webhooks de proveedores de Integraciones) se enrutan sin validar el JWT.
+    3. **JWT sin red:** verifica la firma RS256 con la clave pública de
+       `GET /api/autenticacion/.well-known/jwks.json`, descargada una vez y renovada periódicamente, sin
+       llamar a la red en cada solicitud (~1 ms). Si falta, la firma es inválida o venció (`exp`, 15 min):
+       `401`.
+    4. **Región:** el claim `region` tiene que ser la región del gateway (CONST-6). Si no: `403`.
+    5. **Rol y permisos:** el rol `analista` solo accede a `/api/analitica/*`, y las rutas de
+       `/api/analitica/*` requieren el rol `analista`; el rol `usuario` accede solo a sus propios datos.
+       Para un itinerario compartido, consulta el permiso en el Servicio de Usuarios
+       (`GET /interna/permisos/itinerarios/{viajeId}?usuarioId=`, ~20 ms, tiempo máximo 2 s); si
+       Usuarios no responde, deniega (no se permite el acceso por defecto). Sin permiso: `403`.
+    6. **Registro de rechazos (QA-8, QA-9):** toda solicitud rechazada (`401`, `403` o `404` de una ruta
+       interna) se guarda en el registro de accesos (tabla `accesos_rechazados`: fecha, servicio, ruta,
+       usuarioId, motivo, ip, requestId) de forma asíncrona, sin hacer esperar la respuesta, en menos
+       de 1 s. Un error al registrar no cambia la respuesta.
+
+    Todos los errores del gateway usan `application/problem+json` (RFC 7807) con el esquema `Problema`
+    de `comun.yaml`. El costo de validar en el gateway y en cada servicio es de unos 25 ms por solicitud,
+    por debajo del tope de 200 ms de QA-9.
+servers:
+  - url: http://localhost:8000
+    description: Enrutador global (punto de entrada de la web), que pasa por el nginx y el gateway de la región.
+  - url: http://gateway:3000
+    description: Gateway dentro de la red de la región (lo usan el nginx y el monitor de salud).
+tags:
+  - name: salud
+    description: Estado del servicio para el monitor de salud (ADR-007).
+paths:
+  /health:
+    get:
+      tags: [salud]
+      operationId: obtenerSalud
+      summary: Estado del gateway
+      description: >-
+        Responde 200 si el gateway puede atender (tiene cargada la clave pública del JWKS y la base del
+        registro de accesos conectada), y 503 si no. La usan el monitor de salud (ping cada 5 s, ADR-007)
+        y el balanceador para dejar de enviar solicitudes a una instancia caída. Es pública.
+      security: []
+      parameters:
+        - $ref: './comun.yaml#/components/parameters/XRequestId'
+      responses:
+        '200':
+          $ref: './comun.yaml#/components/responses/Salud'
+        '503':
+          $ref: './comun.yaml#/components/responses/NoDisponible'
+components:
+  securitySchemes:
+    bearerJWT:
+      $ref: './comun.yaml#/components/securitySchemes/bearerJWT'
+security:
+  - bearerJWT: []
