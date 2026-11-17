@@ -1,0 +1,39 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Sobre",
+  "description": "Sobre común de todos los eventos que viajan por el exchange trotamundos.eventos (docs/CONVENCIONES.md 4.5, ADR-002). El contenido propio de cada evento va en 'datos' y se valida con el esquema del evento.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["eventId", "tipo", "version", "ocurridoEn", "region", "datos"],
+  "properties": {
+    "eventId": {
+      "description": "Identificador único del evento. Los consumidores lo guardan en 'eventos_procesados' para ignorar los repetidos.",
+      "type": "string",
+      "format": "uuid"
+    },
+    "tipo": {
+      "description": "Nombre del evento. También es la routing key en el exchange.",
+      "type": "string",
+      "enum": ["ReservaDetectada", "ReservaActualizada", "FiltrosActualizados", "ViajeActualizado"]
+    },
+    "version": {
+      "description": "Versión del esquema de 'datos'. Empieza en 1 y sube solo con cambios incompatibles.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "ocurridoEn": {
+      "description": "Momento en que ocurrió el cambio que originó el evento (UTC, RFC 3339).",
+      "type": "string",
+      "format": "date-time"
+    },
+    "region": {
+      "description": "Región del usuario al que pertenecen los datos (CONST-6, ADR-017).",
+      "type": "string",
+      "enum": ["region-1", "region-2"]
+    },
+    "datos": {
+      "description": "Contenido propio del evento; su forma la define el esquema de cada evento.",
+      "type": "object"
+    }
+  }
+}

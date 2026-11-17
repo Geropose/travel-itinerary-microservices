@@ -1,0 +1,18 @@
+{
+  "eventId": "9a7b5c3d-1e2f-4a6b-8c0d-2e4f6a8b0c1d",
+  "tipo": "ReservaDetectada",
+  "version": 1,
+  "ocurridoEn": "2026-11-20T13:45:00Z",
+  "region": "region-1",
+  "datos": {
+    "usuarioId": "6b1e7c2a-4f3d-4e8b-9c0a-1d2e3f4a5b6c",
+    "proveedor": "aerolinea-andina",
+    "tipoReserva": "vuelo",
+    "numeroReserva": "XKQ7PL",
+    "inicio": "2026-12-10T08:30:00-03:00",
+    "fin": "2026-12-10T10:40:00-03:00",
+    "destino": "SCL",
+    "detalle": {},
+    "correoId": "18c4f2a9d7e3b001"
+  }
+}

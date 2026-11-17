@@ -1,0 +1,28 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "FiltrosActualizados",
+  "description": "Campo 'datos' del evento FiltrosActualizados, versión 1. Lo publica el componente de filtros y whitelist del Servicio de Usuarios cada vez que el usuario cambia su whitelist; lo consume el filtro de remitentes del Servicio de Correo (Iteración 5, UC-2). Lleva la lista completa, no la diferencia: el consumidor reemplaza la que tenía.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["usuarioId", "remitentesPermitidos", "filtrosActivos"],
+  "properties": {
+    "usuarioId": {
+      "description": "Usuario dueño de la whitelist.",
+      "type": "string",
+      "format": "uuid"
+    },
+    "remitentesPermitidos": {
+      "description": "Remitentes seguros: una dirección completa (reservas@aerolinea.com) o un dominio entero (@aerolinea.com).",
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[^@\\s]*@[^@\\s]+\\.[^@\\s]+$"
+      }
+    },
+    "filtrosActivos": {
+      "description": "Si es true, el Servicio de Correo solo procesa los correos de remitentes permitidos; si es false, procesa todos.",
+      "type": "boolean"
+    }
+  }
+}

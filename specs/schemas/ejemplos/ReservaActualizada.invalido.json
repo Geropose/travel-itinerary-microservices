@@ -1,0 +1,14 @@
+{
+  "eventId": "d3e5f7a9-1b2c-4d4e-8f6a-8b0c2d4e6f8a",
+  "tipo": "ReservaActualizada",
+  "version": 1,
+  "ocurridoEn": "2026-11-28T09:12:30Z",
+  "region": "region-1",
+  "datos": {
+    "proveedor": "aerolinea-andina",
+    "numeroReserva": "XKQ7PL",
+    "estado": "cancelada",
+    "cambios": {},
+    "origenCambio": "manual"
+  }
+}

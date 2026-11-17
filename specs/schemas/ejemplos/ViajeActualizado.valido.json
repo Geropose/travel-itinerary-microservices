@@ -1,0 +1,21 @@
+{
+  "eventId": "a6b8c0d2-4e5f-4a7b-9c9d-1e3f5a7b9c1d",
+  "tipo": "ViajeActualizado",
+  "version": 1,
+  "ocurridoEn": "2026-11-28T09:12:31Z",
+  "region": "region-1",
+  "datos": {
+    "usuarioId": "6b1e7c2a-4f3d-4e8b-9c0a-1d2e3f4a5b6c",
+    "viajeId": "b7c9d1e3-5f6a-4b8c-8d0e-2f4a6b8c0d2e",
+    "reservaId": "c8d0e2f4-6a7b-4c9d-9e1f-3a5b7c9d1e3f",
+    "numeroReserva": "XKQ7PL",
+    "proveedor": "aerolinea-andina",
+    "tipoReserva": "vuelo",
+    "origen": "EZE",
+    "destino": "SCL",
+    "inicio": "2026-12-10T11:15:00-03:00",
+    "fin": "2026-12-10T13:25:00-03:00",
+    "estado": "modificada",
+    "origenCambio": "proveedor"
+  }
+}
