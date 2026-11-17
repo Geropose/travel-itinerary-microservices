@@ -14,7 +14,9 @@ info:
     minutos (eso no es una ruta). Cada cambio traducido se publica como el evento `ReservaActualizada`
     (specs/schemas/ReservaActualizada.json) con el outbox. Las rutas `/interna/...` solo se usan
     entre servicios (Asistente Virtual y Viajes), no pasan por el gateway y reciben el JWT del usuario
-    propagado (ADR-019). Si un tercero no responde dentro del tiempo máximo (2 s por defecto,
+    propagado (ADR-019), salvo `/interna/no-traducidos`, que no tiene usuario y pide el token de
+    servicio. La web usa `POST /agencias/casos` para contactar a la agencia sin pasar por el
+    asistente. Si un tercero no responde dentro del tiempo máximo (2 s por defecto,
     CONVENCIONES 4.3) o responde `503`, la ruta responde `503`, así quien llama puede degradar de
     forma controlada (ADR-019).
 
@@ -32,6 +34,8 @@ tags:
     description: Estado del servicio para el monitor de salud (ADR-007).
   - name: webhooks
     description: Avisos de los proveedores que informan sus cambios (Iteración 3, UC-3, QA-1).
+  - name: agencias
+    description: El usuario contacta a su agencia desde la web (UC-6).
   - name: interna
     description: >-
       Rutas entre servicios. No pasan por el gateway; se publican solo en el servidor interno.
@@ -62,7 +66,9 @@ paths:
       description: >-
         La llama el proveedor que avisa sus cambios (en el prototipo, solo `aerolinea-andina`;
         formato en specs/externos/aerolinea.md, inspirado en los webhooks de Duffel). Es pública:
-        no lleva JWT, se autentica con la firma HMAC.
+        no lleva JWT, se autentica con la firma HMAC. El proveedor no sabe la región del usuario: el
+        enrutador global manda el aviso a las dos regiones (gateway.yaml). Cada región lo traduce y
+        publica ReservaActualizada en su broker; el Viajes que no tiene la reserva lo ignora.
 
 
         **Verificación de la firma.** La cabecera `X-Webhook-Signature` tiene la forma
@@ -410,6 +416,63 @@ paths:
         '503':
           $ref: '#/components/responses/TerceroNoDisponible'
 
+  /agencias/casos:
+    post:
+      operationId: contactarAgencia
+      summary: Contactar a la agencia desde la web
+      description: >-
+        La usa el botón "Contactar a mi agencia" de la web (UC-6), sin pasar por el asistente, con el
+        JWT del usuario. Hace lo mismo que la ruta interna `POST /interna/agencias/casos`: el
+        adaptador de la agencia crea el caso con el resumen que escribió el usuario y la conversación
+        vacía. La agencia es la preferida del perfil del usuario y el contacto (nombre y email) lo
+        pide Integraciones al Servicio de Usuarios (GET /perfil, con el JWT propagado, ADR-019). Si
+        el usuario no tiene agencia preferida, 409. Si la agencia no responde a tiempo o responde
+        `503`, 503.
+      tags: [agencias]
+      parameters:
+        - $ref: './comun.yaml#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SolicitudContactoAgencia'
+            example:
+              resumen: Necesito cambiar la fecha de vuelta del viaje a Santiago.
+      responses:
+        '201':
+          description: La agencia creó el caso.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CasoCreado'
+              example:
+                agencia: viajes-del-plata
+                numeroCaso: '35437'
+                creadoEn: '2026-11-28T10:02:40Z'
+        '400':
+          $ref: './comun.yaml#/components/responses/SolicitudInvalida'
+        '401':
+          $ref: './comun.yaml#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SoloUsuarios'
+        '409':
+          description: El usuario no eligió una agencia preferida en su perfil.
+          content:
+            application/problem+json:
+              schema:
+                $ref: './comun.yaml#/components/schemas/Problema'
+              example:
+                type: https://trotamundos.example/errores/conflicto
+                title: Sin agencia preferida
+                status: 409
+                detail: Elegí una agencia en tu perfil para poder contactarla.
+                requestId: 7f3c1e2a-9b4d-4c6e-8a1f-2d3e4f5a6b7c
+        '502':
+          $ref: '#/components/responses/ErrorTercero'
+        '503':
+          $ref: '#/components/responses/TerceroNoDisponible'
+
   /interna/agencias/casos:
     post:
       operationId: crearCasoAgencia
@@ -419,7 +482,8 @@ paths:
         JWT del usuario. El adaptador de la agencia crea el caso (en el mock,
         `POST /api/v2/tickets`, inspirado en Zendesk; ver specs/externos/agencia.md): `resumen` va
         al asunto y al comienzo del texto, y `conversacion` sigue debajo, una línea por mensaje.
-        `usuarioId` tiene que ser el `sub` del JWT. Si la agencia no responde a tiempo o responde
+        `usuarioId` tiene que ser el `sub` del JWT. El asistente pide antes el perfil al Servicio de
+        Usuarios y manda el nombre y el email en `contacto`. Si la agencia no responde a tiempo o responde
         `503`, se responde `503` y el asistente avisa al usuario.
       tags: [interna]
       servers:
@@ -436,6 +500,9 @@ paths:
             example:
               agencia: viajes-del-plata
               usuarioId: 6b1e7c2a-4f3d-4e8b-9c0a-1d2e3f4a5b6c
+              contacto:
+                nombre: Ana García
+                email: ana.garcia@gmail.com
               resumen: >-
                 La aerolínea canceló el vuelo AN 1234 del 10/12 (reserva XKQ7PL, Aerolínea Andina).
                 No hay opciones de reprogramación disponibles y el usuario pidió hablar con una
@@ -507,7 +574,9 @@ paths:
         por reserva, recortado a 500 caracteres) en el idioma del claim `idioma` del JWT y lo
         publica (en el mock, `POST /api/v1/statuses`, inspirado en Mastodon; ver
         specs/externos/redsocial.md) con una `Idempotency-Key` propia por pedido. El itinerario no
-        lleva números de reserva.
+        lleva números de reserva. Simplificación del prototipo: se publica siempre con una única
+        cuenta de Trotamundos (un token por entorno), no con la cuenta de cada usuario; en un sistema
+        real cada usuario conectaría su cuenta con OAuth, como el correo (ADR-015).
       tags: [interna]
       servers:
         - url: http://integraciones:3005
@@ -847,6 +916,23 @@ components:
           minLength: 1
           maxLength: 2000
           description: Resumen del problema que arma el asistente.
+        contacto:
+          type: object
+          additionalProperties: false
+          required: [nombre, email]
+          description: >-
+            Nombre y email del usuario, para que la agencia lo pueda contactar (en el mock van a
+            `ticket.requester`). Los manda quien llama, que los pide al Servicio de Usuarios
+            (GET /perfil con el JWT del usuario). Es opcional: sin contacto la agencia solo recibe el
+            resumen y la conversación.
+          properties:
+            nombre:
+              type: string
+              minLength: 1
+              maxLength: 200
+            email:
+              type: string
+              format: email
         conversacion:
           type: array
           description: >-
@@ -855,6 +941,17 @@ components:
           maxItems: 200
           items:
             $ref: '#/components/schemas/MensajeConversacion'
+
+    SolicitudContactoAgencia:
+      type: object
+      additionalProperties: false
+      required: [resumen]
+      properties:
+        resumen:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: Lo que el usuario le quiere decir a la agencia.
 
     MensajeConversacion:
       type: object

@@ -31,14 +31,18 @@ por entorno (por ejemplo `GMAIL_URL=http://localhost:4001`) y nunca tiene el hos
 |---|---|---|
 | `https://accounts.google.com` | Pantalla de permiso | `GET /o/oauth2/v2/auth` |
 | `https://oauth2.googleapis.com` | Canje y renovación de tokens | `POST /token` |
-| `https://gmail.googleapis.com` | Gmail API | `GET /gmail/v1/users/{userId}/messages`, `GET /gmail/v1/users/{userId}/messages/{id}`, `GET /gmail/v1/users/{userId}/history`, `POST /gmail/v1/users/{userId}/watch` |
+| `https://gmail.googleapis.com` | Gmail API | `GET /gmail/v1/users/{userId}/profile`, `GET /gmail/v1/users/{userId}/messages`, `GET /gmail/v1/users/{userId}/messages/{id}`, `GET /gmail/v1/users/{userId}/history`, `POST /gmail/v1/users/{userId}/watch` |
 
 `{userId}` es la dirección de correo o el valor especial `me` (el dueño del token). El adaptador siempre usa
 `me`.
 
 ## 1. OAuth 2.0 (authorization code)
 
-Scope único: `https://www.googleapis.com/auth/gmail.readonly` (solo lectura, ADR-015).
+Scope único: `https://www.googleapis.com/auth/gmail.readonly` (solo lectura, ADR-015). Alcanza también
+para leer el perfil del buzón (1.6).
+
+El `redirect_uri` lleva el prefijo de región del enrutador global (`/region-1/...` o `/region-2/...`,
+`specs/openapi/gateway.yaml`): cada región registra el suyo, así la vuelta llega a la región del usuario.
 
 ### 1.1 Pedido de permiso
 
@@ -47,7 +51,7 @@ El Servicio de Correo redirige al usuario a:
 ```
 GET /o/oauth2/v2/auth?
   client_id=trotamundos-local.apps.googleusercontent.com
-  &redirect_uri=http%3A%2F%2Flocalhost%3A8000%2Fapi%2Fcorreo%2Foauth%2Fcallback
+  &redirect_uri=http%3A%2F%2Flocalhost%3A8000%2Fregion-1%2Fapi%2Fcorreo%2Foauth%2Fcallback
   &response_type=code
   &scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fgmail.readonly
   &access_type=offline
@@ -71,7 +75,7 @@ Si el usuario rechaza: `GET {redirect_uri}?error=access_denied&state=<el mismo s
 POST /token
 Content-Type: application/x-www-form-urlencoded
 
-code=4/P7q7W91a-oMsCeLvIaQm6bTrgtp7&client_id=trotamundos-local.apps.googleusercontent.com&client_secret=<secreto>&redirect_uri=http%3A%2F%2Flocalhost%3A8000%2Fapi%2Fcorreo%2Foauth%2Fcallback&grant_type=authorization_code
+code=4/P7q7W91a-oMsCeLvIaQm6bTrgtp7&client_id=trotamundos-local.apps.googleusercontent.com&client_secret=<secreto>&redirect_uri=http%3A%2F%2Flocalhost%3A8000%2Fregion-1%2Fapi%2Fcorreo%2Foauth%2Fcallback&grant_type=authorization_code
 ```
 
 Respuesta `200`:
@@ -143,6 +147,29 @@ inválido o no tiene el scope pedido, Gmail responde `401`:
   }
 }
 ```
+
+### 1.6 Dirección de la cuenta conectada (`users.getProfile`)
+
+Después del canje, el adaptador pide el perfil para saber qué dirección se conectó (la guarda en la cuenta
+de correo y la usa para buscar la cuenta cuando llega un aviso push, que trae `emailAddress`):
+
+```
+GET /gmail/v1/users/me/profile
+Authorization: Bearer <access_token>
+```
+
+Respuesta `200`:
+
+```json
+{
+  "emailAddress": "ana@gmail.example",
+  "messagesTotal": 1824,
+  "threadsTotal": 1530,
+  "historyId": "984213"
+}
+```
+
+El adaptador solo usa `emailAddress`.
 
 ## 2. `users.messages.list`
 

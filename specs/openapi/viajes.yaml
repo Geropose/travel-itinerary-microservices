@@ -122,9 +122,11 @@ paths:
       summary: Detalle de un viaje
       description: >-
         Devuelve un viaje con sus reservas. Lo puede ver el dueño o una persona designada por el
-        dueño (itinerario compartido). Si quien pide no es el dueño, el Servicio de Viajes consulta
-        los permisos de itinerarios del Servicio de Usuarios aunque el gateway ya lo haya hecho
-        (defensa en profundidad, ADR-005); la cache nunca reemplaza esa verificación. Si el Servicio
+        dueño (itinerario compartido). Viajes primero mira si quien pide es el dueño con sus propios
+        datos; si no lo es, consulta los permisos de itinerarios del Servicio de Usuarios
+        (GET /interna/permisos/itinerarios/{viajeId}, ADR-005). El gateway no puede hacer esta
+        verificación porque no sabe de quién es cada viaje. La cache nunca reemplaza esa
+        verificación. Si el Servicio
         de Usuarios no responde, se deniega con 503: nunca se permite el acceso por defecto.
       tags: [viajes]
       parameters:
@@ -401,6 +403,38 @@ paths:
         '503':
           $ref: './comun.yaml#/components/responses/NoDisponible'
 
+  /interna/viajes/{viajeId}/dueno:
+    servers:
+      - url: http://viajes:3004
+        description: Interno.
+    get:
+      operationId: consultarDuenoViaje
+      summary: Si el usuario del JWT es el dueño del viaje (interna)
+      description: >-
+        La usa el Servicio de Usuarios para saber si quien gestiona los designados de un itinerario
+        es el dueño del viaje. Recibe el JWT del usuario propagado (ADR-019) y responde si el sub del
+        token es el dueño; no devuelve el usuarioId del dueño. Si el viaje no existe, 404.
+      tags: [interna]
+      parameters:
+        - $ref: './comun.yaml#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/ViajeId'
+      responses:
+        '200':
+          description: Resultado de la consulta.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DuenoViaje'
+              example:
+                viajeId: 9a1d7c3e-2b4f-4e6a-8c0d-5f1e2a3b4c5d
+                esDueno: true
+        '401':
+          $ref: './comun.yaml#/components/responses/NoAutenticado'
+        '404':
+          $ref: './comun.yaml#/components/responses/NoEncontrado'
+        '503':
+          $ref: './comun.yaml#/components/responses/NoDisponible'
+
   /interna/reservas/{numeroReserva}:
     servers:
       - url: http://viajes:3004
@@ -576,6 +610,18 @@ components:
       example: cache
 
   schemas:
+    DuenoViaje:
+      type: object
+      additionalProperties: false
+      required: [viajeId, esDueno]
+      properties:
+        viajeId:
+          type: string
+          format: uuid
+        esDueno:
+          type: boolean
+          description: true si el usuario del JWT es el dueño del viaje.
+
     OrigenCambio:
       type: string
       description: >-

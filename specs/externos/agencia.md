@@ -111,12 +111,13 @@ Formato propio del mock (Integraciones solo mira el código HTTP):
 Si la agencia no responde en el tiempo máximo (2 s por defecto, CONVENCIONES 4.3), Integraciones lo trata
 igual que un `503`.
 
-## Preguntas abiertas para la revisión cruzada (P0.5)
+## Contacto del usuario (decidido en la revisión cruzada P0.5)
 
-- La ruta interna solo trae `usuarioId`. Para que la agencia pueda contactar al usuario haría falta su
-  nombre y su correo (Zendesk los recibe en `ticket.requester`). ¿Los manda el Asistente (que tiene el JWT
-  del usuario) o Integraciones se los pide al Servicio de Usuarios? Mientras tanto, el mock acepta un
-  `ticket.requester` opcional (`{ "name": "...", "email": "..." }`) y no lo exige.
+- Para que la agencia pueda contactar al usuario, el caso lleva su nombre y su correo en
+  `ticket.requester` (`{ "name": "...", "email": "..." }`). Salen del campo opcional `contacto` de
+  `SolicitudCaso` (`specs/openapi/integraciones.yaml`): el Asistente lo pide al Servicio de Usuarios con el
+  JWT del usuario, y en la ruta pública `POST /agencias/casos` lo pide Integraciones. El mock acepta
+  `ticket.requester` y no lo exige.
 
 ## Fuera del formato real
 

@@ -253,12 +253,16 @@ Devolución: Rentadora Sur Aeropuerto SCL 2026-12-14 09:00 (-03:00)
 Vehículo: Toyota Yaris (Económico)
 ```
 
-## Preguntas abiertas para la revisión cruzada (P0.5)
+## Estado de la reserva (decidido en la revisión cruzada P0.5)
 
-- `ReservaDetectada` no tiene estado. Un correo con `reservationStatus` cancelado o en espera
-  (`Cancelled`, `ReservationCancelled`, `ReservationHold`, `ReservationPending`) hoy no tiene evento: se
-  propone que el procesador publique solo los confirmados y deje los demás en `no_procesados`. Los cambios
-  y cancelaciones llegan por el Servicio de Integraciones (`ReservaActualizada`).
-- Un correo de modificación (mismo `reservationNumber`, con `modifiedTime`) publica otro
-  `ReservaDetectada` con el mismo `proveedor` + `numeroReserva`: Viajes tiene que actualizar la reserva
-  existente en lugar de crear una nueva.
+- `ReservaDetectada` lleva `estado`. El procesador lo saca de `reservationStatus` y de `modifiedTime`:
+
+  | Correo | `estado` |
+  |---|---|
+  | `Confirmed` o `ReservationConfirmed`, sin `modifiedTime` | `confirmada` |
+  | `Confirmed` o `ReservationConfirmed`, con `modifiedTime` | `modificada` |
+  | `Cancelled` o `ReservationCancelled` | `cancelada` |
+  | `ReservationHold` o `ReservationPending` | no se publica: va a `no_procesados` |
+
+- Viajes hace un *upsert* por `proveedor` + `numeroReserva`: un correo de modificación o de cancelación
+  de una reserva que ya existe la actualiza, no crea otra.

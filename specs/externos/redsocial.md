@@ -95,11 +95,11 @@ Formato de Mastodon:
 | `422` | `status` vacío o de más de 500 caracteres, o `visibility` inválida. |
 | `503` | Falla simulada desde `/admin`. Integraciones responde el error a Viajes y el usuario ve que no se pudo compartir. |
 
-## Preguntas abiertas para la revisión cruzada (P0.5)
+## Simplificación del prototipo (decidida en la revisión cruzada P0.5)
 
 - En una red social real cada usuario publica con su propia cuenta, así que tendría que conectarla con
-  OAuth (como el correo, ADR-015). La wiki no define esa conexión. Para el prototipo se propone un único
-  token por entorno y que el mock publique siempre con una cuenta de prueba.
+  OAuth (como el correo, ADR-015). La wiki no define esa conexión. En el prototipo se usa un único token
+  por entorno y el mock publica siempre con una cuenta de prueba de Trotamundos.
 
 ## Fuera del formato real
 

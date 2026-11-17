@@ -42,6 +42,7 @@ paths:
       security: []
       parameters:
         - $ref: './comun.yaml#/components/parameters/XRequestId'
+        - $ref: './comun.yaml#/components/parameters/XRegion'
       requestBody:
         required: true
         content:
@@ -94,11 +95,14 @@ paths:
         días) y la región de la cuenta, que la aplicación recuerda para los próximos inicios de sesión
         (Iteración 6). Si la cuenta no está en esta región pero sí en la otra (consulta a
         `GET /interna/cuentas/existe` de la otra región), responde 307 con la región correcta: pasa
-        cuando se inicia sesión desde un dispositivo nuevo, que todavía no conoce su región.
+        cuando se inicia sesión desde un dispositivo nuevo, que todavía no conoce su región. La
+        aplicación manda la región que recuerda en `X-Region`, que usa el enrutador global para
+        elegir la región (gateway.yaml).
       tags: [autenticacion]
       security: []
       parameters:
         - $ref: './comun.yaml#/components/parameters/XRequestId'
+        - $ref: './comun.yaml#/components/parameters/XRegion'
       requestBody:
         required: true
         content:

@@ -221,6 +221,9 @@ paths:
       description: >-
         Lista las personas que pueden ver el itinerario del viaje. Solo lo consulta el dueño del
         viaje; cualquier otro recibe 403 y el intento queda en el registro de accesos (QA-9).
+        Para saber si quien llama es el dueño, Usuarios
+        consulta a Viajes (GET /interna/viajes/{viajeId}/dueno, con el JWT del usuario propagado,
+        ADR-019); si Viajes no responde, responde 503 y no deja pasar.
       tags: [designados]
       parameters:
         - $ref: './comun.yaml#/components/parameters/XRequestId'
@@ -256,7 +259,10 @@ paths:
       description: >-
         El dueño del viaje designa a una persona por email. Si esa persona ya tiene cuenta en la
         región, se guarda su usuarioId; si no, usuarioId queda en null hasta que se registre. No se
-        puede designar al propio dueño (400) ni a alguien ya designado (409).
+        puede designar al propio dueño (400) ni a alguien ya designado (409). Si quien llama no es el
+        dueño, 403. Para saber si quien llama es el dueño, Usuarios
+        consulta a Viajes (GET /interna/viajes/{viajeId}/dueno, con el JWT del usuario propagado,
+        ADR-019); si Viajes no responde, responde 503 y no deja pasar.
       tags: [designados]
       parameters:
         - $ref: './comun.yaml#/components/parameters/XRequestId'
@@ -308,7 +314,10 @@ paths:
       summary: Quitar a una persona designada
       description: >-
         El dueño del viaje le quita el permiso a una persona. Desde ese momento la consulta interna de
-        permisos responde que no puede ver el itinerario.
+        permisos responde que no puede ver el itinerario. Si quien llama no es el dueño, 403.
+        Para saber si quien llama es el dueño, Usuarios
+        consulta a Viajes (GET /interna/viajes/{viajeId}/dueno, con el JWT del usuario propagado,
+        ADR-019); si Viajes no responde, responde 503 y no deja pasar.
       tags: [designados]
       parameters:
         - $ref: './comun.yaml#/components/parameters/XRequestId'
@@ -336,9 +345,9 @@ paths:
       operationId: consultarPermisoItinerario
       summary: Si un usuario puede ver un itinerario
       description: >-
-        La usa el Validador de Intercepción de otro servicio (por ejemplo Viajes en GET
-        /viajes/{viajeId}) en las rutas declaradas "dueño o designado". Responde puedeVer true si el
-        usuario es el dueño o una persona designada del itinerario. Tiene que responder rápido
+        La usa el Servicio de Viajes en GET /viajes/{viajeId} cuando quien pide no es el dueño del
+        viaje (el dueño lo resuelve Viajes con sus propios datos; Usuarios no sabe de quién es cada
+        viaje). Responde puedeVer true si el usuario es una persona designada del itinerario. Tiene que responder rápido
         (índice por viajeId y usuario; la Iteración 5 estima 20 ms) y el que llama la corta a los
         2 s. Recibe el JWT del usuario propagado (ADR-019): usuarioId tiene que ser el sub del token,
         si no responde 403. Un viaje desconocido no es un error: responde puedeVer false.
@@ -689,8 +698,9 @@ components:
           type: string
           description: >-
             Por qué puede (o no) verlo. "ninguno" va con puedeVer false; el validador lo usa como
-            motivo en el registro de accesos.
-          enum: [dueno, designado, ninguno]
+            motivo en el registro de accesos. No existe "dueno": Usuarios no sabe de quién es cada
+            viaje, eso lo resuelve Viajes.
+          enum: [designado, ninguno]
 
     AgenciaPreferida:
       type: object

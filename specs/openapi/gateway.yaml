@@ -53,9 +53,11 @@ info:
     4. **Región:** el claim `region` tiene que ser la región del gateway (CONST-6). Si no: `403`.
     5. **Rol y permisos:** el rol `analista` solo accede a `/api/analitica/*`, y las rutas de
        `/api/analitica/*` requieren el rol `analista`; el rol `usuario` accede solo a sus propios datos.
-       Para un itinerario compartido, consulta el permiso en el Servicio de Usuarios
-       (`GET /interna/permisos/itinerarios/{viajeId}?usuarioId=`, ~20 ms, tiempo máximo 2 s); si
-       Usuarios no responde, deniega (no se permite el acceso por defecto). Sin permiso: `403`.
+       Un token de servicio (rol `servicio`) nunca pasa por el gateway: `403`. El permiso sobre un
+       itinerario compartido no lo verifica el gateway, porque no sabe de quién es cada viaje: lo
+       verifica el Servicio de Viajes (dueño con sus datos; si no, consulta a Usuarios en
+       `GET /interna/permisos/itinerarios/{viajeId}`, ~20 ms, tiempo máximo 2 s, y deniega si
+       Usuarios no responde).
     6. **Registro de rechazos (QA-8, QA-9):** toda solicitud rechazada (`401`, `403` o `404` de una ruta
        interna) se guarda en el registro de accesos (tabla `accesos_rechazados`: fecha, servicio, ruta,
        usuarioId, motivo, ip, requestId) de forma asíncrona, sin hacer esperar la respuesta, en menos
@@ -64,9 +66,43 @@ info:
     Todos los errores del gateway usan `application/problem+json` (RFC 7807) con el esquema `Problema`
     de `comun.yaml`. El costo de validar en el gateway y en cada servicio es de unos 25 ms por solicitud,
     por debajo del tope de 200 ms de QA-9.
+
+    ## Enrutador global (Iteraciones 4 y 6, ADR-013)
+
+    No tiene rutas propias ni negocio: está delante de las dos regiones (`http://localhost:8000`) y
+    pasa cada solicitud, sin cambiarla, al nginx de una región. Elige la región así, en este orden:
+
+    1. **Prefijo de región:** `/region-1/...` o `/region-2/...`. Quita el prefijo y la manda a esa
+       región. Lo usan las URL que se registran en sistemas externos, que no mandan JWT ni
+       `X-Region`: el `redirect_uri` de OAuth y las URL de avisos de Gmail y Outlook de Correo (cada
+       región registra la suya, por ejemplo `/region-1/api/correo/oauth/callback`).
+    2. **JWT:** el claim `region` del header `Authorization`. El enrutador lo lee sin verificar la
+       firma: la verifica después el gateway, que responde `403` si la región no es la suya.
+    3. **Header `X-Region`** (`comun.yaml`): la región que la aplicación recuerda, para el registro y
+       el inicio de sesión, que todavía no tienen JWT.
+    4. **Región por defecto** (variable `REGION_POR_DEFECTO`; en la wiki, la más cercana). Si la
+       cuenta es de la otra región, Autenticación responde `307` hacia ella.
+
+    **Webhooks de proveedores** (`/api/integraciones/webhooks/proveedores/*`): el proveedor no sabe la
+    región del usuario, así que el enrutador manda el aviso a las dos regiones. Cada Integraciones
+    verifica la firma y publica `ReservaActualizada` en su región; el Viajes que no tiene la reserva
+    ignora el evento. Al proveedor le responde con la primera respuesta `2xx`; si ninguna región
+    responde `2xx`, con la peor.
+
+    **Failover (QA-11):** el enrutador consulta `GET /health` del gateway de cada región; si una
+    región no responde durante unos 30 s, manda todo a la otra.
+
+    ## Monitor de salud (Iteración 1, ADR-007)
+
+    Tampoco tiene rutas propias. Hay uno por región: hace un ping a `GET /health` de cada instancia
+    (gateway y cada microservicio) cada 5 s. Si una instancia no responde `200` 3 veces seguidas
+    (15 s), la saca del balanceador (nginx) y la reinicia. Cuando vuelve a responder `200`, la vuelve
+    a agregar.
 servers:
   - url: http://localhost:8000
-    description: Enrutador global (punto de entrada de la web), que pasa por el nginx y el gateway de la región.
+    description: >-
+      Enrutador global (punto de entrada de la web), que pasa por el nginx y el gateway de la región
+      que corresponde.
   - url: http://gateway:3000
     description: Gateway dentro de la red de la región (lo usan el nginx y el monitor de salud).
 tags:

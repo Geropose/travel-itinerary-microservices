@@ -44,6 +44,19 @@ components:
         format: uuid
       example: 7f3c1e2a-9b4d-4c6e-8a1f-2d3e4f5a6b7c
 
+    XRegion:
+      name: X-Region
+      in: header
+      required: false
+      description: >-
+        Región de la cuenta que la aplicación recuerda del último inicio de sesión o registro
+        (Iteración 6). La lee solo el enrutador global para elegir la región cuando todavía no hay
+        JWT. Si no viene (dispositivo nuevo), va a la región por defecto y, si la cuenta es de la
+        otra, la respuesta es 307.
+      schema:
+        $ref: '#/components/schemas/Region'
+      example: region-1
+
   headers:
     XRequestId:
       description: Identificador de la solicitud, el mismo que se usó en los logs.
