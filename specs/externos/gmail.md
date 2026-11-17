@@ -147,7 +147,7 @@ inválido o no tiene el scope pedido, Gmail responde `401`:
 ## 2. `users.messages.list`
 
 ```
-GET /gmail/v1/users/me/messages?q=after:1764331200&maxResults=100&pageToken=<opcional>
+GET /gmail/v1/users/me/messages?q=after:1795867200&maxResults=100&pageToken=<opcional>
 ```
 
 | Parámetro | Uso en Trotamundos |
@@ -188,7 +188,7 @@ partes contenedoras `multipart/*`.
   "labelIds": ["INBOX", "UNREAD"],
   "snippet": "Tu reserva XKQ7PL está confirmada.",
   "historyId": "9876543210",
-  "internalDate": "1764331950000",
+  "internalDate": "1795867950000",
   "sizeEstimate": 5120,
   "payload": {
     "partId": "",
@@ -198,8 +198,8 @@ partes contenedoras `multipart/*`.
       { "name": "From", "value": "Aerolínea Andina <reservas@aerolinea-andina.example>" },
       { "name": "To", "value": "ana.garcia@gmail.com" },
       { "name": "Subject", "value": "Confirmación de tu reserva XKQ7PL" },
-      { "name": "Date", "value": "Fri, 28 Nov 2026 12:12:30 +0000" },
-      { "name": "Message-ID", "value": "<xkq7pl.1764331950@aerolinea-andina.example>" }
+      { "name": "Date", "value": "Sat, 28 Nov 2026 12:12:30 +0000" },
+      { "name": "Message-ID", "value": "<xkq7pl.1795867950@aerolinea-andina.example>" }
     ],
     "body": { "size": 0 },
     "parts": [
@@ -285,7 +285,7 @@ Content-Type: application/json
 Respuesta `200`:
 
 ```json
-{ "historyId": "9876543000", "expiration": "1764936750000" }
+{ "historyId": "9876543000", "expiration": "1796472750000" }
 ```
 
 - `expiration`: cuándo deja de avisar (milisegundos epoch). Hay que repetir `watch` antes: Google pide al

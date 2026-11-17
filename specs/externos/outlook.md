@@ -166,7 +166,7 @@ Respuesta `200`:
       "id": "AAMkAGVmMDEzMTM4LTZmYWUtNDdkNC1hMDZiLTU1OGY5OTZhYmY4OABGAAAAAAAiQ8W967B7TKBjgx9rVEURBwAiIsqMbYjsT5e-T7KzowPTAAAAAAEMAAAiIsqMbYjsT5e-T7KzowPTAAAYbvZDAAA=",
       "receivedDateTime": "2026-11-28T12:12:30Z",
       "subject": "Confirmación de tu reserva XKQ7PL",
-      "internetMessageId": "<xkq7pl.1764331950@aerolinea-andina.example>",
+      "internetMessageId": "<xkq7pl.1795867950@aerolinea-andina.example>",
       "from": {
         "emailAddress": {
           "name": "Aerolínea Andina",

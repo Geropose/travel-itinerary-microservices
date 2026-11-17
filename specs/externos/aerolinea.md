@@ -111,7 +111,7 @@ pública del Servicio de Integraciones `POST /webhooks/proveedores/aerolinea-and
 ```
 POST /webhooks/proveedores/aerolinea-andina
 Content-Type: application/json
-X-Webhook-Signature: t=1764321150,v1=<HMAC-SHA256 en hexadecimal>
+X-Webhook-Signature: t=1795857150,v1=<HMAC-SHA256 en hexadecimal>
 
 {
   "id": "wev_0000AN0000000042",
