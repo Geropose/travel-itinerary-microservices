@@ -1,0 +1,20 @@
+{
+  "name": "@trotamundos/mock-gmail",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Mock de Gmail: OAuth de Google, Gmail API v1 y avisos push (specs/externos/gmail.md)",
+  "type": "module",
+  "config": {
+    "puerto": 4001
+  },
+  "scripts": {
+    "start": "node src/index.ts",
+    "dev": "node --watch src/index.ts",
+    "test": "vitest run --root ../.. mocks/gmail"
+  },
+  "dependencies": {
+    "@trotamundos/comun": "0.1.0",
+    "express": "^5.3.0",
+    "zod": "^4.6.7"
+  }
+}

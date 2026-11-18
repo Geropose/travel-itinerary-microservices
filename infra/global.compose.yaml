@@ -9,7 +9,7 @@
 #
 # Todavía no existen, y se agregan acá cuando se programen:
 # - procesadores Map-Reduce (parte de Analítica): fase 3 de Analítica;
-# - mocks de Gmail, Outlook, aerolínea, hotel, rentadora, agencia y red social (mocks/*): P2.
+# - mocks de Outlook, aerolínea, hotel, rentadora, agencia y red social (mocks/*): P2.
 
 services:
   # Enrutador global (Iteración 6, ADR-017): el único punto de entrada de la web. Manda cada
@@ -26,6 +26,21 @@ services:
       URL_REGION_1: http://nginx-region-1:8080
       URL_REGION_2: http://nginx-region-2:8080
       REGION_POR_DEFECTO: ${REGION_POR_DEFECTO:-region-1}
+
+  # Mock de Gmail (specs/externos/gmail.md, P2.B1): OAuth de Google, Gmail API y avisos push. Publica
+  # el 4001 porque el navegador del usuario abre su pantalla de permiso. Cada región tiene su tópico
+  # de Pub/Sub, y el aviso entra por el enrutador global con el prefijo de su región.
+  mock-gmail:
+    image: trotamundos/mock-gmail:dev
+    build: { context: .., dockerfile: mocks/gmail/Dockerfile }
+    restart: unless-stopped
+    networks: [global]
+    ports: ['${PUERTO_MOCK_GMAIL:-4001}:4001']
+    environment:
+      NIVEL_LOG: ${NIVEL_LOG:-info}
+      CLIENT_SECRET: ${SECRETO_CLIENTE_GMAIL:?}
+      SUSCRIPCIONES_PUSH: >-
+        projects/trotamundos/topics/gmail-avisos-region-1=http://enrutador:8000/region-1/api/correo/notificaciones/gmail?token=${SECRETO_AVISOS_GMAIL:?},projects/trotamundos/topics/gmail-avisos-region-2=http://enrutador:8000/region-2/api/correo/notificaciones/gmail?token=${SECRETO_AVISOS_GMAIL:?}
 
   # Base de analítica (Iteración 6): una sola, con el histórico anonimizado de todas las regiones.
   # No guarda datos personales, por eso puede estar en una sola región sin incumplir CONST-6.
