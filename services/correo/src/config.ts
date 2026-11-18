@@ -29,6 +29,10 @@ export const esquemaConfig = esquemaBase.extend({
   SECRETO_CLIENTE_GMAIL: z.string().min(1).default('cambiar-secreto-cliente-gmail'),
   /** Tópico Pub/Sub para users.watch; por defecto usa el tópico configurado para la región. */
   TOPICO_GMAIL: z.string().min(1).optional(),
+  /** Secreto compartido en la URL ?token= de Pub/Sub hacia POST /notificaciones/gmail. */
+  SECRETO_AVISOS_GMAIL: z.string().min(16).default('cambiar-secreto-avisos-gmail'),
+  /** Nombre esperado del campo `subscription` en el cuerpo de avisos Pub/Sub de Gmail. */
+  SUSCRIPCION_GMAIL: z.string().min(1).optional(),
   /** URL base de la API del proveedor Outlook (en Docker, http://mock-outlook:4002). */
   URL_OUTLOOK: z.url().default('http://mock-outlook:4002'),
   /** URL pública para abrir la pantalla de permiso de Outlook desde el navegador. */
@@ -39,12 +43,25 @@ export const esquemaConfig = esquemaBase.extend({
   URL_AVISOS_OUTLOOK: z.url().optional(),
   /** Segundos de anticipación antes del vencimiento para renovar el access token. */
   MARGEN_RENOVACION_SEG: z.coerce.number().int().min(0).default(300),
+  /** Servicios internos de la región para token de servicio y consulta de viajes próximos. */
+  URL_AUTENTICACION: z.url().default('http://autenticacion:3001'),
+  URL_VIAJES: z.url().default('http://viajes:3004'),
+  SECRETO_SERVICIO_CORREO: z.string().min(1).default('cambiar-secreto-correo'),
+  /** Configuración del Examinador (Iteración 2, ADR-010). */
+  INTERVALO_EXAMINADOR_SEG: z.coerce.number().int().positive().default(30),
+  INTERVALO_VIAJE_PROXIMO_MIN: z.coerce.number().int().positive().default(5),
+  INTERVALO_NORMAL_MIN: z.coerce.number().int().positive().default(60),
+  DIAS_VIAJE_PROXIMO: z.coerce.number().int().min(1).max(60).default(7),
+  CACHE_VIAJES_MIN: z.coerce.number().int().positive().default(10),
+  BACKOFF_429_INICIAL_SEG: z.coerce.number().int().positive().default(30),
+  BACKOFF_429_MAX_SEG: z.coerce.number().int().positive().default(900),
 });
 
 export type Config = ReturnType<typeof esquemaConfig.parse>;
 
 export interface ConfigResueltaAdaptadores {
   urlCallbackOAuth: string;
+  suscripcionGmail: string;
   gmail: {
     urlApi: string;
     urlPublica: string;
@@ -75,17 +92,21 @@ export function resolverConfigAdaptadores(config: Config): ConfigResueltaAdaptad
     (config.URL_OUTLOOK === 'http://mock-outlook:4002'
       ? 'http://localhost:4002'
       : config.URL_OUTLOOK);
+  const topicoWatch =
+    config.TOPICO_GMAIL ?? `projects/trotamundos/topics/gmail-avisos-${config.REGION}`;
+  const suscripcionGmail =
+    config.SUSCRIPCION_GMAIL ?? `${topicoWatch.replace('/topics/', '/subscriptions/')}-push`;
 
   return {
     urlCallbackOAuth,
+    suscripcionGmail,
     gmail: {
       urlApi: config.URL_GMAIL,
       urlPublica: urlPublicaGmail,
       clientId: config.ID_CLIENTE_GMAIL,
       clientSecret: config.SECRETO_CLIENTE_GMAIL,
       redirectUri: urlCallbackOAuth,
-      topicoWatch:
-        config.TOPICO_GMAIL ?? `projects/trotamundos/topics/gmail-avisos-${config.REGION}`,
+      topicoWatch,
     },
     outlook: {
       urlApi: config.URL_OUTLOOK,

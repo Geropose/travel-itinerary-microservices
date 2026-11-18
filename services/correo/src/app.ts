@@ -12,6 +12,15 @@ import { crearAdaptadorGmail } from './adaptadores/gmail.ts';
 import { crearAdaptadorOutlook } from './adaptadores/outlook.ts';
 import { crearRegistroAdaptadores, type RegistroAdaptadores } from './adaptadores/registro.ts';
 import { leerClaveTokens } from './cifrado.ts';
+import type { ClienteViajes } from './clientes.ts';
+import type { ColaBuzones } from './cola.ts';
+import {
+  crearExaminador,
+  type ConfigBackoff429,
+  type Examinador,
+  type IntervalosExaminador,
+} from './examinador.ts';
+import * as repositorio from './repositorio.ts';
 import { registrarRutas, type Negocio } from './rutas.ts';
 import { crearGestorTokens } from './tokens.ts';
 
@@ -27,7 +36,7 @@ export interface OpcionesApp {
   logger: Logger;
   /** Validador de Intercepción. Sin él, toda ruta protegida responde 401. */
   validador?: Validador;
-  /** Base de datos, adaptadores y gestor de tokens. Sin esto solo responde /health. */
+  /** Base de datos, adaptadores, gestor de tokens y examinador. Sin esto solo responde /health. */
   negocio?: Negocio;
   /** Chequeos de GET /health (base, broker...). */
   chequeos?: Record<string, Chequeo>;
@@ -45,10 +54,33 @@ export interface OpcionesNegocioCorreo {
   adaptadores?: RegistroAdaptadores;
   gmail?: Parameters<typeof crearAdaptadorGmail>[0];
   outlook?: Parameters<typeof crearAdaptadorOutlook>[0];
+  cola?: ColaBuzones;
+  viajes?: ClienteViajes;
+  pushGmail?: {
+    secreto: string;
+    suscripcion: string;
+  };
+  intervalos?: Partial<IntervalosExaminador>;
+  backoff429?: Partial<ConfigBackoff429>;
 }
 
-/** Construye las dependencias de negocio de correo (clave AES, adaptadores y gestor de tokens). */
-export function crearNegocioCorreo(opciones: OpcionesNegocioCorreo): Negocio {
+const INTERVALOS_POR_DEFECTO: IntervalosExaminador = {
+  cicloMs: 30_000,
+  viajeProximoMs: 5 * 60_000,
+  normalMs: 60 * 60_000,
+};
+
+const BACKOFF_POR_DEFECTO: ConfigBackoff429 = {
+  inicialMs: 30_000,
+  maxMs: 900_000,
+};
+
+export interface NegocioCorreo extends Negocio {
+  examinador: Examinador;
+}
+
+/** Construye las dependencias de negocio de correo (clave AES, adaptadores, tokens y examinador). */
+export function crearNegocioCorreo(opciones: OpcionesNegocioCorreo): NegocioCorreo {
   const claveTokens = leerClaveTokens(opciones.claveTokensBase64);
   const ahora = opciones.ahora ?? Date.now;
   const adaptadores =
@@ -57,6 +89,27 @@ export function crearNegocioCorreo(opciones: OpcionesNegocioCorreo): Negocio {
       ...(opciones.gmail ? [crearAdaptadorGmail({ ...opciones.gmail, ahora })] : []),
       ...(opciones.outlook ? [crearAdaptadorOutlook({ ...opciones.outlook, ahora })] : []),
     ]);
+
+  const intervalos: IntervalosExaminador = {
+    ...INTERVALOS_POR_DEFECTO,
+    ...opciones.intervalos,
+  };
+  const backoff429: ConfigBackoff429 = {
+    ...BACKOFF_POR_DEFECTO,
+    ...opciones.backoff429,
+  };
+
+  const examinador = crearExaminador({
+    pool: opciones.pool,
+    cola: opciones.cola,
+    viajes: opciones.viajes,
+    adaptadores,
+    logger: opciones.logger,
+    intervalos,
+    backoff429,
+    ahora,
+  });
+
   const gestorTokens = crearGestorTokens({
     pool: opciones.pool,
     claveTokens,
@@ -64,6 +117,11 @@ export function crearNegocioCorreo(opciones: OpcionesNegocioCorreo): Negocio {
     logger: opciones.logger,
     margenRenovacionMs: opciones.margenRenovacionMs ?? 300_000,
     ahora,
+    alLimitarCuota: (cuentaId, retryAfterSeg) =>
+      examinador.registrarLimiteCuota(cuentaId, retryAfterSeg),
+    alExito: async (cuentaId) => {
+      await repositorio.limpiarBackoff429(opciones.pool, cuentaId, new Date(ahora()));
+    },
   });
 
   return {
@@ -71,8 +129,10 @@ export function crearNegocioCorreo(opciones: OpcionesNegocioCorreo): Negocio {
     claveTokens,
     adaptadores,
     gestorTokens,
+    examinador,
     urlWeb: opciones.urlWeb,
     logger: opciones.logger,
+    ...(opciones.pushGmail ? { pushGmail: opciones.pushGmail } : {}),
     ahora,
   };
 }

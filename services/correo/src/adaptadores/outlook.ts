@@ -136,6 +136,7 @@ export function crearAdaptadorOutlook(opciones: OpcionesAdaptadorOutlook): Adapt
 
   return {
     proveedor: 'outlook',
+    soportaPush: true,
 
     urlAutorizacion(state) {
       const url = new URL(`${urlPublica}/${tenant}/oauth2/v2.0/authorize`);

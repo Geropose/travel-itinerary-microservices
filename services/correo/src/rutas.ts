@@ -13,7 +13,8 @@ import {
 import type { Request } from 'express';
 import type { RegistroAdaptadores } from './adaptadores/registro.ts';
 import { ErrorProveedorCorreo } from './adaptadores/tipos.ts';
-import { derivarClaveState, firmarState, verificarState } from './cifrado.ts';
+import { compararSecretos, derivarClaveState, firmarState, verificarState } from './cifrado.ts';
+import type { Examinador } from './examinador.ts';
 import * as repositorio from './repositorio.ts';
 import type { GestorTokens } from './tokens.ts';
 
@@ -26,8 +27,62 @@ export interface Negocio {
   gestorTokens: GestorTokens;
   urlWeb: string;
   logger: Logger;
+  examinador?: Examinador;
+  pushGmail?: {
+    secreto: string;
+    suscripcion: string;
+  };
   ahora?: () => number;
 }
+
+interface AvisoPubSubGmail {
+  message: {
+    data: string;
+    messageId: string;
+  };
+  subscription: string;
+}
+
+interface AvisoGraphItem {
+  id?: string;
+  subscriptionId: string;
+  clientState?: string;
+  changeType: 'created' | 'updated' | 'deleted';
+  resourceData: {
+    id: string;
+  };
+}
+
+function decodificarDataPubSub(data: string): { emailAddress: string; historyId: string } | null {
+  try {
+    const normalizado = data.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    const parsed = JSON.parse(Buffer.from(normalizado, 'base64url').toString('utf8')) as unknown;
+    if (!parsed || typeof parsed !== 'object') return null;
+    const obj = parsed as Record<string, unknown>;
+    if (
+      typeof obj.emailAddress !== 'string' ||
+      !obj.emailAddress.trim() ||
+      typeof obj.historyId !== 'string' ||
+      !obj.historyId.trim()
+    ) {
+      return null;
+    }
+    return {
+      emailAddress: obj.emailAddress.trim().toLowerCase(),
+      historyId: obj.historyId.trim(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+const errorAvisoNoVerificado = () =>
+  new ErrorHttp({
+    status: 401,
+    tipo: 'aviso-no-verificado',
+    titulo: 'Aviso no verificado',
+    detalle: 'El secreto del aviso push falta o no coincide.',
+  });
 
 const textoQuery = (valor: unknown): string => (typeof valor === 'string' ? valor : '');
 
@@ -239,13 +294,141 @@ export function registrarRutas(servidor: Servidor, region: Region, negocio: Nego
     res.status(204).end();
   });
 
-  // Handshake de validación de suscripción de Microsoft Graph (specs/externos/outlook.md 4.2).
-  app.post('/notificaciones/outlook', (req, res) => {
+  // Aviso push de Google Cloud Pub/Sub (specs/openapi/correo.yaml y specs/externos/gmail.md 6).
+  app.post('/notificaciones/gmail', async (req, res) => {
+    const token = textoQuery(req.query.token);
+    const configPush = negocio.pushGmail;
+    if (!configPush || !token || !compararSecretos(token, configPush.secreto)) {
+      throw errorAvisoNoVerificado();
+    }
+
+    const cuerpo = req.body as AvisoPubSubGmail;
+    if (cuerpo.subscription !== configPush.suscripcion) {
+      logger.warn({ subscription: cuerpo.subscription }, 'suscripción Pub/Sub inesperada');
+      throw errorAvisoNoVerificado();
+    }
+
+    const datos = decodificarDataPubSub(cuerpo.message.data);
+    if (!datos) {
+      throw errores.solicitudInvalida('El campo message.data no contiene JSON válido de Gmail.');
+    }
+
+    const examinador = negocio.examinador;
+    if (!examinador) {
+      throw errores.noDisponible('El examinador de correo no está disponible.');
+    }
+
+    const ahoraDate = new Date(ahora());
+    const messageId = cuerpo.message.messageId;
+    const esNuevo = await repositorio.registrarAvisoPushVisto(pool, 'gmail', messageId, ahoraDate);
+    if (!esNuevo) {
+      res.status(202).end();
+      return;
+    }
+
+    const cuenta = await repositorio.buscarCuentaPorEmail(pool, 'gmail', datos.emailAddress);
+    if (!cuenta) {
+      res.status(202).end();
+      return;
+    }
+
+    try {
+      await examinador.encolarPorPush({
+        cuentaId: cuenta.id,
+        usuarioId: cuenta.usuarioId,
+        proveedor: 'gmail',
+        email: cuenta.email,
+        bloqueadoHasta: cuenta.bloqueadoHasta,
+        push: { historyId: datos.historyId },
+      });
+    } catch (err) {
+      await repositorio.eliminarAvisoPushVisto(pool, 'gmail', messageId).catch(() => undefined);
+      logger.warn({ err, cuentaId: cuenta.id }, 'no se pudo encolar el aviso push de Gmail');
+      throw errores.noDisponible('No se pudo encolar la revisión del buzón.');
+    }
+
+    res.status(202).end();
+  });
+
+  // Validación URL (validationToken) y change notifications de Microsoft Graph (specs/externos/outlook.md).
+  app.post('/notificaciones/outlook', async (req, res) => {
     const validationToken = textoQuery(req.query.validationToken);
     if (validationToken) {
       res.status(200).type('text/plain').send(validationToken);
       return;
     }
+
+    const examinador = negocio.examinador;
+    if (!examinador) {
+      throw errores.noDisponible('El examinador de correo no está disponible.');
+    }
+
+    const cuerpo = req.body as { value?: AvisoGraphItem[] };
+    const avisos = Array.isArray(cuerpo?.value) ? cuerpo.value : [];
+    const ahoraDate = new Date(ahora());
+
+    const porCuenta = new Map<
+      string,
+      { cuenta: repositorio.CuentaPushSuscripcion; mensajeIds: string[]; avisoIds: string[] }
+    >();
+
+    for (const aviso of avisos) {
+      if (aviso.changeType === 'deleted') continue;
+
+      const cuenta = await repositorio.buscarCuentaPorSuscripcion(
+        pool,
+        claveTokens,
+        'outlook',
+        aviso.subscriptionId,
+      );
+      if (
+        !cuenta ||
+        !cuenta.secretoSuscripcion ||
+        !aviso.clientState ||
+        !compararSecretos(aviso.clientState, cuenta.secretoSuscripcion)
+      ) {
+        logger.warn(
+          { subscriptionId: aviso.subscriptionId },
+          'aviso push de Outlook descartado por clientState inválido o suscripción desconocida',
+        );
+        continue;
+      }
+
+      if (aviso.id) {
+        const esNuevo = await repositorio.registrarAvisoPushVisto(
+          pool,
+          'outlook',
+          aviso.id,
+          ahoraDate,
+        );
+        if (!esNuevo) continue;
+      }
+
+      const grupo = porCuenta.get(cuenta.id) ?? { cuenta, mensajeIds: [], avisoIds: [] };
+      grupo.mensajeIds.push(aviso.resourceData.id);
+      if (aviso.id) grupo.avisoIds.push(aviso.id);
+      porCuenta.set(cuenta.id, grupo);
+    }
+
+    for (const { cuenta, mensajeIds, avisoIds } of porCuenta.values()) {
+      try {
+        await examinador.encolarPorPush({
+          cuentaId: cuenta.id,
+          usuarioId: cuenta.usuarioId,
+          proveedor: 'outlook',
+          email: cuenta.email,
+          bloqueadoHasta: cuenta.bloqueadoHasta,
+          push: { mensajeIds },
+        });
+      } catch (err) {
+        for (const id of avisoIds) {
+          await repositorio.eliminarAvisoPushVisto(pool, 'outlook', id).catch(() => undefined);
+        }
+        logger.warn({ err, cuentaId: cuenta.id }, 'no se pudo encolar el aviso push de Outlook');
+        throw errores.noDisponible('No se pudo encolar el aviso push de Outlook.');
+      }
+    }
+
     res.status(202).end();
   });
 }

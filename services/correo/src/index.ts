@@ -1,4 +1,4 @@
-// Arranque de correo: lee la configuración, abre las conexiones y empieza a escuchar.
+// Arranque de correo: lee la configuración, abre las conexiones, inicia el examinador y escucha.
 import { fileURLToPath } from 'node:url';
 import {
   cargarConfig,
@@ -12,6 +12,8 @@ import {
   registroPorEvento,
 } from '@trotamundos/comun';
 import { crearApp, crearNegocioCorreo, SERVICIO } from './app.ts';
+import { crearClienteViajes, crearProveedorTokenServicio } from './clientes.ts';
+import { conectarColaBuzones } from './cola.ts';
 import { esquemaConfig, resolverConfigAdaptadores } from './config.ts';
 
 const config = cargarConfig(esquemaConfig);
@@ -30,16 +32,30 @@ const broker = await conectarBroker({
   region: config.REGION,
   logger,
 });
+const cola = await conectarColaBuzones({ url: config.URL_BROKER, logger });
 const validador = crearValidador({
   servicio: SERVICIO,
   region: config.REGION,
   logger,
   claves: { [config.REGION]: { url: config.URL_JWKS } },
   registrar: registroPorEvento(broker, logger),
-  // Rutas internas con token de servicio: 'MÉTODO /ruta': { servicios: [...] }
   reglas: {},
 });
 const outbox = iniciarPublicadorOutbox({ pool, broker, logger });
+
+const obtenerTokenServicio = crearProveedorTokenServicio({
+  urlAutenticacion: config.URL_AUTENTICACION,
+  servicio: SERVICIO,
+  secreto: config.SECRETO_SERVICIO_CORREO,
+  logger,
+});
+const viajes = crearClienteViajes({
+  urlViajes: config.URL_VIAJES,
+  obtenerToken: obtenerTokenServicio,
+  ttlCacheMs: config.CACHE_VIAJES_MIN * 60_000,
+  dias: config.DIAS_VIAJE_PROXIMO,
+  logger,
+});
 
 const negocio = crearNegocioCorreo({
   pool,
@@ -49,6 +65,21 @@ const negocio = crearNegocioCorreo({
   margenRenovacionMs: config.MARGEN_RENOVACION_SEG * 1000,
   gmail: adaptadoresConfig.gmail,
   outlook: adaptadoresConfig.outlook,
+  cola,
+  viajes,
+  pushGmail: {
+    secreto: config.SECRETO_AVISOS_GMAIL,
+    suscripcion: adaptadoresConfig.suscripcionGmail,
+  },
+  intervalos: {
+    cicloMs: config.INTERVALO_EXAMINADOR_SEG * 1000,
+    viajeProximoMs: config.INTERVALO_VIAJE_PROXIMO_MIN * 60_000,
+    normalMs: config.INTERVALO_NORMAL_MIN * 60_000,
+  },
+  backoff429: {
+    inicialMs: config.BACKOFF_429_INICIAL_SEG * 1000,
+    maxMs: config.BACKOFF_429_MAX_SEG * 1000,
+  },
 });
 
 const servidor = crearApp({
@@ -60,11 +91,16 @@ const servidor = crearApp({
   chequeos: {
     base: () => pool.query('SELECT 1'),
     broker: () => broker.verificar(),
+    cola: () => cola.verificar(),
   },
 });
-// Se apagan en orden inverso: primero el outbox, después el broker y al final la base.
+
+// Se apagan en orden inverso: primero examinador/outbox, después cola/broker y al final la base.
 servidor.alApagar(() => pool.end());
+servidor.alApagar(() => cola.cerrar());
 servidor.alApagar(() => broker.cerrar());
 servidor.alApagar(() => outbox.detener());
+servidor.alApagar(() => negocio.examinador.detener());
 
 await servidor.iniciar();
+negocio.examinador.iniciar();

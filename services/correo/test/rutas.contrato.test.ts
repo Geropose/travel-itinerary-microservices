@@ -82,9 +82,12 @@ describe(`contrato de ${SERVICIO}: rutas sin token y reglas de acceso`, () => {
     },
   );
 
-  it('GET /health es pública y no pide token', async () => {
+  it('GET /health y rutas de avisos push / callback son públicas en el contrato', async () => {
     const salud = servidor.spec.buscar('GET', '/health');
     expect(salud?.seguridad).toEqual([]);
     expect((await fetch(`${url}/health`)).status).toBe(200);
+    expect(servidor.spec.buscar('GET', '/oauth/callback')?.seguridad).toEqual([]);
+    expect(servidor.spec.buscar('POST', '/notificaciones/gmail')?.seguridad).toEqual([]);
+    expect(servidor.spec.buscar('POST', '/notificaciones/outlook')?.seguridad).toEqual([]);
   });
 });

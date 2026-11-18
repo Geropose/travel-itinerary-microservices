@@ -75,6 +75,8 @@ export interface MensajeCorreo {
  */
 export interface AdaptadorCorreo {
   readonly proveedor: ProveedorCorreo;
+  /** Indica si el proveedor entrega avisos push y no requiere polling por intervalo tras la revisión inicial. */
+  readonly soportaPush?: boolean;
 
   /** Construye la URL OAuth de autorización con scope de solo lectura y el `state` firmado. */
   urlAutorizacion(state: string): string;

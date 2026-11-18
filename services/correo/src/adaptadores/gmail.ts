@@ -173,6 +173,7 @@ export function crearAdaptadorGmail(opciones: OpcionesAdaptadorGmail): Adaptador
 
   return {
     proveedor: 'gmail',
+    soportaPush: true,
 
     urlAutorizacion(state) {
       const url = new URL(`${urlPublica}/o/oauth2/v2/auth`);
