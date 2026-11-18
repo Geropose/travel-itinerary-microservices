@@ -7,6 +7,7 @@ import {
   type Servidor,
   type Validador,
 } from '@trotamundos/comun';
+import type { Vigilante } from './vigilante.ts';
 
 export const SERVICIO = 'monitor';
 /** Contrato del servicio: las solicitudes y las respuestas se validan contra él. */
@@ -18,17 +19,19 @@ export interface OpcionesApp {
   region: Region;
   puerto: number;
   logger: Logger;
+  /** Ping-echo de las instancias de la región (GET /estado). */
+  vigilante?: Vigilante;
   /** Validador de Intercepción. Sin él, toda ruta protegida responde 401. */
   validador?: Validador;
-  /** Chequeos de GET /health (base, broker...). */
+  /** Chequeos de GET /health (Docker...). */
   chequeos?: Record<string, Chequeo>;
   /** Escuchar SIGTERM para apagar en orden (las pruebas lo apagan). */
   manejarSenales?: boolean;
 }
 
 /**
- * Arma el servidor de monitor con sus rutas. No abre conexiones: index.ts le pasa la base, el
- * broker y el validador, y las pruebas lo usan sin ellos.
+ * Arma el servidor del monitor de salud: GET /health y GET /estado. No abre conexiones: index.ts
+ * le pasa el vigilante con el cliente de Docker, y las pruebas uno con un Docker falso.
  */
 export function crearApp(opciones: OpcionesApp): Servidor {
   const servidor = crearServidor({
@@ -44,8 +47,14 @@ export function crearApp(opciones: OpcionesApp): Servidor {
     servidor.registrarChequeo(nombre, chequeo);
   }
 
-  // Rutas del servicio, una por operación de specs/openapi/monitor.yaml. Por ejemplo:
-  // servidor.app.get('/viajes', async (req, res) => { res.json(...) });
+  servidor.app.get('/estado', (_req, res) => {
+    const estado = opciones.vigilante?.estado() ?? {
+      actualizadoEn: null,
+      intervaloMs: 5000,
+      instancias: [],
+    };
+    res.json({ region: opciones.region, ...estado });
+  });
 
   return servidor;
 }
