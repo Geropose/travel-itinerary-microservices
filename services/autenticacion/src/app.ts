@@ -1,12 +1,14 @@
 import { fileURLToPath } from 'node:url';
 import {
   crearServidor,
+  errores,
   type Chequeo,
   type Logger,
   type Region,
   type Servidor,
   type Validador,
 } from '@trotamundos/comun';
+import type { ClavesJwt } from './claves.ts';
 
 export const SERVICIO = 'autenticacion';
 /** Contrato del servicio: las solicitudes y las respuestas se validan contra él. */
@@ -22,6 +24,8 @@ export interface OpcionesApp {
   validador?: Validador;
   /** Chequeos de GET /health (base, broker...). */
   chequeos?: Record<string, Chequeo>;
+  /** Claves públicas que se publican en GET /.well-known/jwks.json. */
+  jwks?: ClavesJwt['jwks'];
   /** Escuchar SIGTERM para apagar en orden (las pruebas lo apagan). */
   manejarSenales?: boolean;
 }
@@ -44,8 +48,13 @@ export function crearApp(opciones: OpcionesApp): Servidor {
     servidor.registrarChequeo(nombre, chequeo);
   }
 
-  // Rutas del servicio, una por operación de specs/openapi/autenticacion.yaml. Por ejemplo:
-  // servidor.app.get('/viajes', async (req, res) => { res.json(...) });
+  // Rutas del servicio, una por operación de specs/openapi/autenticacion.yaml.
+
+  // Clave pública del JWT (ADR-014): los validadores la descargan una vez y verifican sin red.
+  servidor.app.get('/.well-known/jwks.json', (_req, res) => {
+    if (!opciones.jwks) throw errores.noDisponible('Todavía no hay claves de firma');
+    res.set('Cache-Control', 'public, max-age=3600').json(opciones.jwks);
+  });
 
   return servidor;
 }
