@@ -34,6 +34,8 @@ componentes que no estén ahí.
 | `npm test` | Pruebas unitarias y de contrato (Vitest) |
 | `npm run test:contratos` | Valida los contratos REST de `specs/openapi/` con Redocly y corre las pruebas de contrato (`tests/contratos/` y archivos `*.contrato.test.ts`) |
 | `npm run e2e` | Pruebas de extremo a extremo de `tests/e2e`, contra el sistema levantado |
+| `npm run nuevo-servicio -- <nombre> <puerto>` | Genera `services/<nombre>` desde `infra/plantilla-servicio` (necesita `specs/openapi/<nombre>.yaml`; con `--sin-dependencias`, sin base, broker ni JWT). Después, `npm install` |
+| `npm run mock -- <servicio>` | Mock del servicio con Prism a partir de su contrato, en su mismo puerto |
 
 ## Configuración compartida
 
