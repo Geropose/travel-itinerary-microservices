@@ -56,3 +56,36 @@ server {
     proxy_connect_timeout 2s;
   }
 }
+
+# Puerta entre regiones (Iteración 6, ADR-017). Escucha en 8090, que no se publica: solo se llega
+# desde la red de la región y desde la red global (el nginx de la otra región). Deja pasar únicamente
+# lo que Autenticación comparte con la otra región, que no son datos personales (CONST-6): si una
+# cuenta existe (sí o no) y la clave pública del JWT. Las solicitudes llevan el token de servicio de
+# Autenticación y no se guardan en el log (llevan el email en la URL).
+server {
+  listen 8090;
+  access_log off;
+
+  # De esta región hacia la otra: lo usa Autenticación en el login desde un dispositivo nuevo y en el
+  # registro. ${OTRA_REGION} lo completa la imagen de nginx al arrancar (templates).
+  location ~ ^/otra-region/(?<resto>.*)$ {
+    set $otra_region nginx-${OTRA_REGION};
+    proxy_pass http://$otra_region:8090/esta-region/$resto$is_args$args;
+    proxy_connect_timeout 2s;
+    proxy_read_timeout 2s;
+  }
+
+  # De la otra región hacia esta: solo estas dos rutas de Autenticación.
+  location = /esta-region/autenticacion/interna/cuentas/existe {
+    set $autenticacion autenticacion;
+    proxy_pass http://$autenticacion:3001/interna/cuentas/existe$is_args$args;
+  }
+  location = /esta-region/autenticacion/.well-known/jwks.json {
+    set $autenticacion autenticacion;
+    proxy_pass http://$autenticacion:3001/.well-known/jwks.json;
+  }
+
+  location / {
+    return 404;
+  }
+}

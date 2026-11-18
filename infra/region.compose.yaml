@@ -5,7 +5,8 @@
 # Redes:
 # - region: la red propia de la región. Las bases, el broker y la cache están SOLO acá, así que
 #   desde la otra región no se llega a ellas (CONST-6, ADR-017).
-# - global (trotamundos-global, la crea global.compose.yaml): nginx (para el enrutador global),
+# - global (trotamundos-global, la crea global.compose.yaml): nginx (para el enrutador global y la
+#   puerta entre regiones de Autenticación, puerto 8090),
 #   analitica (el anonimizador escribe en la base de analítica) y correo e integraciones (los mocks
 #   de los sistemas externos).
 #
@@ -67,7 +68,10 @@ services:
     depends_on:
       gateway: { condition: service_healthy }
     volumes:
-      - ./nginx/region.conf:/etc/nginx/conf.d/default.conf:ro
+      # La imagen completa ${OTRA_REGION} en la plantilla y la deja en conf.d/default.conf.
+      - ./nginx/region.conf.template:/etc/nginx/templates/default.conf.template:ro
+    environment:
+      OTRA_REGION: ${OTRA_REGION:?Falta OTRA_REGION (usar npm run infra:levantar)}
     networks:
       region: {}
       global:
@@ -107,6 +111,21 @@ services:
       <<: *entorno
       URL_BASE: postgres://autenticacion:${CLAVE_BD_AUTENTICACION:?}@postgres:5432/autenticacion
       JWT_CLAVE_PRIVADA: ${JWT_CLAVE_PRIVADA:?Falta JWT_CLAVE_PRIVADA (usar npm run infra:levantar)}
+      URL_USUARIOS: http://usuarios:3002
+      # La otra región, por la puerta entre regiones de nginx (puerto 8090, ADR-017).
+      URL_OTRA_REGION: http://nginx:8090/otra-region/autenticacion
+      URL_JWKS_OTRA_REGION: http://nginx:8090/otra-region/autenticacion/.well-known/jwks.json
+      URL_PUBLICA_OTRA_REGION: http://localhost:${PUERTO_NGINX_OTRA_REGION:?}
+      SECRETO_SERVICIO_USUARIOS: ${SECRETO_SERVICIO_USUARIOS:?}
+      SECRETO_SERVICIO_CORREO: ${SECRETO_SERVICIO_CORREO:?}
+      SECRETO_SERVICIO_VIAJES: ${SECRETO_SERVICIO_VIAJES:?}
+      SECRETO_SERVICIO_INTEGRACIONES: ${SECRETO_SERVICIO_INTEGRACIONES:?}
+      SECRETO_SERVICIO_ANALITICA: ${SECRETO_SERVICIO_ANALITICA:?}
+      SECRETO_SERVICIO_ASISTENTE: ${SECRETO_SERVICIO_ASISTENTE:?}
+      SECRETO_SERVICIO_GATEWAY: ${SECRETO_SERVICIO_GATEWAY:?}
+      SECRETO_SERVICIO_PRUEBAS: ${SECRETO_SERVICIO_PRUEBAS:?}
+      # Solo la usan las semillas (analista de prueba).
+      CONTRASENA_ANALISTA: ${CONTRASENA_ANALISTA:?}
     labels:
       trotamundos.servicio: autenticacion
 

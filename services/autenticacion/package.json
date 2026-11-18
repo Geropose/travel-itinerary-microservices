@@ -10,9 +10,11 @@
   "scripts": {
     "start": "node src/index.ts",
     "dev": "node --watch src/index.ts",
-    "test": "vitest run --root ../.. services/autenticacion"
+    "test": "vitest run --root ../.. services/autenticacion",
+    "semillas": "node src/semillas.ts"
   },
   "dependencies": {
+    "@node-rs/argon2": "^2.2.2",
     "@trotamundos/comun": "0.1.0",
     "jose": "^6.2.17",
     "zod": "^4.6.7"

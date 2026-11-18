@@ -5,16 +5,31 @@ import {
   type Chequeo,
   type Logger,
   type Region,
+  type ReglaRuta,
   type Servidor,
   type Validador,
 } from '@trotamundos/comun';
 import type { ClavesJwt } from './claves.ts';
+import { registrarRutas, type Negocio } from './rutas.ts';
 
 export const SERVICIO = 'autenticacion';
 /** Contrato del servicio: las solicitudes y las respuestas se validan contra él. */
 export const RUTA_SPEC = fileURLToPath(
   new URL('../../../specs/openapi/autenticacion.yaml', import.meta.url),
 );
+
+/** Reglas del Validador de Intercepción para las rutas de Autenticación. */
+export function reglasDeRutas(region: Region): Record<string, ReglaRuta> {
+  return {
+    // Solo la Autenticación de cualquiera de las dos regiones (ADR-017).
+    'GET /interna/cuentas/existe': {
+      servicios: ['autenticacion'],
+      regiones: [region, region === 'region-1' ? 'region-2' : 'region-1'],
+    },
+    // El analista también cierra sesión.
+    'POST /logout': { roles: ['usuario', 'analista'] },
+  };
+}
 
 export interface OpcionesApp {
   region: Region;
@@ -26,6 +41,8 @@ export interface OpcionesApp {
   chequeos?: Record<string, Chequeo>;
   /** Claves públicas que se publican en GET /.well-known/jwks.json. */
   jwks?: ClavesJwt['jwks'];
+  /** Base, claves y clientes para las rutas de negocio. Sin esto solo responden /health y el JWKS. */
+  negocio?: Negocio;
   /** Escuchar SIGTERM para apagar en orden (las pruebas lo apagan). */
   manejarSenales?: boolean;
 }
@@ -49,6 +66,9 @@ export function crearApp(opciones: OpcionesApp): Servidor {
   }
 
   // Rutas del servicio, una por operación de specs/openapi/autenticacion.yaml.
+  if (opciones.negocio) {
+    registrarRutas(servidor, opciones.region, SERVICIO, opciones.negocio, opciones.logger);
+  }
 
   // Clave pública del JWT (ADR-014): los validadores la descargan una vez y verifican sin red.
   servidor.app.get('/.well-known/jwks.json', (_req, res) => {

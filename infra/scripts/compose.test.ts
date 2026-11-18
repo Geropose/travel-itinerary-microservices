@@ -97,7 +97,13 @@ describe('global.compose.yaml', () => {
 describe('variables', () => {
   it('cada ${VARIABLE} de los compose está en .env.example o la pone infra.ts', () => {
     const ejemplo = leerEnv(readFileSync(join(raiz, '.env.example'), 'utf8'));
-    const deInfra = ['REGION', 'PUERTO_NGINX', 'JWT_CLAVE_PRIVADA'];
+    const deInfra = [
+      'REGION',
+      'OTRA_REGION',
+      'PUERTO_NGINX',
+      'PUERTO_NGINX_OTRA_REGION',
+      'JWT_CLAVE_PRIVADA',
+    ];
     const usadas = [...`${textoRegion}\n${textoGlobal}`.matchAll(/\$\{([A-Z0-9_]+)/g)].map(
       (m) => m[1],
     );

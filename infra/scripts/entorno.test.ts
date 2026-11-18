@@ -70,9 +70,11 @@ describe('opciones de los scripts', () => {
 
   it('cada región recibe su REGION, su puerto de nginx y su clave del JWT', () => {
     const env = { PUERTO_NGINX_REGION_2: '8082', JWT_CLAVE_PRIVADA_REGION_2: 'clave-2' };
-    expect(entornoRegion('r2', env)).toEqual({
+    expect(entornoRegion('r2', { ...env, PUERTO_NGINX_REGION_1: '8081' })).toEqual({
       REGION: 'region-2',
+      OTRA_REGION: 'region-1',
       PUERTO_NGINX: '8082',
+      PUERTO_NGINX_OTRA_REGION: '8081',
       JWT_CLAVE_PRIVADA: 'clave-2',
     });
   });
@@ -81,21 +83,30 @@ describe('opciones de los scripts', () => {
 describe('pasos de docker compose', () => {
   const env = leerEnv(ejemplo);
 
-  it('levantar: global, las imágenes una sola vez y cada región esperando que esté sana', () => {
+  it('levantar: global, las imágenes una sola vez y cada región sana y con sus semillas', () => {
     const pasos = pasosLevantar(leerOpciones(['--ha']), env);
+    const semillas = [
+      'exec',
+      '-T',
+      'autenticacion',
+      'node',
+      'services/autenticacion/src/semillas.ts',
+    ];
     expect(pasos.map((p) => p.args.slice(0, 3).concat(p.args.slice(7)))).toEqual([
       ['compose', '-p', 'global', 'up', '-d', '--wait'],
       ['compose', '-p', 'r1', 'build'],
       ['compose', '-p', 'r1', '--profile', 'ha', 'up', '-d', '--wait', '--wait-timeout', '300'],
+      ['compose', '-p', 'r1', ...semillas],
       ['compose', '-p', 'r2', '--profile', 'ha', 'up', '-d', '--wait', '--wait-timeout', '300'],
+      ['compose', '-p', 'r2', ...semillas],
     ]);
-    expect(pasos[3]?.entorno.REGION).toBe('region-2');
+    expect(pasos[4]?.entorno.REGION).toBe('region-2');
   });
 
   it('una región que ya se levantó con --ha sigue con el perfil ha', () => {
     const pasos = pasosLevantar(leerOpciones([]), env, ['r2']);
     expect(pasos[2]?.args).not.toContain('--profile');
-    expect(pasos[3]?.args).toEqual(expect.arrayContaining(['--profile', 'ha']));
+    expect(pasos[4]?.args).toEqual(expect.arrayContaining(['--profile', 'ha']));
   });
 
   it('bajar con --solo no toca lo global; reset borra los volúmenes', () => {

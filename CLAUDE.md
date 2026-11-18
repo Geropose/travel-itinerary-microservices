@@ -47,6 +47,10 @@ componentes que no estén ahí.
   `infra/global.compose.yaml` (red global y base de analítica). Las bases de cada región están solo
   en la red de su región (CONST-6); en la red global están nginx, analitica, correo e integraciones.
 - `GET /salud/<servicio>` en el nginx de cada región muestra el `/health` de cada servicio.
+- Puerta entre regiones: el nginx de cada región escucha también en 8090 (no publicado). Autenticación
+  llega por ahí a `/interna/cuentas/existe` y al JWKS de la otra región (`http://nginx:8090/otra-region/autenticacion`).
+- `npm run infra:levantar` corre las semillas de Autenticación: analista de prueba
+  `analista@trotamundos.example` con la contraseña `CONTRASENA_ANALISTA` del `.env`.
 - Las pruebas con todo levantado están en `tests/e2e/infra.test.ts` (`npm run e2e`).
 
 ## Configuración compartida

@@ -324,3 +324,33 @@ describe('middleware del Validador de Intercepción', () => {
     expect(performance.now() - inicio).toBeLessThan(2400);
   });
 });
+
+describe('claves de la otra región', () => {
+  it('si la otra región no responde, arranca igual con las propias y rechaza sus tokens', async () => {
+    const propias = await generarClaves();
+    const deOtra = await generarClaves('otra');
+    const { logger } = loggerDePrueba();
+    const validador = crearValidador({
+      servicio: 'prueba',
+      region: 'region-1',
+      logger,
+      claves: {
+        'region-1': { claves: propias.jwks },
+        // Un puerto donde no escucha nadie: la descarga falla siempre.
+        'region-2': { url: 'http://127.0.0.1:1/.well-known/jwks.json' },
+      },
+      registrar: () => undefined,
+    });
+    await validador.iniciar();
+    await expect(validador.verificarToken(await firmarJwt(propias))).resolves.toMatchObject({
+      region: 'region-1',
+    });
+    await expect(
+      validador.verificarToken(await firmarJwt(deOtra, { region: 'region-2' }), [
+        'region-1',
+        'region-2',
+      ]),
+    ).rejects.toBeInstanceOf(ErrorTokenInvalido);
+    validador.detener();
+  });
+});

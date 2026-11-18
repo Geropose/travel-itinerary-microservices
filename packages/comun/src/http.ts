@@ -80,7 +80,9 @@ export function crearClienteHttp(opciones: OpcionesCliente): ClienteHttp {
     ruta: string,
     llamada: OpcionesLlamada = {},
   ): Promise<RespuestaHttp<T>> {
-    const url = new URL(ruta, urlBase);
+    // La ruta se agrega a la de la URL base (que puede tener un prefijo, por ejemplo
+    // http://nginx:8090/otra-region/autenticacion), en lugar de reemplazarla.
+    const url = new URL(`${urlBase.replace(/\/+$/, '')}/${ruta.replace(/^\/+/, '')}`);
     for (const [clave, valor] of Object.entries(llamada.query ?? {})) {
       if (valor !== undefined) url.searchParams.set(clave, String(valor));
     }

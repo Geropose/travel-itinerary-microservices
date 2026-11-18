@@ -134,11 +134,14 @@ export function entornoRegion(
   env: Record<string, string>,
 ): Record<string, string> {
   const region = PROYECTOS[proyecto];
-  const sufijo = region.toUpperCase().replace('-', '_');
+  const otra = region === 'region-1' ? 'region-2' : 'region-1';
+  const sufijo = (r: string) => r.toUpperCase().replace('-', '_');
   return {
     REGION: region,
-    PUERTO_NGINX: env[`PUERTO_NGINX_${sufijo}`] ?? '',
-    JWT_CLAVE_PRIVADA: env[`JWT_CLAVE_PRIVADA_${sufijo}`] ?? '',
+    OTRA_REGION: otra,
+    PUERTO_NGINX: env[`PUERTO_NGINX_${sufijo(region)}`] ?? '',
+    PUERTO_NGINX_OTRA_REGION: env[`PUERTO_NGINX_${sufijo(otra)}`] ?? '',
+    JWT_CLAVE_PRIVADA: env[`JWT_CLAVE_PRIVADA_${sufijo(region)}`] ?? '',
   };
 }
 
@@ -168,20 +171,35 @@ export function pasosLevantar(
       args: [...compose(primera, ARCHIVO_REGION), 'build'],
       entorno: entornoRegion(primera, env),
     },
-    ...opciones.regiones.map((proyecto) => ({
-      descripcion: `Región ${proyecto} (${PROYECTOS[proyecto]})`,
-      args: [
-        ...compose(proyecto, ARCHIVO_REGION),
-        ...perfil(proyecto),
-        'up',
-        '-d',
-        '--wait',
-        '--wait-timeout',
-        '300',
-        ...opciones.resto,
-      ],
-      entorno: entornoRegion(proyecto, env),
-    })),
+    ...opciones.regiones.flatMap((proyecto) => [
+      {
+        descripcion: `Región ${proyecto} (${PROYECTOS[proyecto]})`,
+        args: [
+          ...compose(proyecto, ARCHIVO_REGION),
+          ...perfil(proyecto),
+          'up',
+          '-d',
+          '--wait',
+          '--wait-timeout',
+          '300',
+          ...opciones.resto,
+        ],
+        entorno: entornoRegion(proyecto, env),
+      },
+      {
+        // Analista de prueba (se puede correr varias veces).
+        descripcion: `Semillas de Autenticación en ${proyecto}`,
+        args: [
+          ...compose(proyecto, ARCHIVO_REGION),
+          'exec',
+          '-T',
+          'autenticacion',
+          'node',
+          'services/autenticacion/src/semillas.ts',
+        ],
+        entorno: entornoRegion(proyecto, env),
+      },
+    ]),
   ];
 }
 
