@@ -1,0 +1,13 @@
+# Contexto de las imágenes de los servicios (se construyen desde la raíz del repositorio).
+**/node_modules
+**/dist
+**/coverage
+.git
+.github
+.claude
+.env
+.env.*
+!.env.example
+**/test
+tests
+*.log

@@ -61,7 +61,7 @@ function sinValidador(): RequestHandler {
  * el contrato (express-openapi-validator), errores problem+json y apagado ordenado.
  */
 export function crearServidor(opciones: OpcionesServidor): Servidor {
-  const { servicio, region, puerto, logger, validador } = opciones;
+  const { puerto, logger, validador } = opciones;
   const spec = cargarSpec(opciones.rutaSpec);
   const app = express();
   app.disable('x-powered-by');
@@ -183,7 +183,7 @@ export function crearServidor(opciones: OpcionesServidor): Servidor {
         const s = app.listen(puerto, () => resolver(s));
       });
       const real = (servidorHttp.address() as AddressInfo).port;
-      logger.info({ puerto: real, servicio, region }, 'Servicio escuchando');
+      logger.info({ puerto: real }, 'Servicio escuchando');
       if (opciones.manejarSenales ?? true) {
         for (const senal of ['SIGTERM', 'SIGINT'] as const) {
           process.once(senal, () => {

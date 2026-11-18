@@ -19,12 +19,15 @@
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run --passWithNoTests",
     "test:contratos": "node infra/scripts/lint-contratos.mjs && vitest run --passWithNoTests contrato",
-    "e2e": "vitest run --passWithNoTests --config tests/e2e/vitest.config.ts"
+    "e2e": "vitest run --passWithNoTests --config tests/e2e/vitest.config.ts",
+    "nuevo-servicio": "node infra/scripts/nuevo-servicio.ts",
+    "mock": "node infra/scripts/mock.ts"
   },
   "devDependencies": {
     "@asyncapi/parser": "^3.6.6",
     "@eslint/js": "^10.0.1",
     "@redocly/cli": "^2.79.0",
+    "@stoplight/prism-cli": "^5.14.2",
     "@types/node": "^24.19.2",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",

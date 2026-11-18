@@ -1,0 +1,19 @@
+{
+  "name": "@trotamundos/viajes",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Servicio viajes de Trotamundos (contrato: specs/openapi/viajes.yaml)",
+  "type": "module",
+  "config": {
+    "puerto": 3004
+  },
+  "scripts": {
+    "start": "node src/index.ts",
+    "dev": "node --watch src/index.ts",
+    "test": "vitest run --root ../.. services/viajes"
+  },
+  "dependencies": {
+    "@trotamundos/comun": "0.1.0",
+    "zod": "^4.6.7"
+  }
+}

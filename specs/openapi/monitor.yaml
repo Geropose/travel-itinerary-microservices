@@ -1,0 +1,41 @@
+# Contrato REST del Monitor de salud (docs/CONVENCIONES.md 4.2 y 4.3; wiki: Iteracion-1, ADR-007).
+# El monitor no tiene rutas de negocio: solo documenta su propio GET /health, como todos los servicios.
+# Qué hace (ping cada 5 s, sacar del nginx y reiniciar) está descrito en gateway.yaml.
+openapi: 3.1.0
+info:
+  title: Trotamundos — Monitor de salud
+  version: 0.1.0
+  description: |
+    Hay uno por región (Iteración 1, ADR-007). Hace un ping a `GET /health` de cada instancia
+    (gateway y cada microservicio) cada 5 s. Si una instancia no responde `200` 3 veces seguidas
+    (15 s), la saca del balanceador (nginx) y la reinicia; cuando vuelve a responder `200`, la vuelve
+    a agregar. No recibe solicitudes de los usuarios: su única ruta es su propio `GET /health`.
+servers:
+  - url: http://monitor:3010
+    description: Monitor dentro de la red de la región. No se publica hacia afuera.
+tags:
+  - name: salud
+    description: Estado del servicio (ADR-007).
+paths:
+  /health:
+    get:
+      tags: [salud]
+      operationId: consultarSalud
+      summary: Estado del monitor
+      description: >-
+        Responde 200 si el monitor está corriendo y 503 si no. Es pública y solo se usa desde la red de
+        la región (por ejemplo, el HEALTHCHECK de su contenedor).
+      security: []
+      parameters:
+        - $ref: './comun.yaml#/components/parameters/XRequestId'
+      responses:
+        '200':
+          $ref: './comun.yaml#/components/responses/Salud'
+        '503':
+          $ref: './comun.yaml#/components/responses/NoDisponible'
+components:
+  securitySchemes:
+    bearerJWT:
+      $ref: './comun.yaml#/components/securitySchemes/bearerJWT'
+security:
+  - bearerJWT: []

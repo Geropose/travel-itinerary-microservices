@@ -1,0 +1,19 @@
+{
+  "name": "@trotamundos/correo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Servicio correo de Trotamundos (contrato: specs/openapi/correo.yaml)",
+  "type": "module",
+  "config": {
+    "puerto": 3003
+  },
+  "scripts": {
+    "start": "node src/index.ts",
+    "dev": "node --watch src/index.ts",
+    "test": "vitest run --root ../.. services/correo"
+  },
+  "dependencies": {
+    "@trotamundos/comun": "0.1.0",
+    "zod": "^4.6.7"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "name": "@trotamundos/asistente",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Servicio asistente de Trotamundos (contrato: specs/openapi/asistente.yaml)",
+  "type": "module",
+  "config": {
+    "puerto": 3007
+  },
+  "scripts": {
+    "start": "node src/index.ts",
+    "dev": "node --watch src/index.ts",
+    "test": "vitest run --root ../.. services/asistente"
+  },
+  "dependencies": {
+    "@trotamundos/comun": "0.1.0",
+    "zod": "^4.6.7"
+  }
+}
