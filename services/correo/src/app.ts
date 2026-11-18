@@ -1,6 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import {
   crearServidor,
+  type Broker,
   type Chequeo,
   type Logger,
   type Pool,
@@ -20,6 +21,7 @@ import {
   type Examinador,
   type IntervalosExaminador,
 } from './examinador.ts';
+import { crearProcesadorCorreo, type ProcesadorCorreo } from './procesador.ts';
 import * as repositorio from './repositorio.ts';
 import { registrarRutas, type Negocio } from './rutas.ts';
 import { crearGestorTokens } from './tokens.ts';
@@ -46,6 +48,7 @@ export interface OpcionesApp {
 
 export interface OpcionesNegocioCorreo {
   pool: Pool;
+  region?: Region;
   claveTokensBase64: string;
   urlWeb: string;
   logger: Logger;
@@ -55,6 +58,7 @@ export interface OpcionesNegocioCorreo {
   gmail?: Parameters<typeof crearAdaptadorGmail>[0];
   outlook?: Parameters<typeof crearAdaptadorOutlook>[0];
   cola?: ColaBuzones;
+  broker?: Broker;
   viajes?: ClienteViajes;
   pushGmail?: {
     secreto: string;
@@ -62,6 +66,8 @@ export interface OpcionesNegocioCorreo {
   };
   intervalos?: Partial<IntervalosExaminador>;
   backoff429?: Partial<ConfigBackoff429>;
+  cantidadProcesadores?: number;
+  concurrenciaLectura?: number;
 }
 
 const INTERVALOS_POR_DEFECTO: IntervalosExaminador = {
@@ -77,6 +83,7 @@ const BACKOFF_POR_DEFECTO: ConfigBackoff429 = {
 
 export interface NegocioCorreo extends Negocio {
   examinador: Examinador;
+  procesador: ProcesadorCorreo;
 }
 
 /** Construye las dependencias de negocio de correo (clave AES, adaptadores, tokens y examinador). */
@@ -124,12 +131,25 @@ export function crearNegocioCorreo(opciones: OpcionesNegocioCorreo): NegocioCorr
     },
   });
 
+  const procesador = crearProcesadorCorreo({
+    pool: opciones.pool,
+    region: opciones.region ?? 'region-1',
+    gestorTokens,
+    cola: opciones.cola,
+    broker: opciones.broker,
+    logger: opciones.logger,
+    cantidadProcesadores: opciones.cantidadProcesadores ?? 4,
+    concurrenciaLectura: opciones.concurrenciaLectura ?? 5,
+    ahora,
+  });
+
   return {
     pool: opciones.pool,
     claveTokens,
     adaptadores,
     gestorTokens,
     examinador,
+    procesador,
     urlWeb: opciones.urlWeb,
     logger: opciones.logger,
     ...(opciones.pushGmail ? { pushGmail: opciones.pushGmail } : {}),
