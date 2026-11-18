@@ -72,7 +72,7 @@ info:
     de `comun.yaml`. El costo de validar en el gateway y en cada servicio es de unos 25 ms por solicitud,
     por debajo del tope de 200 ms de QA-9.
 
-    ## Enrutador global (Iteraciones 4 y 6, ADR-013)
+    ## Enrutador global (Iteraciones 4 y 6, ADR-013 y ADR-017)
 
     No tiene negocio: está delante de las dos regiones (`http://localhost:8000`) y pasa cada
     solicitud, sin cambiarla, al nginx de una región. Su única ruta propia es `GET /health`
@@ -107,8 +107,13 @@ info:
     ignora el evento. Al proveedor le responde con la primera respuesta `2xx`; si ninguna región
     responde `2xx`, con la peor.
 
-    **Failover (QA-11):** el enrutador consulta `GET /health` del gateway de cada región; si una
-    región no responde durante unos 30 s, manda todo a la otra.
+    **Sin failover entre regiones (Iteración 6, ADR-013 ajustado por ADR-017):** el enrutador no
+    manda a una región las solicitudes de los usuarios de la otra, aunque la suya no responda: sus
+    datos personales no pueden estar fuera de su región (CONST-6) y el gateway de la otra región
+    rechazaría su JWT con `403`. Si una región no responde, sus solicitudes reciben `503`. La caída
+    de un centro de datos se resuelve dentro de la región: la read replica del otro centro de datos
+    pasa a ser la principal. Si cae la región entera, sus usuarios quedan sin servicio hasta que se
+    recupere (riesgo aceptado en la Iteración 6).
 
     ## Monitor de salud (Iteración 1, ADR-007)
 
