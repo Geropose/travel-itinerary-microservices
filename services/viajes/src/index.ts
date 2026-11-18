@@ -12,11 +12,16 @@ import {
 } from '@trotamundos/comun';
 import { crearApp, SERVICIO } from './app.ts';
 import { esquemaConfig } from './config.ts';
+import { registrarConsumidoresViajes } from './consumidores.ts';
+import { crearGestorViajes } from './gestor.ts';
 
 const config = cargarConfig(esquemaConfig);
 const logger = crearLogger({ servicio: SERVICIO, region: config.REGION, nivel: config.NIVEL_LOG });
 
-const pool = crearPool({ url: config.URL_BASE });
+const pool = crearPool({
+  url: config.URL_BASE,
+  maximo: Math.max(10, config.CANTIDAD_CONSUMIDORES * 2),
+});
 await migrar(
   pool,
   [MIGRACIONES_EVENTOS, fileURLToPath(new URL('../migrations/', import.meta.url))],
@@ -36,6 +41,19 @@ const validador = crearValidador({
   registrar: registroPorEvento(broker, logger),
   // Rutas internas con token de servicio: 'MÉTODO /ruta': { servicios: [...] }
   reglas: {},
+});
+const gestor = crearGestorViajes({
+  region: config.REGION,
+  logger,
+  margenAgrupacionMs: config.MARGEN_AGRUPACION_HORAS * 60 * 60 * 1000,
+});
+await registrarConsumidoresViajes({
+  broker,
+  pool,
+  gestor,
+  logger,
+  cantidadConsumidores: config.CANTIDAD_CONSUMIDORES,
+  prefetch: config.PREFETCH_CONSUMIDORES,
 });
 const outbox = iniciarPublicadorOutbox({ pool, broker, logger });
 
