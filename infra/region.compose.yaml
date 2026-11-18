@@ -1,0 +1,316 @@
+# Una región de Trotamundos (Iteraciones 4 y 6, Vista de despliegue). Se levanta dos veces, como
+# proyectos r1 y r2: npm run infra:levantar pasa REGION, PUERTO_NGINX y JWT_CLAVE_PRIVADA de cada
+# una y el resto sale del .env (npm run infra:secretos).
+#
+# Redes:
+# - region: la red propia de la región. Las bases, el broker y la cache están SOLO acá, así que
+#   desde la otra región no se llega a ellas (CONST-6, ADR-017).
+# - global (trotamundos-global, la crea global.compose.yaml): nginx (para el enrutador global),
+#   analitica (el anonimizador escribe en la base de analítica) y correo e integraciones (los mocks
+#   de los sistemas externos).
+#
+# Centros de datos (ADR-013, ADR-017): la base principal de Viajes está en el A y su read replica
+# en el B, dentro de la misma región. En el prototipo es una etiqueta; en producción son dos sitios.
+
+x-servicio: &servicio
+  restart: unless-stopped
+  networks: [region]
+  depends_on: &dependencias
+    postgres: { condition: service_healthy }
+    rabbitmq: { condition: service_healthy }
+    autenticacion: { condition: service_healthy }
+
+# Variables de todos los servicios con base, broker y JWT (docs/CONVENCIONES.md 4.3).
+x-entorno: &entorno
+  REGION: ${REGION:?Falta REGION (usar npm run infra:levantar)}
+  NIVEL_LOG: ${NIVEL_LOG:-info}
+  URL_BROKER: amqp://trotamundos:${CLAVE_BROKER:?}@rabbitmq:5672
+  URL_JWKS: http://autenticacion:3001/.well-known/jwks.json
+
+x-postgres: &postgres
+  image: postgres:17-alpine
+  restart: unless-stopped
+  networks: [region]
+  healthcheck:
+    # Por TCP: durante la inicialización la imagen solo escucha por socket local.
+    test: [CMD-SHELL, pg_isready -h 127.0.0.1 -U admin -d postgres]
+    interval: 5s
+    timeout: 3s
+    retries: 10
+    start_period: 30s
+
+x-rabbitmq: &rabbitmq
+  image: rabbitmq:4-alpine
+  restart: unless-stopped
+  networks: [region]
+  environment:
+    RABBITMQ_DEFAULT_USER: trotamundos
+    RABBITMQ_DEFAULT_PASS: ${CLAVE_BROKER:?}
+    # Los nodos del cluster (y sus herramientas de línea de comandos) comparten la cookie.
+    RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: -setcookie ${COOKIE_BROKER:?}
+    RABBITMQ_CTL_ERL_ARGS: -setcookie ${COOKIE_BROKER:?}
+  healthcheck:
+    test: [CMD, rabbitmq-diagnostics, -q, check_running]
+    interval: 5s
+    timeout: 10s
+    retries: 12
+    start_period: 20s
+
+services:
+  # --- Entrada de la región -----------------------------------------------------------------
+
+  nginx:
+    image: nginx:1.28-alpine
+    restart: unless-stopped
+    ports: ['${PUERTO_NGINX:?Falta PUERTO_NGINX (usar npm run infra:levantar)}:8080']
+    # Arranca con el gateway ya sano, así su nombre resuelve desde la primera solicitud.
+    depends_on:
+      gateway: { condition: service_healthy }
+    volumes:
+      - ./nginx/region.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      region: {}
+      global:
+        # El enrutador global llega a cada región por este nombre (nginx-region-1, nginx-region-2).
+        aliases:
+          - nginx-${REGION}
+    healthcheck:
+      test: [CMD, wget, -qO-, http://127.0.0.1:8080/nginx/salud]
+      interval: 5s
+      timeout: 2s
+      retries: 3
+    labels:
+      trotamundos.servicio: nginx
+
+  gateway:
+    <<: *servicio
+    image: trotamundos/gateway:dev
+    build: { context: .., dockerfile: services/gateway/Dockerfile }
+    # Dos instancias detrás de nginx; se escala con --scale gateway=N.
+    deploy: { replicas: 2 }
+    environment:
+      <<: *entorno
+      URL_BASE: postgres://gateway:${CLAVE_BD_GATEWAY:?}@postgres:5432/registro_accesos
+    labels:
+      trotamundos.servicio: gateway
+
+  # --- Servicios de negocio -----------------------------------------------------------------
+
+  autenticacion:
+    <<: *servicio
+    image: trotamundos/autenticacion:dev
+    build: { context: .., dockerfile: services/autenticacion/Dockerfile }
+    depends_on:
+      postgres: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+    environment:
+      <<: *entorno
+      URL_BASE: postgres://autenticacion:${CLAVE_BD_AUTENTICACION:?}@postgres:5432/autenticacion
+      JWT_CLAVE_PRIVADA: ${JWT_CLAVE_PRIVADA:?Falta JWT_CLAVE_PRIVADA (usar npm run infra:levantar)}
+    labels:
+      trotamundos.servicio: autenticacion
+
+  usuarios:
+    <<: *servicio
+    image: trotamundos/usuarios:dev
+    build: { context: .., dockerfile: services/usuarios/Dockerfile }
+    environment:
+      <<: *entorno
+      URL_BASE: postgres://usuarios:${CLAVE_BD_USUARIOS:?}@postgres:5432/usuarios
+    labels:
+      trotamundos.servicio: usuarios
+
+  correo:
+    <<: *servicio
+    image: trotamundos/correo:dev
+    build: { context: .., dockerfile: services/correo/Dockerfile }
+    networks: [region, global]
+    environment:
+      <<: *entorno
+      URL_BASE: postgres://correo:${CLAVE_BD_CORREO:?}@postgres:5432/correo
+      CLAVE_TOKENS_CORREO: ${CLAVE_TOKENS_CORREO:?}
+    labels:
+      trotamundos.servicio: correo
+
+  viajes:
+    <<: *servicio
+    image: trotamundos/viajes:dev
+    build: { context: .., dockerfile: services/viajes/Dockerfile }
+    depends_on:
+      <<: *dependencias
+      postgres-viajes: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    environment:
+      <<: *entorno
+      # Escrituras en la base principal (centro de datos A).
+      URL_BASE: postgres://viajes:${CLAVE_BD_VIAJES:?}@postgres-viajes:5432/viajes
+      # Lecturas en la read replica (centro de datos B) y cache del panel (Iteración 4).
+      URL_BASE_LECTURA: postgres://viajes:${CLAVE_BD_VIAJES:?}@postgres-viajes-replica:5432/viajes
+      URL_CACHE: redis://redis:6379
+    labels:
+      trotamundos.servicio: viajes
+
+  integraciones:
+    <<: *servicio
+    image: trotamundos/integraciones:dev
+    build: { context: .., dockerfile: services/integraciones/Dockerfile }
+    networks: [region, global]
+    environment:
+      <<: *entorno
+      URL_BASE: postgres://integraciones:${CLAVE_BD_INTEGRACIONES:?}@postgres:5432/integraciones
+    labels:
+      trotamundos.servicio: integraciones
+
+  analitica:
+    <<: *servicio
+    image: trotamundos/analitica:dev
+    build: { context: .., dockerfile: services/analitica/Dockerfile }
+    networks: [region, global]
+    environment:
+      <<: *entorno
+      URL_BASE: postgres://analitica:${CLAVE_BD_ANALITICA:?}@postgres:5432/analitica
+      # Base de analítica global (sin datos personales), por la red global (Iteración 6).
+      URL_BASE_ANALITICA: postgres://analitica:${CLAVE_BD_ANALITICA_GLOBAL:?}@postgres-analitica:5432/analitica
+      SECRETO_ANALITICA: ${SECRETO_ANALITICA:?}
+    labels:
+      trotamundos.servicio: analitica
+
+  asistente:
+    <<: *servicio
+    image: trotamundos/asistente:dev
+    build: { context: .., dockerfile: services/asistente/Dockerfile }
+    environment:
+      <<: *entorno
+      URL_BASE: postgres://asistente:${CLAVE_BD_ASISTENTE:?}@postgres:5432/asistente
+    labels:
+      trotamundos.servicio: asistente
+
+  monitor:
+    image: trotamundos/monitor:dev
+    build: { context: .., dockerfile: services/monitor/Dockerfile }
+    restart: unless-stopped
+    networks: [region]
+    environment:
+      REGION: ${REGION:?}
+      NIVEL_LOG: ${NIVEL_LOG:-info}
+    labels:
+      trotamundos.servicio: monitor
+
+  # --- Datos -------------------------------------------------------------------------------
+
+  # Bases principales de la región (centro de datos A): una base y un usuario por servicio
+  # (ADR-001), más registro_accesos del gateway (Iteración 5).
+  postgres:
+    <<: *postgres
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: ${CLAVE_BD_ADMIN:?}
+      BASES: >-
+        registro_accesos:gateway autenticacion:autenticacion usuarios:usuarios correo:correo
+        integraciones:integraciones analitica:analitica asistente:asistente
+      CLAVE_BD_GATEWAY: ${CLAVE_BD_GATEWAY:?}
+      CLAVE_BD_AUTENTICACION: ${CLAVE_BD_AUTENTICACION:?}
+      CLAVE_BD_USUARIOS: ${CLAVE_BD_USUARIOS:?}
+      CLAVE_BD_CORREO: ${CLAVE_BD_CORREO:?}
+      CLAVE_BD_INTEGRACIONES: ${CLAVE_BD_INTEGRACIONES:?}
+      CLAVE_BD_ANALITICA: ${CLAVE_BD_ANALITICA:?}
+      CLAVE_BD_ASISTENTE: ${CLAVE_BD_ASISTENTE:?}
+    volumes:
+      - postgres:/var/lib/postgresql/data
+      - ./postgres/crear-bases.sh:/docker-entrypoint-initdb.d/10-crear-bases.sh:ro
+    labels:
+      trotamundos.centro-datos: a
+
+  # Base principal de Viajes (centro de datos A): recibe las escrituras (ADR-012).
+  postgres-viajes:
+    <<: *postgres
+    # Guarda WAL de sobra por si la réplica se queda atrás un rato.
+    command: [postgres, -c, wal_keep_size=256MB]
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: ${CLAVE_BD_ADMIN:?}
+      BASES: viajes:viajes
+      CLAVE_BD_VIAJES: ${CLAVE_BD_VIAJES:?}
+      CLAVE_BD_REPLICACION: ${CLAVE_BD_REPLICACION:?}
+    volumes:
+      - postgres-viajes:/var/lib/postgresql/data
+      - ./postgres/crear-bases.sh:/docker-entrypoint-initdb.d/10-crear-bases.sh:ro
+      - ./postgres/permitir-replicacion.sh:/docker-entrypoint-initdb.d/20-permitir-replicacion.sh:ro
+    labels:
+      trotamundos.centro-datos: a
+
+  # Read replica de Viajes (centro de datos B): se copia con pg_basebackup y queda en standby,
+  # con replicación nativa. Responde las lecturas; si la principal falla, se promueve (ADR-012).
+  postgres-viajes-replica:
+    <<: *postgres
+    entrypoint: [bash, /scripts/iniciar-replica.sh]
+    depends_on:
+      postgres-viajes: { condition: service_healthy }
+    environment:
+      PRINCIPAL: postgres-viajes
+      CLAVE_BD_REPLICACION: ${CLAVE_BD_REPLICACION:?}
+    volumes:
+      - postgres-viajes-replica:/var/lib/postgresql/data
+      - ./postgres/iniciar-replica.sh:/scripts/iniciar-replica.sh:ro
+    labels:
+      trotamundos.centro-datos: b
+
+  # Cache del panel (Iteración 4, QA-2). Es una cache: no guarda nada en disco.
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    command: [redis-server, --save, '', --appendonly, 'no']
+    networks: [region]
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      timeout: 2s
+      retries: 5
+
+  # --- Broker de mensajes (ADR-002) ----------------------------------------------------------
+
+  rabbitmq:
+    <<: *rabbitmq
+    hostname: rabbitmq
+    volumes:
+      - rabbitmq:/var/lib/rabbitmq
+      - ./rabbitmq/quorum.conf:/etc/rabbitmq/conf.d/20-quorum.conf:ro
+
+  # Con el perfil ha (npm run infra:levantar -- --ha): 3 nodos en cluster. Arrancan a la vez que el
+  # nodo 1 (sin depends_on): al reiniciar, un nodo del cluster espera a los otros para tener quórum.
+  # La primera vez, unirse-al-cluster.sh los hace esperar al nodo 1.
+  rabbitmq-2:
+    <<: *rabbitmq
+    hostname: rabbitmq-2
+    profiles: [ha]
+    entrypoint: [bash, /scripts/unirse-al-cluster.sh]
+    volumes:
+      - rabbitmq-2:/var/lib/rabbitmq
+      - ./rabbitmq/quorum.conf:/etc/rabbitmq/conf.d/20-quorum.conf:ro
+      - ./rabbitmq/unirse-al-cluster.conf:/etc/rabbitmq/conf.d/30-cluster.conf:ro
+      - ./rabbitmq/unirse-al-cluster.sh:/scripts/unirse-al-cluster.sh:ro
+
+  rabbitmq-3:
+    <<: *rabbitmq
+    hostname: rabbitmq-3
+    profiles: [ha]
+    entrypoint: [bash, /scripts/unirse-al-cluster.sh]
+    volumes:
+      - rabbitmq-3:/var/lib/rabbitmq
+      - ./rabbitmq/quorum.conf:/etc/rabbitmq/conf.d/20-quorum.conf:ro
+      - ./rabbitmq/unirse-al-cluster.conf:/etc/rabbitmq/conf.d/30-cluster.conf:ro
+      - ./rabbitmq/unirse-al-cluster.sh:/scripts/unirse-al-cluster.sh:ro
+
+networks:
+  region: {}
+  global:
+    external: true
+    name: trotamundos-global
+
+volumes:
+  postgres:
+  postgres-viajes:
+  postgres-viajes-replica:
+  rabbitmq:
+  rabbitmq-2:
+  rabbitmq-3:

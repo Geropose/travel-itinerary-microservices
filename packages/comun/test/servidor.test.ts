@@ -150,3 +150,29 @@ describe('crearServidor', () => {
     await expect(fetch(`http://127.0.0.1:${puerto}/health`)).rejects.toThrow();
   });
 });
+
+describe('crearServidor sin validador', () => {
+  it('las rutas protegidas responden 401 y las públicas atienden', async () => {
+    const sinValidador = crearServidor({
+      servicio: 'prueba',
+      rutaSpec,
+      region: 'region-1',
+      puerto: 0,
+      logger,
+      manejarSenales: false,
+    });
+    sinValidador.app.get('/publica', (_req, res) => {
+      res.json({ texto: 'hola' });
+    });
+    sinValidador.app.get('/privada', (_req, res) => {
+      res.json({ texto: 'no tendría que llegar acá' });
+    });
+    const base = `http://127.0.0.1:${await sinValidador.iniciar()}`;
+    const privada = await fetch(`${base}/privada`);
+    expect(privada.status).toBe(401);
+    expect(privada.headers.get('content-type')).toContain('application/problem+json');
+    expect((await fetch(`${base}/publica`)).status).toBe(200);
+    expect((await fetch(`${base}/no-existe`)).status).toBe(404);
+    await sinValidador.detener();
+  });
+});

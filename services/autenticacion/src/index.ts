@@ -11,11 +11,13 @@ import {
   registroPorEvento,
 } from '@trotamundos/comun';
 import { crearApp, SERVICIO } from './app.ts';
+import { leerClaves } from './claves.ts';
 import { esquemaConfig } from './config.ts';
 
 const config = cargarConfig(esquemaConfig);
 const logger = crearLogger({ servicio: SERVICIO, region: config.REGION, nivel: config.NIVEL_LOG });
 
+const claves = leerClaves(config.JWT_CLAVE_PRIVADA, config.REGION);
 const pool = crearPool({ url: config.URL_BASE });
 await migrar(
   pool,
@@ -32,7 +34,8 @@ const validador = crearValidador({
   servicio: SERVICIO,
   region: config.REGION,
   logger,
-  claves: { [config.REGION]: { url: config.URL_JWKS } },
+  // Autenticación verifica con sus propias claves: no se descarga el JWKS a sí misma.
+  claves: { [config.REGION]: { claves: claves.jwks } },
   registrar: registroPorEvento(broker, logger),
   // Rutas internas con token de servicio: 'MÉTODO /ruta': { servicios: [...] }
   reglas: {},
@@ -44,6 +47,7 @@ const servidor = crearApp({
   puerto: config.PUERTO,
   logger,
   validador,
+  jwks: claves.jwks,
   chequeos: {
     base: () => pool.query('SELECT 1'),
     broker: () => broker.verificar(),

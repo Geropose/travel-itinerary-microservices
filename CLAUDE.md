@@ -36,6 +36,18 @@ componentes que no estén ahí.
 | `npm run e2e` | Pruebas de extremo a extremo de `tests/e2e`, contra el sistema levantado |
 | `npm run nuevo-servicio -- <nombre> <puerto>` | Genera `services/<nombre>` desde `infra/plantilla-servicio` (necesita `specs/openapi/<nombre>.yaml`; con `--sin-dependencias`, sin base, broker ni JWT). Después, `npm install` |
 | `npm run mock -- <servicio>` | Mock del servicio con Prism a partir de su contrato, en su mismo puerto |
+| `npm run infra:secretos` | Genera `.env` desde `.env.example` con secretos de desarrollo (solo completa las variables que falten; `-- --regenerar` genera todo) |
+| `npm run infra:levantar` | Levanta lo global y las regiones r1 y r2 con Docker Compose y espera que todo esté sano (`-- --solo r1`, `-- --ha`, `-- --scale gateway=3`). nginx: r1 en 8081, r2 en 8082 |
+| `npm run infra:bajar` / `infra:reset` | Baja los contenedores; `reset` borra también los volúmenes (`-- --solo r1`) |
+| `npm run infra:logs` | Logs de las regiones (`-- --solo r1 gateway viajes`) |
+
+## Infraestructura
+
+- `infra/region.compose.yaml` (una región, se levanta como proyectos r1 y r2) e
+  `infra/global.compose.yaml` (red global y base de analítica). Las bases de cada región están solo
+  en la red de su región (CONST-6); en la red global están nginx, analitica, correo e integraciones.
+- `GET /salud/<servicio>` en el nginx de cada región muestra el `/health` de cada servicio.
+- Las pruebas con todo levantado están en `tests/e2e/infra.test.ts` (`npm run e2e`).
 
 ## Configuración compartida
 

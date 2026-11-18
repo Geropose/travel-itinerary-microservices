@@ -7,8 +7,8 @@ export const esquemaConfig = esquemaBase.extend({
   URL_BASE: z.url(),
   /** RabbitMQ de la región (ADR-002). */
   URL_BROKER: z.url(),
-  /** Clave pública del JWT: GET /.well-known/jwks.json de Autenticación de la región (ADR-014). */
-  URL_JWKS: z.url(),
+  /** Clave privada RS256 del JWT de la región, PEM en base64 (ADR-014; npm run infra:secretos). */
+  JWT_CLAVE_PRIVADA: z.string().min(1),
 });
 
 export type Config = ReturnType<typeof esquemaConfig.parse>;
