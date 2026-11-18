@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buscarViajeParaAgrupar,
+  buscarViajesParaAgrupar,
   calcularResumenViaje,
   distanciaEntreRangosMs,
   MARGEN_AGRUPACION_MS_DEFECTO,
@@ -88,11 +89,16 @@ describe('agrupación de reservas por fechas (UC-5)', () => {
       fin: '2026-12-08T10:00:00Z',
       estado: 'activo',
     };
-    // A 36 h de viajeA y 12 h de viajeB -> elige viajeB
+    // A 36 h de viajeA y 12 h de viajeB -> elige viajeB y devuelve ambos candidatos puenteados
     expect(
       buscarViajeParaAgrupar([viajeA, viajeB], '2026-12-05T00:00:00Z', '2026-12-05T22:00:00Z')
         ?.viajeId,
     ).toBe(viajeB.viajeId);
+    expect(
+      buscarViajesParaAgrupar([viajeA, viajeB], '2026-12-05T00:00:00Z', '2026-12-05T22:00:00Z').map(
+        (v) => v.viajeId,
+      ),
+    ).toEqual([viajeB.viajeId, viajeA.viajeId]);
   });
 
   it('calcula inicio, fin, destino principal (priorizando hotel o vuelo de ida) y nombre', () => {

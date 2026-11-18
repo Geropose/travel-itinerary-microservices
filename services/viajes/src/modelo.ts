@@ -37,6 +37,92 @@ export interface ViajeConReservas extends Viaje {
   reservas: Reserva[];
 }
 
+/** Reserva tal como la expone specs/openapi/viajes.yaml (sin usuarioId ni correoId). */
+export interface ReservaPublica {
+  reservaId: string;
+  viajeId: string;
+  proveedor: string;
+  tipoReserva: TipoReserva;
+  numeroReserva: string;
+  inicio: string;
+  fin: string;
+  origen?: string;
+  destino: string;
+  estado: EstadoReserva;
+  detalle: Record<string, unknown>;
+  origenCambio: OrigenCambio;
+  actualizadoEn: string;
+}
+
+/** Viaje tal como lo expone specs/openapi/viajes.yaml (sin campo interno nombre). */
+export interface ViajePublico {
+  viajeId: string;
+  usuarioId: string;
+  destino: string;
+  inicio: string;
+  fin: string;
+  estado: EstadoViaje;
+  reservas: ReservaPublica[];
+}
+
+export interface PanelPublico {
+  viajes: ViajePublico[];
+}
+
+/** Alta manual de una reserva (POST /reservas, UC-4). */
+export interface NuevaReservaDatos {
+  viajeId?: string;
+  proveedor: string;
+  tipoReserva: TipoReserva;
+  numeroReserva: string;
+  inicio: string;
+  fin: string;
+  origen?: string;
+  destino: string;
+  detalle?: Record<string, unknown>;
+}
+
+/** Cambio manual parcial de una reserva (PATCH /reservas/{reservaId}, UC-4). */
+export interface CambioReservaDatos {
+  viajeId?: string;
+  inicio?: string;
+  fin?: string;
+  origen?: string;
+  destino?: string;
+  estado?: EstadoReserva;
+  detalle?: Record<string, unknown>;
+}
+
+export function aReservaPublica(reserva: Reserva): ReservaPublica {
+  return {
+    reservaId: reserva.reservaId,
+    viajeId: reserva.viajeId,
+    proveedor: reserva.proveedor,
+    tipoReserva: reserva.tipoReserva,
+    numeroReserva: reserva.numeroReserva,
+    inicio: reserva.inicio,
+    fin: reserva.fin,
+    ...(reserva.origen !== undefined ? { origen: reserva.origen } : {}),
+    destino: reserva.destino,
+    estado: reserva.estado,
+    detalle: reserva.detalle,
+    origenCambio: reserva.origenCambio,
+    actualizadoEn: reserva.actualizadoEn,
+  };
+}
+
+export function aViajePublico(viaje: ViajeConReservas): ViajePublico {
+  return {
+    viajeId: viaje.viajeId,
+    usuarioId: viaje.usuarioId,
+    destino: viaje.destino,
+    inicio: viaje.inicio,
+    fin: viaje.fin,
+    estado: viaje.estado,
+    reservas: viaje.reservas.map(aReservaPublica),
+  };
+}
+
 /** Datos del evento ReservaDetectada (specs/schemas/ReservaDetectada.json). */
 export interface ReservaDetectadaDatos {
   usuarioId: string;
