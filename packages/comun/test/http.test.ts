@@ -44,6 +44,14 @@ describe('cliente http', () => {
     expect(ultimos.authorization).toBe('Bearer jwt-del-usuario');
   });
 
+  it('una URL base con prefijo lo conserva', async () => {
+    for (const base of [`${url}/prefijo/servicio`, `${url}/prefijo/servicio/`]) {
+      const cliente = crearClienteHttp({ urlBase: base });
+      const respuesta = await cliente.get<{ url: string }>('/eco', { query: { a: 'b' } });
+      expect(respuesta.datos.url).toBe('/prefijo/servicio/eco?a=b');
+    }
+  });
+
   it('un token explícito reemplaza al propagado y null no manda ninguno', async () => {
     const cliente = crearClienteHttp({ urlBase: url });
     await conContexto({ requestId: 'x', token: 'jwt' }, () =>

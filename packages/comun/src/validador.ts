@@ -130,18 +130,35 @@ export function crearValidador(opciones: OpcionesValidador): Validador {
     logger.info({ regionClaves: r }, 'Claves del JWKS descargadas');
   }
 
+  let detenido = false;
+
+  /** Reintenta hasta descargar las claves (o hasta que se detenga el validador). */
+  async function cargarConReintentos(r: Region, fuente: FuenteClaves): Promise<void> {
+    for (let intento = 1; !detenido; intento++) {
+      try {
+        await cargarClaves(r, fuente);
+        return;
+      } catch (error) {
+        logger.warn(
+          { err: error, intento, regionClaves: r },
+          'No se pudo descargar el JWKS: reintentando',
+        );
+        await new Promise((resolver) => setTimeout(resolver, Math.min(5000, 250 * intento)));
+      }
+    }
+  }
+
   async function iniciar(): Promise<void> {
     for (const r of REGIONES) {
       const fuente = opciones.claves[r];
       if (!fuente) continue;
-      for (let intento = 1; ; intento++) {
-        try {
-          await cargarClaves(r, fuente);
-          break;
-        } catch (error) {
-          logger.warn({ err: error, intento }, 'No se pudo descargar el JWKS: reintentando');
-          await new Promise((resolver) => setTimeout(resolver, Math.min(5000, 250 * intento)));
-        }
+      if (r === region) {
+        // Sin las claves propias no se puede atender: se espera hasta tenerlas.
+        await cargarConReintentos(r, fuente);
+      } else {
+        // Las de la otra región se cargan aparte: si esa región está caída, esta igual arranca, y
+        // sus tokens se rechazan hasta tener las claves (ADR-017).
+        void cargarConReintentos(r, fuente);
       }
       if ('url' in fuente) {
         const t = setInterval(() => {
@@ -359,7 +376,10 @@ export function crearValidador(opciones: OpcionesValidador): Validador {
 
   return {
     iniciar,
-    detener: () => temporizadores.forEach((t) => clearInterval(t)),
+    detener: () => {
+      detenido = true;
+      temporizadores.forEach((t) => clearInterval(t));
+    },
     verificarToken,
     middleware,
     soloDueno,
