@@ -74,19 +74,32 @@ info:
 
     ## Enrutador global (Iteraciones 4 y 6, ADR-013)
 
-    No tiene rutas propias ni negocio: está delante de las dos regiones (`http://localhost:8000`) y
-    pasa cada solicitud, sin cambiarla, al nginx de una región. Elige la región así, en este orden:
+    No tiene negocio: está delante de las dos regiones (`http://localhost:8000`) y pasa cada
+    solicitud, sin cambiarla, al nginx de una región. Su única ruta propia es `GET /health`
+    (`{"estado":"ok"}`), para el healthcheck de Docker. Elige la región así, en este orden:
 
-    1. **Prefijo de región:** `/region-1/...` o `/region-2/...`. Quita el prefijo y la manda a esa
+    1. **JWT:** el claim `region` del header `Authorization`. El enrutador lo lee sin verificar la
+       firma: la verifica después el gateway, que responde `403` si la región no es la suya. Va
+       primero para que un JWT de una región nunca llegue a la otra, aunque la solicitud traiga
+       prefijo o `X-Region`. Un JWT que no se puede leer, o sin un `region` válido, se ignora (el
+       gateway responde `401`).
+    2. **Prefijo de región:** `/region-1/...` o `/region-2/...`. Quita el prefijo y la manda a esa
        región. Lo usan las URL que se registran en sistemas externos, que no mandan JWT ni
        `X-Region`: el `redirect_uri` de OAuth y las URL de avisos de Gmail y Outlook de Correo (cada
        región registra la suya, por ejemplo `/region-1/api/correo/oauth/callback`).
-    2. **JWT:** el claim `region` del header `Authorization`. El enrutador lo lee sin verificar la
-       firma: la verifica después el gateway, que responde `403` si la región no es la suya.
     3. **Header `X-Region`** (`comun.yaml`): la región que la aplicación recuerda, para el registro y
        el inicio de sesión, que todavía no tienen JWT.
     4. **Región por defecto** (variable `REGION_POR_DEFECTO`; en la wiki, la más cercana). Si la
        cuenta es de la otra región, Autenticación responde `307` hacia ella.
+
+    **307 de Autenticación (ADR-017):** en `POST /api/autenticacion/login` y
+    `POST /api/autenticacion/registro`, si la región responde `307` con la otra región en el cuerpo
+    (`{"region": ...}`), el enrutador repite la misma solicitud, con el mismo cuerpo, en esa región
+    y devuelve esa respuesta: la aplicación no ve el `307`. El cuerpo solo pasa: no se guarda. Si la
+    región elegida no responde, `503` (problem+json).
+
+    **Logs:** una línea por solicitud con método, ruta (sin la query y con los emails tapados),
+    status, región y por qué se eligió. Nunca el cuerpo, los headers, la query ni la IP.
 
     **Webhooks de proveedores** (`/api/integraciones/webhooks/proveedores/*`): el proveedor no sabe la
     región del usuario, así que el enrutador manda el aviso a las dos regiones. Cada Integraciones

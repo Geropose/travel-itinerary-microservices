@@ -37,7 +37,7 @@ componentes que no estén ahí.
 | `npm run nuevo-servicio -- <nombre> <puerto>` | Genera `services/<nombre>` desde `infra/plantilla-servicio` (necesita `specs/openapi/<nombre>.yaml`; con `--sin-dependencias`, sin base, broker ni JWT). Después, `npm install` |
 | `npm run mock -- <servicio>` | Mock del servicio con Prism a partir de su contrato, en su mismo puerto |
 | `npm run infra:secretos` | Genera `.env` desde `.env.example` con secretos de desarrollo (solo completa las variables que falten; `-- --regenerar` genera todo) |
-| `npm run infra:levantar` | Levanta lo global y las regiones r1 y r2 con Docker Compose y espera que todo esté sano (`-- --solo r1`, `-- --ha`, `-- --scale gateway=3`). nginx: r1 en 8081, r2 en 8082 |
+| `npm run infra:levantar` | Levanta lo global y las regiones r1 y r2 con Docker Compose y espera que todo esté sano (`-- --solo r1`, `-- --ha`, `-- --scale gateway=3`). Enrutador global en 8000; nginx: r1 en 8081, r2 en 8082 |
 | `npm run infra:bajar` / `infra:reset` | Baja los contenedores; `reset` borra también los volúmenes (`-- --solo r1`) |
 | `npm run infra:logs` | Logs de las regiones (`-- --solo r1 gateway viajes`) |
 | `npm run infra:escalador` | Escala cada servicio con `docker compose --scale` según `docker stats`: +1 instancia con más del 70 % de procesador, −1 con menos del 30 % durante 2 min; mínimo 3 con el perfil ha (`-- --solo r1`, `-- --una-vez`) |
@@ -48,6 +48,11 @@ componentes que no estén ahí.
 - `infra/region.compose.yaml` (una región, se levanta como proyectos r1 y r2) e
   `infra/global.compose.yaml` (red global y base de analítica). Las bases de cada región están solo
   en la red de su región (CONST-6); en la red global están nginx, analitica, correo e integraciones.
+- Enrutador global (`services/enrutador`, en `infra/global.compose.yaml`, puerto 8000): el único punto
+  de entrada de la web. Elige la región por el claim `region` del JWT (sin verificar la firma), el
+  prefijo `/region-N`, el header `X-Region` o `REGION_POR_DEFECTO`, en ese orden, y la manda al nginx
+  de esa región por la red global. En login y registro sigue el 307 de Autenticación hacia la otra
+  región. Nunca escribe cuerpos, headers, query ni emails en el log.
 - `GET /salud/<servicio>` en el nginx de cada región muestra el `/health` de cada servicio.
 - Puerta entre regiones: el nginx de cada región escucha también en 8090 (no publicado). Autenticación
   llega por ahí a `/interna/cuentas/existe` y al JWKS de la otra región (`http://nginx:8090/otra-region/autenticacion`).

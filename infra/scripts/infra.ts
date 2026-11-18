@@ -96,7 +96,7 @@ switch (comando) {
     }
     for (const paso of pasosLevantar(opciones, env, conHa)) correr(paso);
     process.stdout.write(
-      `\nListo. nginx: ${opciones.regiones
+      `\nListo. Enrutador global: http://localhost:${env.PUERTO_ENRUTADOR ?? '8000'}. nginx: ${opciones.regiones
         .map((p) => `${p} http://localhost:${env[`PUERTO_NGINX_REGION_${p.slice(1)}`] ?? '?'}`)
         .join(', ')}\n`,
     );

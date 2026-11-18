@@ -8,11 +8,25 @@
 # Las bases de cada región no están en esta red (CONST-6).
 #
 # Todavía no existen, y se agregan acá cuando se programen:
-# - enrutador global (services/enrutador, puerto 8000): P1.7;
 # - procesadores Map-Reduce (parte de Analítica): fase 3 de Analítica;
 # - mocks de Gmail, Outlook, aerolínea, hotel, rentadora, agencia y red social (mocks/*): P2.
 
 services:
+  # Enrutador global (Iteración 6, ADR-017): el único punto de entrada de la web. Manda cada
+  # solicitud al nginx de la región del usuario por la red global. Las regiones se levantan después:
+  # mientras no estén, responde 503.
+  enrutador:
+    image: trotamundos/enrutador:dev
+    build: { context: .., dockerfile: services/enrutador/Dockerfile }
+    restart: unless-stopped
+    networks: [global]
+    ports: ['${PUERTO_ENRUTADOR:-8000}:8000']
+    environment:
+      NIVEL_LOG: ${NIVEL_LOG:-info}
+      URL_REGION_1: http://nginx-region-1:8080
+      URL_REGION_2: http://nginx-region-2:8080
+      REGION_POR_DEFECTO: ${REGION_POR_DEFECTO:-region-1}
+
   # Base de analítica (Iteración 6): una sola, con el histórico anonimizado de todas las regiones.
   # No guarda datos personales, por eso puede estar en una sola región sin incumplir CONST-6.
   postgres-analitica:

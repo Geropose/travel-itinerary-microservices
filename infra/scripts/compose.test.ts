@@ -31,11 +31,12 @@ const redes = (s: Servicio) =>
 const DATOS = /^(postgres|redis|rabbitmq)/;
 
 describe('region.compose.yaml', () => {
-  it('tiene cada servicio de services/ con su Dockerfile', () => {
-    const servicios = readdirSync(join(raiz, 'services')).filter((s) =>
-      existsSync(join(raiz, 'services', s, 'Dockerfile')),
+  it('tiene cada servicio de services/ con su Dockerfile (menos el enrutador, que es global)', () => {
+    const servicios = readdirSync(join(raiz, 'services')).filter(
+      (s) => s !== 'enrutador' && existsSync(join(raiz, 'services', s, 'Dockerfile')),
     );
     expect(servicios).toHaveLength(9);
+    expect(region.services.enrutador).toBeUndefined();
     for (const nombre of servicios) {
       expect(region.services[nombre]?.build?.dockerfile).toBe(`services/${nombre}/Dockerfile`);
     }
@@ -106,6 +107,20 @@ describe('region.compose.yaml', () => {
 describe('global.compose.yaml', () => {
   it('la base de analítica está solo en la red global', () => {
     expect(redes(global.services['postgres-analitica'] ?? {})).toEqual(['global']);
+  });
+
+  it('el enrutador global publica el 8000 y llega al nginx de cada región por la red global', () => {
+    const enrutador = global.services.enrutador ?? {};
+    expect(enrutador.build?.dockerfile).toBe('services/enrutador/Dockerfile');
+    expect(redes(enrutador)).toEqual(['global']);
+    expect(enrutador.ports).toEqual(['${PUERTO_ENRUTADOR:-8000}:8000']);
+    expect(enrutador.environment).toMatchObject({
+      URL_REGION_1: 'http://nginx-region-1:8080',
+      URL_REGION_2: 'http://nginx-region-2:8080',
+    });
+    // Es el único servicio con puerto en lo global: las bases no se publican.
+    const conPuertos = Object.entries(global.services).filter(([, s]) => s.ports);
+    expect(conPuertos.map(([nombre]) => nombre)).toEqual(['enrutador']);
   });
 });
 

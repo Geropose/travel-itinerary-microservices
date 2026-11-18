@@ -161,8 +161,8 @@ export function pasosLevantar(
     opciones.ha || conHa.includes(proyecto) ? ['--profile', 'ha'] : [];
   return [
     {
-      descripcion: 'Global: red global y base de analítica',
-      args: [...compose(PROYECTO_GLOBAL, ARCHIVO_GLOBAL), 'up', '-d', '--wait'],
+      descripcion: 'Global: red global, enrutador y base de analítica',
+      args: [...compose(PROYECTO_GLOBAL, ARCHIVO_GLOBAL), 'up', '-d', '--build', '--wait'],
       entorno: {},
     },
     {
