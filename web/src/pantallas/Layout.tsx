@@ -23,7 +23,8 @@ export function Layout() {
   const { api, sesion } = useApp();
   const claims = useClaims();
   const enLinea = useEnLinea();
-  const menu = tieneRol(claims, 'analista') ? MENU_ANALISTA : MENU_USUARIO;
+  const esAnalista = tieneRol(claims, 'analista');
+  const menu = esAnalista ? MENU_ANALISTA : MENU_USUARIO;
 
   return (
     <div className="layout">
@@ -31,6 +32,11 @@ export function Layout() {
         <span className="marca">{t('app.nombre')}</span>
         <div className="barra-acciones">
           <SelectorIdioma />
+          {!esAnalista && (
+            <NavLink className="enlace-barra" to="/preferencias">
+              {t('menu.preferencias')}
+            </NavLink>
+          )}
           <button
             type="button"
             className="secundario"

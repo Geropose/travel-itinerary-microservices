@@ -16,6 +16,7 @@
     "archivados": "Archivados",
     "correo": "Correo",
     "whitelist": "Whitelist",
+    "preferencias": "Preferencias",
     "asistente": "Asistente",
     "analitica": "Analítica"
   },
@@ -50,6 +51,8 @@
     "noDisponible": "El servicio no está disponible. Probá de nuevo en un rato.",
     "sinPermiso": "No tenés permiso para ver esta pantalla.",
     "volver": "Volver al inicio",
+    "solicitudInvalida": "Revisá los datos ingresados y probá de nuevo.",
+    "noEncontrado": "No encontramos el recurso solicitado.",
     "inesperado": "Algo salió mal. Probá de nuevo."
   },
   "panel": {
@@ -57,10 +60,128 @@
     "actualizado": "Actualizado el {{fecha}}",
     "guardadoSinRed": "Sin conexión: se muestra el último panel guardado ({{fecha}}).",
     "sinViajes": "Todavía no hay viajes para mostrar.",
-    "fechas": "Del {{inicio}} al {{fin}}"
+    "fechas": "Del {{inicio}} al {{fin}}",
+    "verDetalle": "Ver detalle y compartir"
   },
   "construccion": {
     "texto": "Esta pantalla está en construcción.",
     "hoy": "Hoy es {{fecha}}. Ejemplo de precio: {{precio}}."
+  },
+  "correo": {
+    "titulo": "Correo",
+    "descripcion": "Conectá tus buzones con permiso de solo lectura para detectar reservas automáticamente.",
+    "conectarGmail": "Conectar Gmail",
+    "conectarOutlook": "Conectar Outlook",
+    "cuentasTitulo": "Cuentas conectadas",
+    "sinCuentas": "Todavía no conectaste ninguna cuenta de correo.",
+    "conectadaEl": "Conectada el {{fecha}}",
+    "ultimaRevision": "Última revisión: {{fecha}}",
+    "sinRevision": "Última revisión: todavía pendiente",
+    "reconectarAviso": "El permiso fue revocado. Volvé a conectar la cuenta para seguir leyendo reservas.",
+    "desconectar": "Desconectar",
+    "desconectarCuenta": "Desconectar {{email}}",
+    "desconectadaExito": "Cuenta desconectada.",
+    "oauthConectada": "Cuenta conectada correctamente.",
+    "erroresOAuth": {
+      "permiso-denegado": "Cancelaste el permiso en tu proveedor de correo.",
+      "scope-insuficiente": "Faltó el permiso de solo lectura requerido.",
+      "codigo-invalido": "El código de autorización venció o es inválido.",
+      "cuenta-de-otro-usuario": "Ese buzón ya está conectado a otro usuario.",
+      "proveedor-no-disponible": "El proveedor de correo no respondió. Probá de nuevo.",
+      "desconocido": "No se pudo completar la conexión del correo."
+    },
+    "proveedores": {
+      "gmail": "Gmail",
+      "outlook": "Outlook"
+    },
+    "estados": {
+      "conectada": "Conectada",
+      "sin-permiso": "Sin permiso"
+    }
+  },
+  "whitelist": {
+    "titulo": "Whitelist",
+    "descripcion": "Elegí qué remitentes o dominios querés procesar cuando los filtros están activos.",
+    "activarFiltros": "Activar filtro de remitentes",
+    "estadoActivo": "Solo se procesan correos de la lista permitida.",
+    "estadoInactivo": "Filtro desactivado: se revisan todos los correos entrantes.",
+    "remitenteLabel": "Remitente o dominio",
+    "remitentePlaceholder": "reservas@aerolinea.example o @aerolinea.example",
+    "remitenteAyuda": "Ingresá un email completo o un dominio empezando con @.",
+    "agregar": "Agregar",
+    "quitar": "Quitar",
+    "quitarRemitente": "Quitar {{remitente}}",
+    "listaTitulo": "Remitentes permitidos",
+    "sinRemitentes": "No hay remitentes en tu whitelist todavía.",
+    "actualizado": "Actualizado el {{fecha}}",
+    "guardado": "Cambios guardados en la whitelist.",
+    "errorFormato": "Ingresá un email válido o un dominio como @aerolinea.example.",
+    "errorDuplicado": "Ese remitente ya está en la whitelist."
+  },
+  "preferencias": {
+    "titulo": "Preferencias",
+    "descripcion": "Personalizá el idioma, la moneda de referencia y tu agencia preferida.",
+    "cuenta": "Cuenta: {{email}} ({{region}})",
+    "idioma": "Idioma",
+    "idiomaAyuda": "Cambia los textos y formatos de la aplicación al instante.",
+    "moneda": "Moneda",
+    "ejemploMoneda": "Ejemplo de formato: {{precio}}",
+    "agencia": "Agencia preferida",
+    "sinAgencia": "Sin agencia preferida",
+    "guardar": "Guardar preferencias",
+    "guardando": "Guardando…",
+    "guardado": "Preferencias guardadas.",
+    "monedas": {
+      "ARS": "ARS — Peso argentino",
+      "USD": "USD — Dólar estadounidense",
+      "EUR": "EUR — Euro",
+      "BRL": "BRL — Real brasileño",
+      "CLP": "CLP — Peso chileno",
+      "UYU": "UYU — Peso uruguayo",
+      "MXN": "MXN — Peso mexicano"
+    },
+    "agencias": {
+      "viajes-del-plata": "Viajes del Plata"
+    }
+  },
+  "viaje": {
+    "volver": "Volver al panel",
+    "noEncontrado": "No se encontró este viaje.",
+    "compartidoContigo": "Itinerario compartido contigo (solo lectura).",
+    "reservasTitulo": "Reservas del itinerario",
+    "sinReservas": "Todavía no hay reservas registradas en este viaje.",
+    "codigoReserva": "Código {{codigo}}",
+    "ruta": "{{origen}} → {{destino}}",
+    "estados": {
+      "activo": "Activo",
+      "archivado": "Archivado"
+    },
+    "tipos": {
+      "vuelo": "Vuelo",
+      "hotel": "Hotel",
+      "auto": "Auto"
+    },
+    "estadosReserva": {
+      "confirmada": "Confirmada",
+      "modificada": "Modificada",
+      "cancelada": "Cancelada"
+    },
+    "compartir": {
+      "titulo": "Compartir itinerario",
+      "descripcion": "Designá por email a quienes pueden ver este viaje.",
+      "emailLabel": "Email de la persona",
+      "emailPlaceholder": "persona@correo.example",
+      "agregar": "Designar persona",
+      "quitar": "Quitar",
+      "quitarPersona": "Quitar a {{email}}",
+      "vacio": "Todavía no designaste a nadie para ver este viaje.",
+      "conCuenta": "Con cuenta registrada",
+      "sinCuenta": "Pendiente de registro",
+      "desde": "Desde el {{fecha}}",
+      "agregado": "Se designó a {{email}} para ver el itinerario.",
+      "quitado": "Se quitó el permiso a {{email}}.",
+      "errorSolicitud": "Ingresá un email válido de otra persona.",
+      "errorDuplicado": "Esa persona ya está designada en este viaje."
+    }
   }
 }
