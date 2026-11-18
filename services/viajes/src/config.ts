@@ -9,6 +9,12 @@ export const esquemaConfig = esquemaBase.extend({
   URL_BROKER: z.url(),
   /** Clave pública del JWT: GET /.well-known/jwks.json de Autenticación de la región (ADR-014). */
   URL_JWKS: z.url(),
+  /** Cantidad de consumidores en paralelo por cola de eventos (ADR-009). */
+  CANTIDAD_CONSUMIDORES: z.coerce.number().int().min(1).max(100).default(4),
+  /** Mensajes en vuelo por consumidor en RabbitMQ. */
+  PREFETCH_CONSUMIDORES: z.coerce.number().int().min(1).max(100).default(5),
+  /** Ventana de agrupación de reservas en un mismo viaje, en horas (por defecto 48 h = 2 días). */
+  MARGEN_AGRUPACION_HORAS: z.coerce.number().positive().default(48),
 });
 
 export type Config = ReturnType<typeof esquemaConfig.parse>;
