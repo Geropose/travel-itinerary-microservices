@@ -45,9 +45,15 @@ export interface Servidor {
   detener(): Promise<void>;
 }
 
-function sinValidador(): RequestHandler {
-  // Sin validador ninguna ruta protegida pasa: mejor un 401 que atender sin verificar.
-  return (_req, res) => {
+function sinValidador(spec: Spec): RequestHandler {
+  // Sin validador ninguna ruta protegida pasa: mejor un 401 que atender sin verificar. Las públicas
+  // (security: []) y las que no están en el contrato siguen (estas terminan en 404).
+  return (req, res, next) => {
+    const operacion = spec.buscar(req.method, req.path);
+    if (!operacion || operacion.seguridad.length === 0) {
+      next();
+      return;
+    }
     res
       .status(401)
       .type('application/problem+json')
@@ -130,7 +136,7 @@ export function crearServidor(opciones: OpcionesServidor): Servidor {
       .json(aProblema(error, String(res.getHeader('X-Request-Id'))));
   });
 
-  app.use(validador ? validador.middleware(spec) : sinValidador());
+  app.use(validador ? validador.middleware(spec) : sinValidador(spec));
   app.use(express.json({ limit: '1mb' }));
   app.use(
     OpenApiValidator.middleware({
