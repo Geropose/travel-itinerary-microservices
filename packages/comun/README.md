@@ -110,8 +110,10 @@ este orden:
 2. Log de cada solicitud.
 3. `GET /health` con los chequeos registrados. Responde 200 `{"estado":"ok"}`; si un chequeo
    falla o tarda más de 1 s, responde 503.
-4. Validador de Intercepción.
-5. Validación de solicitudes y respuestas contra el contrato (express-openapi-validator). Una
+4. Las rutas de `antesDelContrato(app)`, si se pasa. Solo lo usa el gateway, que enruta
+   `/api/<servicio>/*` con el contrato de cada servicio.
+5. Validador de Intercepción.
+6. Validación de solicitudes y respuestas contra el contrato (express-openapi-validator). Una
    respuesta que no cumple el contrato se convierte en 500.
 
 El contrato se carga con `cargarSpec`: resuelve los `$ref` a `comun.yaml` y deja el servidor en
@@ -137,7 +139,11 @@ ADR-014:
   salvo que la regla acepte otras `regiones`. Es el caso de `GET /interna/cuentas/existe`, que se
   verifica con las claves de la otra región.
 - **Rechazos:** responde 401 (`sin-token`, `token-invalido`) o 403 (`otra-region`,
-  `sin-permiso`) y llama a `registrar` sin esperar.
+  `sin-permiso`) y llama a `registrar` sin esperar, con la ruta completa (`req.baseUrl` +
+  `req.path`).
+- **Contrato de otro servicio:** `middleware(spec, { reglas, rolesPorDefecto })` intercepta con
+  las reglas y los roles por defecto de ese contrato en lugar de los del validador. Lo usa el
+  gateway, con un solo validador para las rutas de todos los servicios.
 
 ```ts
 const validador = crearValidador({
@@ -181,7 +187,8 @@ y la solicitud sigue.
 - `registroPorEvento(broker, logger)`: para los microservicios. Publica el evento
   `AccesoRechazado` (CONVENCIONES 4.5).
 - `registroEnBase(pool, logger)`: para el gateway. Guarda directo en `accesos_rechazados` de la
-  base `registro_accesos` (migración `MIGRACIONES_REGISTRO_ACCESOS`).
+  base `registro_accesos` (migración `MIGRACIONES_REGISTRO_ACCESOS`). Además de los 401 y 403,
+  guarda los 404 de las rutas `/interna/...` pedidas desde afuera (motivo `ruta-interna`).
 - `guardarAccesoRechazado(cliente, rechazo)`: para el consumidor de `AccesoRechazado` del
   gateway.
 

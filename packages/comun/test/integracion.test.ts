@@ -114,6 +114,7 @@ describe.skipIf(!hayDocker)('con PostgreSQL y RabbitMQ', { timeout: 30_000 }, ()
       expect([...a, ...b].sort()).toEqual([
         '000_comun_accesos_rechazados.sql',
         '000_comun_eventos.sql',
+        '001_comun_rechazo_ruta_interna.sql',
       ]);
       expect(await migrar(pool, carpetas)).toEqual([]);
     });

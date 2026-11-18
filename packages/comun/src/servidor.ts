@@ -30,6 +30,11 @@ export interface OpcionesServidor {
   tiempoChequeoMs?: number;
   /** Escuchar SIGTERM y SIGINT para apagar en orden (por defecto sí). */
   manejarSenales?: boolean;
+  /**
+   * Rutas que se atienden antes del Validador de Intercepción y del contrato, con el X-Request-Id
+   * ya puesto. Solo para el gateway, que enruta /api/<servicio>/* con el contrato de cada servicio.
+   */
+  antesDelContrato?: (app: Express) => void;
 }
 
 export interface Servidor {
@@ -45,7 +50,8 @@ export interface Servidor {
   detener(): Promise<void>;
 }
 
-function sinValidador(spec: Spec): RequestHandler {
+/** Sin Validador de Intercepción: las rutas protegidas del contrato responden 401. */
+export function sinValidador(spec: Spec): RequestHandler {
   // Sin validador ninguna ruta protegida pasa: mejor un 401 que atender sin verificar. Las públicas
   // (security: []) y las que no están en el contrato siguen (estas terminan en 404).
   return (req, res, next) => {
@@ -136,6 +142,7 @@ export function crearServidor(opciones: OpcionesServidor): Servidor {
       .json(aProblema(error, String(res.getHeader('X-Request-Id'))));
   });
 
+  opciones.antesDelContrato?.(app);
   app.use(validador ? validador.middleware(spec) : sinValidador(spec));
   app.use(express.json({ limit: '1mb' }));
   app.use(

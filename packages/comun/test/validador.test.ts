@@ -1,6 +1,7 @@
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { fileURLToPath } from 'node:url';
+import express from 'express';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   firmarJwt,
@@ -12,6 +13,7 @@ import {
 } from '../src/pruebas/index.ts';
 import type { AccesoRechazado } from '../src/registro-accesos.ts';
 import { crearServidor, type Servidor } from '../src/servidor.ts';
+import { cargarSpec } from '../src/spec.ts';
 import {
   autenticacion,
   crearValidador,
@@ -352,5 +354,52 @@ describe('claves de la otra región', () => {
       ]),
     ).rejects.toBeInstanceOf(ErrorTokenInvalido);
     validador.detener();
+  });
+});
+
+describe('middleware con el contrato de otro servicio (gateway)', () => {
+  it('usa las reglas y los roles de los ajustes, y registra la ruta completa', async () => {
+    const propias = await generarClaves();
+    const registrados: AccesoRechazado[] = [];
+    const v = crearValidador({
+      servicio: 'gateway',
+      region: 'region-1',
+      logger,
+      claves: { 'region-1': { claves: propias.jwks } },
+      registrar: (r) => registrados.push(r),
+    });
+    await v.iniciar();
+    const app = express();
+    app.use(
+      '/api/prueba',
+      v.middleware(cargarSpec(rutaSpec), { rolesPorDefecto: ['analista'] }),
+      (_req, res) => {
+        res.json({ paso: true });
+      },
+    );
+    const s = createServer(app);
+    const base = await escuchar(s);
+    const pedir = async (roles: string[]) =>
+      (
+        await fetch(`${base}/api/prueba/privada`, {
+          headers: { authorization: `Bearer ${await firmarJwt(propias, { roles })}` },
+        })
+      ).status;
+    expect(await pedir(['analista'])).toBe(200);
+    expect(await pedir(['usuario'])).toBe(403);
+    expect(registrados.at(-1)).toMatchObject({
+      servicio: 'gateway',
+      ruta: '/api/prueba/privada',
+      status: 403,
+      motivo: 'sin-permiso',
+    });
+    s.close();
+    v.detener();
+  });
+
+  it('una regla de los ajustes que no está en ese contrato no arranca', () => {
+    expect(() =>
+      validador.middleware(cargarSpec(rutaSpec), { reglas: { 'GET /no-existe': {} } }),
+    ).toThrow(/no corresponde/);
   });
 });
