@@ -1,15 +1,21 @@
 # Contrato REST del Monitor de salud (docs/CONVENCIONES.md 4.2 y 4.3; wiki: Iteracion-1, ADR-007).
-# El monitor no tiene rutas de negocio: solo documenta su propio GET /health, como todos los servicios.
-# Qué hace (ping cada 5 s, sacar del nginx y reiniciar) está descrito en gateway.yaml.
+# El monitor no tiene rutas de negocio: documenta su propio GET /health, como todos los servicios, y
+# GET /estado con lo que ve de cada instancia de su región.
 openapi: 3.1.0
 info:
   title: Trotamundos — Monitor de salud
   version: 0.1.0
   description: |
     Hay uno por región (Iteración 1, ADR-007). Hace un ping a `GET /health` de cada instancia
-    (gateway y cada microservicio) cada 5 s. Si una instancia no responde `200` 3 veces seguidas
-    (15 s), la saca del balanceador (nginx) y la reinicia; cuando vuelve a responder `200`, la vuelve
-    a agregar. No recibe solicitudes de los usuarios: su única ruta es su propio `GET /health`.
+    (gateway y cada microservicio) cada 5 s. Descubre las instancias con la API de Docker, por la
+    etiqueta `trotamundos.servicio` de los contenedores de su región. Si una instancia no responde
+    `200` 3 veces seguidas (15 s), la marca caída, la reinicia con la API de Docker y lo registra en
+    el log. Mientras se reinicia, el balanceador (nginx) no le manda solicitudes: la marca fallida
+    después de 3 errores durante 15 s (`max_fails=3 fail_timeout=15s`, ADR-008) y deja de verla
+    cuando su contenedor se detiene. Cuando vuelve a responder `200`, queda sana otra vez.
+
+    No recibe solicitudes de los usuarios: no está en la tabla del gateway ni se publica hacia afuera.
+    Sus dos rutas son públicas y se usan solo desde la red de la región.
 servers:
   - url: http://monitor:3010
     description: Monitor dentro de la red de la región. No se publica hacia afuera.
@@ -33,7 +39,98 @@ paths:
           $ref: './comun.yaml#/components/responses/Salud'
         '503':
           $ref: './comun.yaml#/components/responses/NoDisponible'
+  /estado:
+    get:
+      tags: [salud]
+      operationId: consultarEstado
+      summary: Estado de cada instancia de la región
+      description: >-
+        Lo que ve el monitor en su último ping: cada instancia (contenedor) con su servicio, su estado
+        y cuántas veces la reinició. La usan la prueba de caos y la demo.
+      security: []
+      parameters:
+        - $ref: './comun.yaml#/components/parameters/XRequestId'
+      responses:
+        '200':
+          description: Estado de las instancias.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EstadoRegion'
+              example:
+                region: region-1
+                actualizadoEn: '2026-11-20T13:45:05Z'
+                intervaloMs: 5000
+                instancias:
+                  - nombre: r1-gateway-1
+                    servicio: gateway
+                    estado: reiniciando
+                    fallasSeguidas: 0
+                    ultimoPing: '2026-11-20T13:45:05Z'
+                    caidaDetectadaEn: '2026-11-20T13:45:05Z'
+                    reinicios: 1
+                    ultimoReinicio: '2026-11-20T13:45:05Z'
+                  - nombre: r1-gateway-2
+                    servicio: gateway
+                    estado: sana
+                    fallasSeguidas: 0
+                    ultimoPing: '2026-11-20T13:45:05Z'
+                    reinicios: 0
 components:
+  schemas:
+    EstadoRegion:
+      type: object
+      additionalProperties: false
+      required: [region, actualizadoEn, intervaloMs, instancias]
+      properties:
+        region:
+          type: string
+          enum: [region-1, region-2]
+        actualizadoEn:
+          type: [string, 'null']
+          format: date-time
+          description: Fin del último ciclo de pings (null si todavía no terminó ninguno).
+        intervaloMs:
+          type: integer
+          description: Cada cuánto hace el ping (5000 ms, ADR-007).
+        instancias:
+          type: array
+          items:
+            $ref: '#/components/schemas/Instancia'
+    Instancia:
+      type: object
+      additionalProperties: false
+      required: [nombre, servicio, estado, fallasSeguidas, reinicios]
+      properties:
+        nombre:
+          type: string
+          description: Nombre del contenedor (por ejemplo r1-gateway-1).
+        servicio:
+          type: string
+          description: Etiqueta trotamundos.servicio del contenedor.
+        estado:
+          type: string
+          enum: [sana, sin-respuesta, caida, reiniciando]
+          description: >-
+            sana: respondió 200 al último ping. sin-respuesta: falló 1 o 2 pings seguidos. caida: falló
+            3 pings seguidos y no se la pudo reiniciar. reiniciando: se la reinició y todavía no vuelve
+            a responder 200.
+        fallasSeguidas:
+          type: integer
+          minimum: 0
+        ultimoPing:
+          type: string
+          format: date-time
+        caidaDetectadaEn:
+          type: string
+          format: date-time
+          description: Última vez que se la marcó caída (3 pings sin respuesta).
+        reinicios:
+          type: integer
+          minimum: 0
+        ultimoReinicio:
+          type: string
+          format: date-time
   securitySchemes:
     bearerJWT:
       $ref: './comun.yaml#/components/securitySchemes/bearerJWT'
