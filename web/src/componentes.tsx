@@ -69,6 +69,24 @@ export function EnConstruccion({ titulo }: { titulo: string }) {
   );
 }
 
+export function claveErrorHttp(status: number | undefined): string {
+  switch (status) {
+    case 400:
+      return 'errores.solicitudInvalida';
+    case 403:
+      return 'errores.sinPermiso';
+    case 404:
+      return 'errores.noEncontrado';
+    case undefined:
+    case 502:
+    case 503:
+    case 504:
+      return 'errores.noDisponible';
+    default:
+      return 'errores.inesperado';
+  }
+}
+
 export function SinPermiso() {
   const { t } = useTranslation();
   return (

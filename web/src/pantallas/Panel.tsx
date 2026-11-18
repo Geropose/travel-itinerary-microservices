@@ -2,6 +2,7 @@
 // esperar a la red (QA-3), y después lo actualiza. El dueño de Viajes completa la pantalla.
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Link } from 'react-router';
 import { guardarPanel, leerPanel, type PanelGuardado } from '../cache/panel.ts';
 import { EnConstruccion, useIdioma } from '../componentes.tsx';
 import { useApp, useClaims } from '../contexto.tsx';
@@ -58,13 +59,18 @@ export function Panel() {
             <ul className="viajes">
               {guardado.panel.viajes.map((viaje) => (
                 <li key={viaje.viajeId}>
-                  <strong>{viaje.destino}</strong>
-                  <span>
-                    {t('panel.fechas', {
-                      inicio: formatearFecha(viaje.inicio, idioma),
-                      fin: formatearFecha(viaje.fin, idioma),
-                    })}
-                  </span>
+                  <div className="viaje-resumen">
+                    <strong>{viaje.destino}</strong>
+                    <span>
+                      {t('panel.fechas', {
+                        inicio: formatearFecha(viaje.inicio, idioma),
+                        fin: formatearFecha(viaje.fin, idioma),
+                      })}
+                    </span>
+                  </div>
+                  <Link className="enlace-boton" to={`/viajes/${viaje.viajeId}`}>
+                    {t('panel.verDetalle')}
+                  </Link>
                 </li>
               ))}
             </ul>

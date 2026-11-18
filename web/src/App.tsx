@@ -7,8 +7,12 @@ import type { Rol } from './api/sesion.ts';
 import { EnConstruccion, SinPermiso } from './componentes.tsx';
 import { tieneRol, useClaims } from './contexto.tsx';
 import { Login, Registro } from './pantallas/Acceso.tsx';
+import { Correo } from './pantallas/Correo.tsx';
 import { Layout } from './pantallas/Layout.tsx';
 import { Panel } from './pantallas/Panel.tsx';
+import { Preferencias } from './pantallas/Preferencias.tsx';
+import { ViajeDetalle } from './pantallas/ViajeDetalle.tsx';
+import { Whitelist } from './pantallas/Whitelist.tsx';
 
 /** Pantalla de inicio de cada rol. */
 const inicioDe = (analista: boolean) => (analista ? '/analitica' : '/');
@@ -73,8 +77,38 @@ export function App() {
           }
         />
         <Route path="archivados" element={enConstruccion('menu.archivados')} />
-        <Route path="correo" element={enConstruccion('menu.correo')} />
-        <Route path="whitelist" element={enConstruccion('menu.whitelist')} />
+        <Route
+          path="correo"
+          element={
+            <ConRol rol="usuario">
+              <Correo />
+            </ConRol>
+          }
+        />
+        <Route
+          path="whitelist"
+          element={
+            <ConRol rol="usuario">
+              <Whitelist />
+            </ConRol>
+          }
+        />
+        <Route
+          path="preferencias"
+          element={
+            <ConRol rol="usuario">
+              <Preferencias />
+            </ConRol>
+          }
+        />
+        <Route
+          path="viajes/:viajeId"
+          element={
+            <ConRol rol="usuario">
+              <ViajeDetalle />
+            </ConRol>
+          }
+        />
         <Route path="asistente" element={enConstruccion('menu.asistente')} />
         <Route
           path="analitica"
