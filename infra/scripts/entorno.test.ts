@@ -93,7 +93,7 @@ describe('pasos de docker compose', () => {
       'services/autenticacion/src/semillas.ts',
     ];
     expect(pasos.map((p) => p.args.slice(0, 3).concat(p.args.slice(7)))).toEqual([
-      ['compose', '-p', 'global', 'up', '-d', '--wait'],
+      ['compose', '-p', 'global', 'up', '-d', '--build', '--wait'],
       ['compose', '-p', 'r1', 'build'],
       ['compose', '-p', 'r1', '--profile', 'ha', 'up', '-d', '--wait', '--wait-timeout', '300'],
       ['compose', '-p', 'r1', ...semillas],
