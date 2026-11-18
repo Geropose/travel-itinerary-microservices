@@ -1,11 +1,18 @@
 // Persistencia de cuentas de correo y states OAuth en PostgreSQL (una base por servicio).
 // Todos los tokens y secretos de suscripción se almacenan cifrados con AES-256-GCM.
 import { randomUUID } from 'node:crypto';
-import type { ClienteDb, Pool } from '@trotamundos/comun';
-
-type Db = Pool | ClienteDb;
+import {
+  guardarEnOutbox,
+  type ClienteDb,
+  type Pool,
+  type Sobre,
+  type ValidadorEventos,
+} from '@trotamundos/comun';
 import { desencriptarTexto, encriptarTexto } from './cifrado.ts';
 import type { CredencialesOAuth, ProveedorCorreo, SuscripcionAvisos } from './adaptadores/tipos.ts';
+import type { MotivoNoProcesado, ReservaDetectadaDatos } from './extractor.ts';
+
+type Db = Pool | ClienteDb;
 
 export type EstadoCuentaCorreo = 'conectada' | 'sin-permiso';
 
@@ -649,4 +656,354 @@ export async function eliminarAvisoPushVisto(
     proveedor,
     avisoId,
   ]);
+}
+
+// --- Procesadores, Filtro de remitentes y No Procesados (P2.B6) -----------------------------------
+
+export interface FiltroRemitentesUsuario {
+  remitentesPermitidos: string[];
+  filtrosActivos: boolean;
+}
+
+export interface CuentaParaProcesar {
+  id: string;
+  usuarioId: string;
+  proveedor: ProveedorCorreo;
+  email: string;
+  estado: EstadoCuentaCorreo;
+  ultimoCursor: string | null;
+  ultimaRevision: Date | null;
+}
+
+export interface NoProcesadoPublico {
+  id: string;
+  cuentaId: string;
+  proveedorCorreo: ProveedorCorreo;
+  correoId: string;
+  remitente: string;
+  asunto?: string;
+  recibidoEn: string;
+  registradoEn: string;
+  motivo: MotivoNoProcesado;
+  detalle?: string;
+}
+
+export async function guardarFiltroRemitentes(
+  db: Db,
+  datos: {
+    usuarioId: string;
+    remitentesPermitidos: string[];
+    filtrosActivos: boolean;
+    actualizadoEn: Date;
+  },
+): Promise<void> {
+  const normalizados = datos.remitentesPermitidos
+    .map((r) => r.trim().toLowerCase())
+    .filter(Boolean);
+  await db.query(
+    `INSERT INTO filtros_remitentes (usuario_id, remitentes_permitidos, filtros_activos, actualizado_en)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (usuario_id) DO UPDATE
+       SET remitentes_permitidos = EXCLUDED.remitentes_permitidos,
+           filtros_activos = EXCLUDED.filtros_activos,
+           actualizado_en = EXCLUDED.actualizado_en
+       WHERE filtros_remitentes.actualizado_en <= EXCLUDED.actualizado_en`,
+    [datos.usuarioId, normalizados, datos.filtrosActivos, datos.actualizadoEn],
+  );
+}
+
+export async function obtenerFiltroRemitentes(
+  db: Db,
+  usuarioId: string,
+): Promise<FiltroRemitentesUsuario | null> {
+  const res = await db.query<{
+    remitentes_permitidos: string[];
+    filtros_activos: boolean;
+  }>(
+    `SELECT remitentes_permitidos, filtros_activos
+     FROM filtros_remitentes
+     WHERE usuario_id = $1`,
+    [usuarioId],
+  );
+  const fila = res.rows[0];
+  if (!fila) return null;
+  return {
+    remitentesPermitidos: fila.remitentes_permitidos,
+    filtrosActivos: fila.filtros_activos,
+  };
+}
+
+export async function obtenerCuentaParaProcesar(
+  db: Db,
+  cuentaId: string,
+): Promise<CuentaParaProcesar | null> {
+  const res = await db.query<{
+    id: string;
+    usuario_id: string;
+    proveedor: string;
+    email: string;
+    estado: EstadoCuentaCorreo;
+    ultimo_cursor: string | null;
+    ultima_revision: Date | null;
+  }>(
+    `SELECT id, usuario_id, proveedor, email, estado, ultimo_cursor, ultima_revision
+     FROM cuentas_correo
+     WHERE id = $1`,
+    [cuentaId],
+  );
+  const r = res.rows[0];
+  if (!r) return null;
+  return {
+    id: r.id,
+    usuarioId: r.usuario_id,
+    proveedor: r.proveedor,
+    email: r.email,
+    estado: r.estado,
+    ultimoCursor: r.ultimo_cursor,
+    ultimaRevision: r.ultima_revision,
+  };
+}
+
+/** Devuelve únicamente los correoId que todavía no figuran en correos_procesados para la cuenta. */
+export async function filtrarCorreosPendientes(
+  db: Db,
+  cuentaId: string,
+  correoIds: string[],
+): Promise<string[]> {
+  if (correoIds.length === 0) return [];
+  const res = await db.query<{ correo_id: string }>(
+    `SELECT correo_id
+     FROM correos_procesados
+     WHERE cuenta_id = $1 AND correo_id = ANY($2::text[])`,
+    [cuentaId, correoIds],
+  );
+  const yaVistos = new Set(res.rows.map((r) => r.correo_id));
+  return correoIds.filter((id) => !yaVistos.has(id));
+}
+
+export interface ResultadoCorreoProcesado {
+  cuentaId: string;
+  usuarioId: string;
+  proveedorCorreo: ProveedorCorreo;
+  correoId: string;
+  remitente: string;
+  asunto: string;
+  recibidoEn: Date;
+  ahora: Date;
+  evento?: Sobre<ReservaDetectadaDatos>;
+  validador?: ValidadorEventos;
+  noProcesado?: { motivo: MotivoNoProcesado; detalle: string };
+}
+
+/**
+ * Registra en lote y de forma atómica los correos procesados y guarda (en la misma transacción)
+ * sus eventos `ReservaDetectada` en el outbox o sus metadatos en `no_procesados`. Devuelve los
+ * `correoId` efectivamente reclamados por esta transacción para garantizar exactamente-una vez.
+ */
+export async function guardarResultadosCorreosProcesados(
+  db: ClienteDb,
+  resultados: readonly ResultadoCorreoProcesado[],
+): Promise<string[]> {
+  if (resultados.length === 0) return [];
+
+  const vistos = new Set<string>();
+  const unicos: ResultadoCorreoProcesado[] = [];
+  for (const item of resultados) {
+    const clave = `${item.cuentaId}\0${item.correoId}`;
+    if (!vistos.has(clave)) {
+      vistos.add(clave);
+      unicos.push(item);
+    }
+  }
+
+  const marca = await db.query<{ cuenta_id: string; correo_id: string }>(
+    `INSERT INTO correos_procesados (cuenta_id, correo_id, procesado_en)
+     SELECT u.cuenta_id, u.correo_id, u.procesado_en
+     FROM unnest($1::uuid[], $2::text[], $3::timestamptz[])
+       AS u(cuenta_id, correo_id, procesado_en)
+     ON CONFLICT (cuenta_id, correo_id) DO NOTHING
+     RETURNING cuenta_id, correo_id`,
+    [unicos.map((r) => r.cuentaId), unicos.map((r) => r.correoId), unicos.map((r) => r.ahora)],
+  );
+  if (marca.rows.length === 0) return [];
+
+  const recienMarcados = new Set(marca.rows.map((r) => `${r.cuenta_id}\0${r.correo_id}`));
+  const nuevos = unicos.filter((r) => recienMarcados.has(`${r.cuentaId}\0${r.correoId}`));
+
+  const noProcesados = nuevos.flatMap((r) =>
+    r.noProcesado ? [{ item: r, detalle: r.noProcesado }] : [],
+  );
+  if (noProcesados.length > 0) {
+    await db.query(
+      `INSERT INTO no_procesados (
+         id, cuenta_id, usuario_id, proveedor_correo, correo_id,
+         remitente, asunto, recibido_en, registrado_en, motivo, detalle
+       )
+       SELECT u.id, u.cuenta_id, u.usuario_id, u.proveedor_correo, u.correo_id,
+              u.remitente, u.asunto, u.recibido_en, u.registrado_en, u.motivo, u.detalle
+       FROM unnest(
+         $1::uuid[], $2::uuid[], $3::uuid[], $4::text[], $5::text[],
+         $6::text[], $7::text[], $8::timestamptz[], $9::timestamptz[], $10::text[], $11::text[]
+       ) AS u(
+         id, cuenta_id, usuario_id, proveedor_correo, correo_id,
+         remitente, asunto, recibido_en, registrado_en, motivo, detalle
+       )
+       ON CONFLICT (cuenta_id, correo_id) DO NOTHING`,
+      [
+        noProcesados.map(() => randomUUID()),
+        noProcesados.map(({ item }) => item.cuentaId),
+        noProcesados.map(({ item }) => item.usuarioId),
+        noProcesados.map(({ item }) => item.proveedorCorreo),
+        noProcesados.map(({ item }) => item.correoId),
+        noProcesados.map(({ item }) => item.remitente),
+        noProcesados.map(({ item }) => item.asunto || null),
+        noProcesados.map(({ item }) => item.recibidoEn),
+        noProcesados.map(({ item }) => item.ahora),
+        noProcesados.map(({ detalle }) => detalle.motivo),
+        noProcesados.map(({ detalle }) => detalle.detalle || null),
+      ],
+    );
+  }
+
+  for (const item of nuevos) {
+    if (item.evento) {
+      await guardarEnOutbox(db, item.evento, item.validador);
+    }
+  }
+
+  return nuevos.map((r) => r.correoId);
+}
+
+/**
+ * Registra de forma atómica el correo como procesado y guarda (en la misma transacción) o bien
+ * el evento ReservaDetectada en el outbox, o bien sus metadatos en no_procesados, o nada si es
+ * ignorado. Garantiza que el mismo correo nunca publique dos eventos.
+ */
+export async function guardarResultadoCorreoProcesado(
+  db: ClienteDb,
+  datos: ResultadoCorreoProcesado,
+): Promise<boolean> {
+  const reclamados = await guardarResultadosCorreosProcesados(db, [datos]);
+  return reclamados.length > 0;
+}
+
+function esCursorNuevoMayor(actual: string | null, nuevo: string): boolean {
+  if (!actual) return true;
+  if (/^\d+$/.test(actual) && /^\d+$/.test(nuevo)) {
+    return BigInt(nuevo) > BigInt(actual);
+  }
+  const tActual = Date.parse(actual);
+  const tNuevo = Date.parse(nuevo);
+  if (!Number.isNaN(tActual) && !Number.isNaN(tNuevo)) {
+    return tNuevo > tActual;
+  }
+  return nuevo !== actual;
+}
+
+export async function actualizarCursorRevision(
+  db: Db,
+  datos: {
+    cuentaId: string;
+    nuevoCursor?: string;
+    cursorExpirado?: boolean;
+    ahora: Date;
+  },
+): Promise<void> {
+  const res = await db.query<{ ultimo_cursor: string | null; ultima_revision: Date | null }>(
+    `SELECT ultimo_cursor, ultima_revision
+     FROM cuentas_correo
+     WHERE id = $1
+     FOR UPDATE`,
+    [datos.cuentaId],
+  );
+  const fila = res.rows[0];
+  if (!fila) return;
+
+  const ultimaRevision =
+    !fila.ultima_revision || datos.ahora.getTime() > fila.ultima_revision.getTime()
+      ? datos.ahora
+      : fila.ultima_revision;
+
+  let cursorFinal = fila.ultimo_cursor;
+  if (datos.nuevoCursor) {
+    if (datos.cursorExpirado || esCursorNuevoMayor(fila.ultimo_cursor, datos.nuevoCursor)) {
+      cursorFinal = datos.nuevoCursor;
+    }
+  }
+
+  await db.query(
+    `UPDATE cuentas_correo
+     SET ultima_revision = $2,
+         ultimo_cursor = $3,
+         actualizado_en = $4
+     WHERE id = $1`,
+    [datos.cuentaId, ultimaRevision, cursorFinal, datos.ahora],
+  );
+}
+
+export async function listarNoProcesados(
+  db: Db,
+  filtros: {
+    usuarioId: string;
+    desde?: Date;
+    cuentaId?: string;
+    limite: number;
+  },
+): Promise<{ total: number; noProcesados: NoProcesadoPublico[] }> {
+  const condiciones = ['usuario_id = $1'];
+  const valores: unknown[] = [filtros.usuarioId];
+
+  if (filtros.desde) {
+    valores.push(filtros.desde);
+    condiciones.push(`registrado_en >= $${valores.length}`);
+  }
+  if (filtros.cuentaId) {
+    valores.push(filtros.cuentaId);
+    condiciones.push(`cuenta_id = $${valores.length}`);
+  }
+
+  const where = condiciones.join(' AND ');
+  const conteo = await db.query<{ total: string }>(
+    `SELECT COUNT(*)::text AS total FROM no_procesados WHERE ${where}`,
+    valores,
+  );
+  const total = Number(conteo.rows[0]?.total ?? 0);
+
+  const valoresLista = [...valores, filtros.limite];
+  const lista = await db.query<{
+    id: string;
+    cuenta_id: string;
+    proveedor_correo: string;
+    correo_id: string;
+    remitente: string;
+    asunto: string | null;
+    recibido_en: Date;
+    registrado_en: Date;
+    motivo: MotivoNoProcesado;
+    detalle: string | null;
+  }>(
+    `SELECT id, cuenta_id, proveedor_correo, correo_id, remitente, asunto,
+            recibido_en, registrado_en, motivo, detalle
+     FROM no_procesados
+     WHERE ${where}
+     ORDER BY registrado_en DESC, id DESC
+     LIMIT $${valoresLista.length}`,
+    valoresLista,
+  );
+
+  return {
+    total,
+    noProcesados: lista.rows.map((r) => ({
+      id: r.id,
+      cuentaId: r.cuenta_id,
+      proveedorCorreo: r.proveedor_correo,
+      correoId: r.correo_id,
+      remitente: r.remitente,
+      ...(r.asunto !== null ? { asunto: r.asunto } : {}),
+      recibidoEn: r.recibido_en.toISOString(),
+      registradoEn: r.registrado_en.toISOString(),
+      motivo: r.motivo,
+      ...(r.detalle !== null ? { detalle: r.detalle } : {}),
+    })),
+  };
 }

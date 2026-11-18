@@ -59,6 +59,7 @@ const viajes = crearClienteViajes({
 
 const negocio = crearNegocioCorreo({
   pool,
+  region: config.REGION,
   claveTokensBase64: config.CLAVE_TOKENS_CORREO,
   urlWeb: config.URL_WEB,
   logger,
@@ -66,6 +67,7 @@ const negocio = crearNegocioCorreo({
   gmail: adaptadoresConfig.gmail,
   outlook: adaptadoresConfig.outlook,
   cola,
+  broker,
   viajes,
   pushGmail: {
     secreto: config.SECRETO_AVISOS_GMAIL,
@@ -80,6 +82,8 @@ const negocio = crearNegocioCorreo({
     inicialMs: config.BACKOFF_429_INICIAL_SEG * 1000,
     maxMs: config.BACKOFF_429_MAX_SEG * 1000,
   },
+  cantidadProcesadores: config.CANTIDAD_PROCESADORES,
+  concurrenciaLectura: config.CONCURRENCIA_LECTURA,
 });
 
 const servidor = crearApp({
@@ -95,12 +99,14 @@ const servidor = crearApp({
   },
 });
 
-// Se apagan en orden inverso: primero examinador/outbox, después cola/broker y al final la base.
+// Se apagan en orden inverso: primero procesadores/examinador/outbox, después cola/broker y al final la base.
 servidor.alApagar(() => pool.end());
 servidor.alApagar(() => cola.cerrar());
 servidor.alApagar(() => broker.cerrar());
 servidor.alApagar(() => outbox.detener());
 servidor.alApagar(() => negocio.examinador.detener());
+servidor.alApagar(() => negocio.procesador.detener());
 
+await negocio.procesador.iniciar();
 await servidor.iniciar();
 negocio.examinador.iniciar();

@@ -55,6 +55,9 @@ export const esquemaConfig = esquemaBase.extend({
   CACHE_VIAJES_MIN: z.coerce.number().int().positive().default(10),
   BACKOFF_429_INICIAL_SEG: z.coerce.number().int().positive().default(30),
   BACKOFF_429_MAX_SEG: z.coerce.number().int().positive().default(900),
+  /** Configuración de Procesadores en paralelo (Iteración 2, ADR-009). */
+  CANTIDAD_PROCESADORES: z.coerce.number().int().min(1).max(64).default(4),
+  CONCURRENCIA_LECTURA: z.coerce.number().int().min(1).max(20).default(5),
 });
 
 export type Config = ReturnType<typeof esquemaConfig.parse>;

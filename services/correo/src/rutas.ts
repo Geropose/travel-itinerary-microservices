@@ -431,4 +431,20 @@ export function registrarRutas(servidor: Servidor, region: Region, negocio: Nego
 
     res.status(202).end();
   });
+
+  app.get('/no-procesados', async (req, res) => {
+    const { sub } = autenticacion(req);
+    const desdeTexto = textoQuery(req.query.desde);
+    const desde = desdeTexto ? new Date(desdeTexto) : undefined;
+    const cuentaId = textoQuery(req.query.cuentaId) || undefined;
+    const limite = req.query.limite !== undefined ? Number(req.query.limite) : 100;
+
+    const resultado = await repositorio.listarNoProcesados(pool, {
+      usuarioId: sub,
+      ...(desde ? { desde } : {}),
+      ...(cuentaId ? { cuentaId } : {}),
+      limite,
+    });
+    res.json(resultado);
+  });
 }
