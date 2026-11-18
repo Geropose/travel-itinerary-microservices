@@ -36,6 +36,8 @@ export interface OpcionesGestorTokens {
   logger: Logger;
   margenRenovacionMs: number;
   ahora?: () => number;
+  alLimitarCuota?: (cuentaId: string, retryAfterSeg?: number) => Promise<void>;
+  alExito?: (cuentaId: string) => Promise<void>;
 }
 
 export interface TokenCuentaResuelto {
@@ -146,15 +148,26 @@ export function crearGestorTokens(opciones: OpcionesGestorTokens): GestorTokens 
     cuentaId: string,
     operacion: (adaptador: AdaptadorCorreo, accessToken: string) => Promise<T>,
   ): Promise<T> {
-    const inicial = await obtenerTokenValido(cuentaId);
     try {
-      return await operacion(inicial.adaptador, inicial.accessToken);
+      const inicial = await obtenerTokenValido(cuentaId);
+      try {
+        const res = await operacion(inicial.adaptador, inicial.accessToken);
+        await opciones.alExito?.(cuentaId);
+        return res;
+      } catch (err) {
+        if (err instanceof ErrorProveedorCorreo && err.codigo === 'token-invalido') {
+          const renovado = await obtenerTokenValido(cuentaId, {
+            forzarSiIgualA: inicial.accessToken,
+          });
+          const res = await operacion(renovado.adaptador, renovado.accessToken);
+          await opciones.alExito?.(cuentaId);
+          return res;
+        }
+        throw err;
+      }
     } catch (err) {
-      if (err instanceof ErrorProveedorCorreo && err.codigo === 'token-invalido') {
-        const renovado = await obtenerTokenValido(cuentaId, {
-          forzarSiIgualA: inicial.accessToken,
-        });
-        return operacion(renovado.adaptador, renovado.accessToken);
+      if (err instanceof ErrorProveedorCorreo && err.codigo === 'limite-cuota') {
+        await opciones.alLimitarCuota?.(cuentaId, err.retryAfterSeg);
       }
       throw err;
     }

@@ -3,6 +3,7 @@
 import {
   createCipheriv,
   createDecipheriv,
+  createHash,
   createHmac,
   hkdfSync,
   randomBytes,
@@ -141,4 +142,10 @@ export function verificarState(
     proveedor: d.proveedor,
     venceEn: d.venceEn,
   };
+}
+
+/** Compara secretos en tiempo constante sin filtrar su longitud ni contenido. */
+export function compararSecretos(a: string, b: string): boolean {
+  const huella = (texto: string) => createHash('sha256').update(texto, 'utf8').digest();
+  return timingSafeEqual(huella(a), huella(b));
 }
