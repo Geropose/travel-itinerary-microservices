@@ -56,6 +56,10 @@ componentes que no estén ahí.
   prefijo `/region-N`, el header `X-Region` o `REGION_POR_DEFECTO`, en ese orden, y la manda al nginx
   de esa región por la red global. En login y registro sigue el 307 de Autenticación hacia la otra
   región. Nunca escribe cuerpos, headers, query ni emails en el log.
+- Mock de Gmail (`mocks/gmail`, en `infra/global.compose.yaml`, puerto 4001): OAuth de Google, Gmail
+  API y avisos push de Pub/Sub con los formatos de `specs/externos/gmail.md`, más rutas
+  `/admin/buzones/{email}/correos` para inyectar correos generados. Arranca con 20 buzones de prueba
+  (`mocks/gmail/README.md`).
 - `GET /salud/<servicio>` en el nginx de cada región muestra el `/health` de cada servicio.
 - Puerta entre regiones: el nginx de cada región escucha también en 8090 (no publicado). Autenticación
   llega por ahí a `/interna/cuentas/existe` y al JWKS de la otra región (`http://nginx:8090/otra-region/autenticacion`).

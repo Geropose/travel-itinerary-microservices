@@ -118,9 +118,22 @@ describe('global.compose.yaml', () => {
       URL_REGION_1: 'http://nginx-region-1:8080',
       URL_REGION_2: 'http://nginx-region-2:8080',
     });
-    // Es el único servicio con puerto en lo global: las bases no se publican.
+    // Las bases no se publican: solo el enrutador y los mocks que abre el navegador.
     const conPuertos = Object.entries(global.services).filter(([, s]) => s.ports);
-    expect(conPuertos.map(([nombre]) => nombre)).toEqual(['enrutador']);
+    expect(conPuertos.map(([nombre]) => nombre)).toEqual(['enrutador', 'mock-gmail']);
+  });
+
+  it('el mock de Gmail publica el 4001 y manda los avisos de cada región por el enrutador', () => {
+    const gmail = global.services['mock-gmail'] ?? {};
+    expect(gmail.build?.dockerfile).toBe('mocks/gmail/Dockerfile');
+    expect(redes(gmail)).toEqual(['global']);
+    expect(gmail.ports).toEqual(['${PUERTO_MOCK_GMAIL:-4001}:4001']);
+    const avisos = gmail.environment?.SUSCRIPCIONES_PUSH ?? '';
+    for (const region of ['region-1', 'region-2']) {
+      expect(avisos).toContain(
+        `gmail-avisos-${region}=http://enrutador:8000/${region}/api/correo/notificaciones/gmail?token=`,
+      );
+    }
   });
 });
 
