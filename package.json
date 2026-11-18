@@ -16,10 +16,11 @@
   "scripts": {
     "lint": "eslint . && prettier --check .",
     "format": "prettier --write .",
-    "typecheck": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json && tsc -p web/tsconfig.json",
     "test": "vitest run --passWithNoTests",
     "test:contratos": "node infra/scripts/lint-contratos.mjs && vitest run --passWithNoTests contrato",
     "e2e": "vitest run --passWithNoTests --config tests/e2e/vitest.config.ts",
+    "e2e:web": "npm run e2e -w web",
     "nuevo-servicio": "node infra/scripts/nuevo-servicio.ts",
     "mock": "node infra/scripts/mock.ts",
     "infra:secretos": "node infra/scripts/secretos.ts",
@@ -28,7 +29,9 @@
     "infra:logs": "node infra/scripts/infra.ts logs",
     "infra:reset": "node infra/scripts/infra.ts reset",
     "infra:escalador": "node infra/scripts/escalador.ts",
-    "caos": "vitest run --passWithNoTests --config tests/caos/vitest.config.ts"
+    "caos": "vitest run --passWithNoTests --config tests/caos/vitest.config.ts",
+    "web": "npm run dev -w web",
+    "web:api": "npm run api -w web"
   },
   "devDependencies": {
     "@asyncapi/parser": "^3.6.6",
@@ -46,5 +49,10 @@
     "typescript-eslint": "^8.73.0",
     "vitest": "^5.1.0",
     "yaml": "^2.9.1"
+  },
+  "overrides": {
+    "openapi-typescript": {
+      "typescript": "$typescript"
+    }
   }
 }

@@ -4,3 +4,6 @@ coverage
 package-lock.json
 # Los documentos en Markdown no se reformatean (docs/CONVENCIONES.md es copia textual del plan).
 *.md
+# Tipos generados desde los contratos (npm run web:api)
+web/src/api/generado
+web/dev-dist
