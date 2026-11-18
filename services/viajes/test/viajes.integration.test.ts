@@ -72,6 +72,7 @@ describe.skipIf(!hayDocker)(
     beforeAll(async () => {
       [postgres, rabbit] = await Promise.all([levantarPostgres(), levantarRabbit()]);
       pool = crearPool({ url: postgres.url, maximo: 20 });
+      pool.on('error', () => undefined);
       await migrar(pool, [
         MIGRACIONES_EVENTOS,
         fileURLToPath(new URL('../migrations/', import.meta.url)),

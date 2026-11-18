@@ -43,6 +43,8 @@ describe.skipIf(!hayDocker)(
     beforeAll(async () => {
       postgres = await levantarPostgres();
       pool = crearPool({ url: postgres.url, maximo: Math.min(30, CANTIDAD_CONSUMIDORES) });
+      // Absorbe errores 57P01 de conexiones en cierre al apagar el contenedor de PostgreSQL.
+      pool.on('error', () => undefined);
       await migrar(pool, [
         MIGRACIONES_EVENTOS,
         fileURLToPath(new URL('../migrations/', import.meta.url)),

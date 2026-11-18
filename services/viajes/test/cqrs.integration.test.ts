@@ -62,7 +62,9 @@ describe.skipIf(!hayDocker)(
       ]);
       urlRedis = `redis://${redisContenedor.getHost()}:${redisContenedor.getMappedPort(6379)}`;
       poolPrincipal = crearPool({ url: postgres.url, maximo: 15 });
+      poolPrincipal.on('error', () => undefined);
       const poolReplicaReal = crearPool({ url: postgres.url, maximo: 10 });
+      poolReplicaReal.on('error', () => undefined);
 
       // Envolvemos el pool de lectura para poder simular caída de la read replica en la prueba.
       poolLectura = new Proxy(poolReplicaReal, {

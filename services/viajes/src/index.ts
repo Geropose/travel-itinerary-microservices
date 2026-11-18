@@ -24,10 +24,18 @@ const pool = crearPool({
   url: config.URL_BASE,
   maximo: Math.max(10, config.CANTIDAD_CONSUMIDORES * 2),
 });
+pool.on('error', (err) => {
+  logger.warn({ err }, 'error en conexión inactiva de la base principal');
+});
 const poolLectura =
   config.URL_BASE_LECTURA && config.URL_BASE_LECTURA !== config.URL_BASE
     ? crearPool({ url: config.URL_BASE_LECTURA, maximo: 15 })
     : pool;
+if (poolLectura !== pool) {
+  poolLectura.on('error', (err) => {
+    logger.warn({ err }, 'error en conexión inactiva de la read replica');
+  });
+}
 await migrar(
   pool,
   [MIGRACIONES_EVENTOS, fileURLToPath(new URL('../migrations/', import.meta.url))],
