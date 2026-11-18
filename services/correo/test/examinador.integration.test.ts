@@ -171,6 +171,7 @@ describe.skipIf(!hayDocker)(
 
       [postgres, rabbit] = await Promise.all([levantarPostgres(), levantarRabbit()]);
       pool = crearPool({ url: postgres.url });
+      pool.on('error', () => undefined);
       await migrar(pool, [
         MIGRACIONES_EVENTOS,
         fileURLToPath(new URL('../migrations/', import.meta.url)),
@@ -365,26 +366,20 @@ describe.skipIf(!hayDocker)(
       const userPush = randomUUID();
       usuariosViajeProximo.add(userProximo);
 
-      // Conectamos cuenta Gmail (con push) y dos cuentas sin push (IMAP).
+      // Conectamos cuenta Gmail (con push): al activar users.watch el mock dispara un push inicial
+      // inmediato con prioridad 1, que ya marca la cuenta como encolada.
       const idGmail = await conectarCuentaReal(
         userPush,
         'gmail',
         mockGmail.almacen.todos()[0]?.email ?? '',
       );
-
-      // Primera pasada a los 15 segundos (< 1 min): Gmail nueva debe encolarse con prioridad 1 en correo.buzones-a-revisar.
-      reloj.ahora += 15_000;
-      const inicial = await negocio.examinador.ejecutarCiclo();
-      expect(inicial.map((t) => [t.cuentaId, t.origen, t.prioridad])).toEqual([
-        [idGmail, 'cuenta-nueva', 1],
-      ]);
-      await esperarQue(
-        () =>
-          trabajosRecibidos.some((t) => t.cuentaId === idGmail && t.origen === 'cuenta-nueva') &&
-          trabajosRecibidos.some((t) => t.cuentaId === idGmail && t.origen === 'push'),
+      await esperarQue(() =>
+        trabajosRecibidos.some(
+          (t) => t.cuentaId === idGmail && t.origen === 'push' && t.prioridad === 1,
+        ),
       );
 
-      // Agregamos dos cuentas sin push ya con revisión inicial superada en t = reloj.ahora.
+      // Agregamos dos cuentas sin push (IMAP) recién conectadas en t = reloj.ahora.
       const g1 = await guardarCuentaConectada(pool, Buffer.from(CLAVE_TOKENS, 'base64'), {
         usuarioId: userProximo,
         proveedor: 'imap',
@@ -411,9 +406,18 @@ describe.skipIf(!hayDocker)(
       });
       if (g1.resultado !== 'ok' || g2.resultado !== 'ok') throw new Error('Insert imap fallido');
 
-      // Revisión inicial en < 1 min toma ambas IMAP (prioridad 1).
+      // Primera pasada a los 15 segundos (< 1 min): las cuentas nuevas sin push se encolan con
+      // prioridad 1 ('cuenta-nueva') y Gmail con push activo no se vuelve a encolar por intervalo.
       trabajosRecibidos.length = 0;
-      await negocio.examinador.ejecutarCiclo();
+      reloj.ahora += 15_000;
+      const inicial = await negocio.examinador.ejecutarCiclo();
+      expect(inicial).toHaveLength(2);
+      expect(inicial.map((t) => [t.cuentaId, t.origen, t.prioridad])).toEqual(
+        expect.arrayContaining([
+          [g1.cuentaId, 'cuenta-nueva', 1],
+          [g2.cuentaId, 'cuenta-nueva', 1],
+        ]),
+      );
       await esperarQue(() => trabajosRecibidos.length === 2);
 
       // Avanzamos +5 min: SOLO userProximo (imap) se consulta; userNormal NO, Gmail push NO.
@@ -446,9 +450,14 @@ describe.skipIf(!hayDocker)(
       const idGmail = await conectarCuentaReal(randomUUID(), 'gmail', emailGmail);
       const idOutlook = await conectarCuentaReal(randomUUID(), 'outlook', emailOutlook);
 
-      // Limpiamos revisión inicial (< 1 min) y vaciamos trabajos.
+      // Esperamos el push inicial del watch de Gmail y limpiamos la revisión inicial de Outlook.
+      await esperarQue(() =>
+        trabajosRecibidos.some((t) => t.cuentaId === idGmail && t.origen === 'push'),
+      );
       await negocio.examinador.ejecutarCiclo();
-      await esperarQue(() => trabajosRecibidos.length >= 2);
+      await esperarQue(() =>
+        trabajosRecibidos.some((t) => t.cuentaId === idOutlook && t.origen === 'cuenta-nueva'),
+      );
       trabajosRecibidos.length = 0;
 
       // 1) Entra correo nuevo al buzón Gmail: el mock manda Pub/Sub push y se encola sin esperar intervalo.
@@ -564,13 +573,11 @@ describe.skipIf(!hayDocker)(
       const emailGmail = mockGmail.almacen.todos()[2]?.email ?? '';
       const idGmail = await conectarCuentaReal(randomUUID(), 'gmail', emailGmail);
 
-      // Consumimos la revisión inicial y aguardamos tanto el ciclo como el push inicial del watch.
-      await negocio.examinador.ejecutarCiclo();
-      await esperarQue(
-        () =>
-          trabajosRecibidos.some((t) => t.cuentaId === idGmail && t.origen === 'cuenta-nueva') &&
-          trabajosRecibidos.some((t) => t.cuentaId === idGmail && t.origen === 'push'),
+      // Esperamos el push inicial del watch de Gmail y limpiamos cualquier revisión inicial pendiente.
+      await esperarQue(() =>
+        trabajosRecibidos.some((t) => t.cuentaId === idGmail && t.origen === 'push'),
       );
+      await negocio.examinador.ejecutarCiclo();
       trabajosRecibidos.length = 0;
 
       // Reiniciamos ventana de cuota (+65 s): list (5u) + get.full (60u) pasan, 2ª lectura (60u -> 125 > 110) dispara 429 real.

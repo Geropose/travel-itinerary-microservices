@@ -85,6 +85,39 @@ export async function bloquearUsuarioParaAgrupacion(
   await db.query('SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))', [usuarioId]);
 }
 
+export async function buscarViajePorId(
+  db: Db,
+  viajeId: string,
+  opciones: { paraActualizar?: boolean } = {},
+): Promise<Viaje | null> {
+  const sufijo = opciones.paraActualizar ? ' FOR UPDATE' : '';
+  const res = await db.query<FilaViaje>(
+    `SELECT id, usuario_id, nombre, destino, inicio, fin, estado
+     FROM viajes
+     WHERE id = $1${sufijo}`,
+    [viajeId],
+  );
+  const fila = res.rows[0];
+  return fila ? mapearViaje(fila) : null;
+}
+
+export async function buscarReservaPorId(
+  db: Db,
+  reservaId: string,
+  opciones: { paraActualizar?: boolean } = {},
+): Promise<Reserva | null> {
+  const sufijo = opciones.paraActualizar ? ' FOR UPDATE' : '';
+  const res = await db.query<FilaReserva>(
+    `SELECT id, viaje_id, usuario_id, proveedor, tipo_reserva, numero_reserva,
+            inicio, fin, origen, destino, detalle, estado, origen_cambio, correo_id, actualizado_en
+     FROM reservas
+     WHERE id = $1${sufijo}`,
+    [reservaId],
+  );
+  const fila = res.rows[0];
+  return fila ? mapearReserva(fila) : null;
+}
+
 export async function buscarReservaPorClave(
   db: Db,
   proveedor: string,
@@ -233,6 +266,7 @@ export async function actualizarReserva(
   db: ClienteDb,
   reservaId: string,
   datos: {
+    viajeId?: string;
     inicio: string;
     fin: string;
     origen?: string;
@@ -246,20 +280,22 @@ export async function actualizarReserva(
 ): Promise<Reserva> {
   const res = await db.query<FilaReserva>(
     `UPDATE reservas
-     SET inicio = $2,
-         fin = $3,
-         origen = $4,
-         destino = $5,
-         detalle = $6::jsonb,
-         estado = $7,
-         origen_cambio = $8,
-         correo_id = COALESCE($9, correo_id),
-         actualizado_en = $10
+     SET viaje_id = COALESCE($2, viaje_id),
+         inicio = $3,
+         fin = $4,
+         origen = $5,
+         destino = $6,
+         detalle = $7::jsonb,
+         estado = $8,
+         origen_cambio = $9,
+         correo_id = COALESCE($10, correo_id),
+         actualizado_en = $11
      WHERE id = $1
      RETURNING id, viaje_id, usuario_id, proveedor, tipo_reserva, numero_reserva,
                inicio, fin, origen, destino, detalle, estado, origen_cambio, correo_id, actualizado_en`,
     [
       reservaId,
+      datos.viajeId ?? null,
       datos.inicio,
       datos.fin,
       datos.origen ?? null,
@@ -274,6 +310,35 @@ export async function actualizarReserva(
   const fila = res.rows[0];
   if (!fila) throw new Error(`Reserva ${reservaId} no encontrada al actualizar.`);
   return mapearReserva(fila);
+}
+
+export async function eliminarReservaPorId(db: ClienteDb, reservaId: string): Promise<boolean> {
+  const res = await db.query('DELETE FROM reservas WHERE id = $1', [reservaId]);
+  return (res.rowCount ?? 0) > 0;
+}
+
+export async function eliminarViajePorId(db: ClienteDb, viajeId: string): Promise<boolean> {
+  const res = await db.query('DELETE FROM viajes WHERE id = $1', [viajeId]);
+  return (res.rowCount ?? 0) > 0;
+}
+
+/**
+ * Mueve todas las reservas de `viajesAbsorbidosIds` al `viajePrincipalId` y elimina los viajes
+ * absorbidos (usado cuando una reserva puente une viajes que llegaron fuera de orden).
+ */
+export async function fusionarViajesEnPrincipal(
+  db: ClienteDb,
+  viajePrincipalId: string,
+  viajesAbsorbidosIds: readonly string[],
+): Promise<void> {
+  if (viajesAbsorbidosIds.length === 0) return;
+  await db.query(
+    `UPDATE reservas
+     SET viaje_id = $1
+     WHERE viaje_id = ANY($2::uuid[])`,
+    [viajePrincipalId, viajesAbsorbidosIds],
+  );
+  await db.query(`DELETE FROM viajes WHERE id = ANY($1::uuid[])`, [viajesAbsorbidosIds]);
 }
 
 export async function listarViajesConReservas(

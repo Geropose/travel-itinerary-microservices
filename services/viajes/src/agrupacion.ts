@@ -42,23 +42,24 @@ export function distanciaEntreRangosMs(
 }
 
 /**
- * Elige el viaje activo del usuario en el que debe agruparse una reserva nueva:
- * entra si sus fechas se superponen o están a menos de `margenMs` (por defecto 2 días).
- * Si hay más de un candidato válido, elige el más cercano (y ante empate, el de inicio más temprano).
+ * Devuelve todos los viajes activos del usuario cuyas fechas se superponen o están a menos de
+ * `margenMs` (por defecto 2 días) de la reserva nueva, ordenados del inicio más temprano al más
+ * tardío. Si devuelve más de uno, la reserva nueva actúa como puente y esos viajes se fusionan,
+ * haciendo la agrupación independiente del orden de llegada de los eventos (ADR-002).
  */
-export function buscarViajeParaAgrupar(
+export function buscarViajesParaAgrupar(
   viajes: readonly RangoViajeCandidato[],
   inicioIso: string,
   finIso: string,
   margenMs: number = MARGEN_AGRUPACION_MS_DEFECTO,
-): RangoViajeCandidato | null {
+): RangoViajeCandidato[] {
   const inicioMs = Date.parse(inicioIso);
   const finMs = Date.parse(finIso);
   if (Number.isNaN(inicioMs) || Number.isNaN(finMs)) {
     throw new Error('Fechas de reserva inválidas para agrupación.');
   }
 
-  let mejor: { viaje: RangoViajeCandidato; distancia: number; inicioViajeMs: number } | null = null;
+  const candidatos: { viaje: RangoViajeCandidato; distancia: number; inicioViajeMs: number }[] = [];
 
   for (const viaje of viajes) {
     if (viaje.estado !== 'activo') continue;
@@ -69,16 +70,23 @@ export function buscarViajeParaAgrupar(
     const distancia = distanciaEntreRangosMs(inicioMs, finMs, vInicioMs, vFinMs);
     if (distancia >= margenMs) continue;
 
-    if (
-      !mejor ||
-      distancia < mejor.distancia ||
-      (distancia === mejor.distancia && vInicioMs < mejor.inicioViajeMs)
-    ) {
-      mejor = { viaje, distancia, inicioViajeMs: vInicioMs };
-    }
+    candidatos.push({ viaje, distancia, inicioViajeMs: vInicioMs });
   }
 
-  return mejor?.viaje ?? null;
+  candidatos.sort((a, b) => a.distancia - b.distancia || a.inicioViajeMs - b.inicioViajeMs);
+  return candidatos.map((c) => c.viaje);
+}
+
+/**
+ * Elige el viaje activo más cercano del usuario en el que debe agruparse una reserva nueva.
+ */
+export function buscarViajeParaAgrupar(
+  viajes: readonly RangoViajeCandidato[],
+  inicioIso: string,
+  finIso: string,
+  margenMs: number = MARGEN_AGRUPACION_MS_DEFECTO,
+): RangoViajeCandidato | null {
+  return buscarViajesParaAgrupar(viajes, inicioIso, finIso, margenMs)[0] ?? null;
 }
 
 /**
