@@ -1,0 +1,19 @@
+{
+  "name": "@trotamundos/analitica",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Servicio analitica de Trotamundos (contrato: specs/openapi/analitica.yaml)",
+  "type": "module",
+  "config": {
+    "puerto": 3006
+  },
+  "scripts": {
+    "start": "node src/index.ts",
+    "dev": "node --watch src/index.ts",
+    "test": "vitest run --root ../.. services/analitica"
+  },
+  "dependencies": {
+    "@trotamundos/comun": "0.1.0",
+    "zod": "^4.6.7"
+  }
+}

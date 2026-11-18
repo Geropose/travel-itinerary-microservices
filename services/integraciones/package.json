@@ -1,0 +1,19 @@
+{
+  "name": "@trotamundos/integraciones",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Servicio integraciones de Trotamundos (contrato: specs/openapi/integraciones.yaml)",
+  "type": "module",
+  "config": {
+    "puerto": 3005
+  },
+  "scripts": {
+    "start": "node src/index.ts",
+    "dev": "node --watch src/index.ts",
+    "test": "vitest run --root ../.. services/integraciones"
+  },
+  "dependencies": {
+    "@trotamundos/comun": "0.1.0",
+    "zod": "^4.6.7"
+  }
+}
