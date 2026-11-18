@@ -121,7 +121,7 @@ export interface Paso {
   entorno: Record<string, string>;
 }
 
-function compose(proyecto: string, archivo: string): string[] {
+export function compose(proyecto: string, archivo: string): string[] {
   return ['compose', '-p', proyecto, '-f', archivo, '--env-file', '.env'];
 }
 

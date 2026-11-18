@@ -5,9 +5,11 @@
 # se agregan o se sacan con docker compose --scale gateway=N.
 resolver 127.0.0.11 valid=5s ipv6=off;
 
+# Con 3 errores dentro de 15 s, nginx deja de mandarle solicitudes a esa instancia durante 15 s
+# (ADR-007 y ADR-008): mientras el monitor la reinicia, el tráfico va a las demás.
 upstream gateway {
   zone gateway 64k;
-  server gateway:3000 resolve;
+  server gateway:3000 resolve max_fails=3 fail_timeout=15s;
 }
 
 # Puerto de cada servicio de la región (docs/CONVENCIONES.md 4.2), para /salud/<servicio>.

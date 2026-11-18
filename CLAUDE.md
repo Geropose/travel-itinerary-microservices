@@ -40,6 +40,8 @@ componentes que no estén ahí.
 | `npm run infra:levantar` | Levanta lo global y las regiones r1 y r2 con Docker Compose y espera que todo esté sano (`-- --solo r1`, `-- --ha`, `-- --scale gateway=3`). nginx: r1 en 8081, r2 en 8082 |
 | `npm run infra:bajar` / `infra:reset` | Baja los contenedores; `reset` borra también los volúmenes (`-- --solo r1`) |
 | `npm run infra:logs` | Logs de las regiones (`-- --solo r1 gateway viajes`) |
+| `npm run infra:escalador` | Escala cada servicio con `docker compose --scale` según `docker stats`: +1 instancia con más del 70 % de procesador, −1 con menos del 30 % durante 2 min; mínimo 3 con el perfil ha (`-- --solo r1`, `-- --una-vez`) |
+| `npm run caos` | Pruebas de caos de `tests/caos` contra el sistema levantado (por ejemplo, matar una instancia del gateway) |
 
 ## Infraestructura
 
@@ -54,7 +56,11 @@ componentes que no estén ahí.
 - El gateway (`services/gateway/src/enrutamiento.ts`) enruta `/api/<servicio>/*` solo a las
   operaciones del contrato de cada servicio, con el Validador de Intercepción antes; las rutas
   `/interna/...` responden 404 y quedan en el registro de accesos.
-- Las pruebas con todo levantado están en `tests/e2e/` (`npm run e2e`).
+- Monitor de salud (`services/monitor`): uno por región, con el socket de Docker. Cada 5 s hace ping a
+  `/health` de cada contenedor con la etiqueta `trotamundos.servicio`; con 3 fallas seguidas lo
+  reinicia. `GET /estado` (desde adentro de la región) muestra lo que ve. nginx deja de mandarle al
+  gateway caído con `max_fails=3 fail_timeout=15s`.
+- Las pruebas con todo levantado están en `tests/e2e/` (`npm run e2e`) y `tests/caos/` (`npm run caos`).
 
 ## Configuración compartida
 
