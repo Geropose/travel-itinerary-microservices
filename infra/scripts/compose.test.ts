@@ -13,6 +13,8 @@ interface Servicio {
   ports?: string[];
   environment?: Record<string, string>;
   deploy?: { replicas: number };
+  volumes?: string[];
+  labels?: Record<string, string>;
   profiles?: string[];
 }
 interface Compose {
@@ -78,6 +80,19 @@ describe('region.compose.yaml', () => {
     }
   });
 
+  it('solo el monitor tiene el socket de Docker, y sabe qué proyecto vigilar (ADR-007)', () => {
+    const conSocket = Object.entries(region.services)
+      .filter(([, s]) => (s.volumes ?? []).some((v) => v.startsWith('/var/run/docker.sock:')))
+      .map(([nombre]) => nombre);
+    expect(conSocket).toEqual(['monitor']);
+    expect(region.services.monitor?.environment?.PROYECTO_DOCKER).toBe('${COMPOSE_PROJECT_NAME:?}');
+  });
+
+  it('nginx deja de mandar al gateway caído: max_fails=3 y fail_timeout=15s (ADR-008)', () => {
+    const plantilla = readFileSync(join(raiz, 'infra/nginx/region.conf.template'), 'utf8');
+    expect(plantilla).toMatch(/server gateway:3000 resolve max_fails=3 fail_timeout=15s;/);
+  });
+
   it('RabbitMQ: un nodo por defecto y dos más con el perfil ha', () => {
     const nodos = Object.entries(region.services).filter(([n]) => n.startsWith('rabbitmq'));
     expect(nodos.map(([n, s]) => [n, s.profiles ?? []])).toEqual([
@@ -103,6 +118,8 @@ describe('variables', () => {
       'PUERTO_NGINX',
       'PUERTO_NGINX_OTRA_REGION',
       'JWT_CLAVE_PRIVADA',
+      // La pone docker compose con -p (r1 o r2).
+      'COMPOSE_PROJECT_NAME',
     ];
     const usadas = [...`${textoRegion}\n${textoGlobal}`.matchAll(/\$\{([A-Z0-9_]+)/g)].map(
       (m) => m[1],

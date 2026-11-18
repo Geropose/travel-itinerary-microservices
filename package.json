@@ -26,7 +26,9 @@
     "infra:levantar": "node infra/scripts/infra.ts levantar",
     "infra:bajar": "node infra/scripts/infra.ts bajar",
     "infra:logs": "node infra/scripts/infra.ts logs",
-    "infra:reset": "node infra/scripts/infra.ts reset"
+    "infra:reset": "node infra/scripts/infra.ts reset",
+    "infra:escalador": "node infra/scripts/escalador.ts",
+    "caos": "vitest run --passWithNoTests --config tests/caos/vitest.config.ts"
   },
   "devDependencies": {
     "@asyncapi/parser": "^3.6.6",

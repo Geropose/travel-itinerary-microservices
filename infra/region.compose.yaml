@@ -208,14 +208,24 @@ services:
     labels:
       trotamundos.servicio: asistente
 
+  # Monitor de salud (Iteración 1, ADR-007): ping cada 5 s a cada instancia de la región, que
+  # descubre y reinicia con la API de Docker. Por eso tiene el socket de Docker, que da control
+  # total sobre Docker: no publica ningún puerto ni está en la tabla del gateway.
   monitor:
     image: trotamundos/monitor:dev
     build: { context: .., dockerfile: services/monitor/Dockerfile }
     restart: unless-stopped
     networks: [region]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    # El socket es del grupo root en Docker Desktop (GID 0); en Linux suele ser el grupo docker
+    # (GID_DOCKER=$(getent group docker | cut -d: -f3)).
+    group_add: ['${GID_DOCKER:-0}']
     environment:
       REGION: ${REGION:?}
       NIVEL_LOG: ${NIVEL_LOG:-info}
+      # Proyecto de compose de la región (r1 o r2): solo vigila sus contenedores.
+      PROYECTO_DOCKER: ${COMPOSE_PROJECT_NAME:?}
     labels:
       trotamundos.servicio: monitor
 
