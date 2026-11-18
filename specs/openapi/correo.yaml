@@ -204,6 +204,7 @@ paths:
         - name: state
           in: query
           required: true
+          allowReserved: true
           description: El mismo `state` firmado que se mandó en la URL de autorización.
           schema:
             type: string
@@ -212,6 +213,7 @@ paths:
         - name: code
           in: query
           required: false
+          allowReserved: true
           description: Código de autorización. Viene si el usuario dio el permiso.
           schema:
             type: string
@@ -220,6 +222,7 @@ paths:
         - name: scope
           in: query
           required: false
+          allowReserved: true
           description: Scopes concedidos (solo Gmail lo manda en la redirección). Se vuelve a comprobar con la respuesta del canje.
           schema:
             type: string
@@ -227,6 +230,7 @@ paths:
         - name: error
           in: query
           required: false
+          allowReserved: true
           description: Viene en lugar de `code` si el usuario rechazó el permiso (`access_denied`) u otro error OAuth.
           schema:
             type: string
@@ -234,6 +238,7 @@ paths:
         - name: error_description
           in: query
           required: false
+          allowReserved: true
           description: Texto libre del proveedor (Outlook). Solo para los logs.
           schema:
             type: string
@@ -353,6 +358,7 @@ paths:
         - name: validationToken
           in: query
           required: false
+          allowReserved: true
           description: Solo en la validación de la URL. Token opaco; se devuelve decodificado en el cuerpo.
           schema:
             type: string

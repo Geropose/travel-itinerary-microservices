@@ -1,8 +1,9 @@
 // Arranque de correo: lee la configuración, abre las conexiones y empieza a escuchar.
 import { fileURLToPath } from 'node:url';
-import { cargarConfig, crearLogger } from '@trotamundos/comun';
 import {
+  cargarConfig,
   conectarBroker,
+  crearLogger,
   crearPool,
   crearValidador,
   iniciarPublicadorOutbox,
@@ -10,11 +11,12 @@ import {
   MIGRACIONES_EVENTOS,
   registroPorEvento,
 } from '@trotamundos/comun';
-import { crearApp, SERVICIO } from './app.ts';
-import { esquemaConfig } from './config.ts';
+import { crearApp, crearNegocioCorreo, SERVICIO } from './app.ts';
+import { esquemaConfig, resolverConfigAdaptadores } from './config.ts';
 
 const config = cargarConfig(esquemaConfig);
 const logger = crearLogger({ servicio: SERVICIO, region: config.REGION, nivel: config.NIVEL_LOG });
+const adaptadoresConfig = resolverConfigAdaptadores(config);
 
 const pool = crearPool({ url: config.URL_BASE });
 await migrar(
@@ -39,11 +41,22 @@ const validador = crearValidador({
 });
 const outbox = iniciarPublicadorOutbox({ pool, broker, logger });
 
+const negocio = crearNegocioCorreo({
+  pool,
+  claveTokensBase64: config.CLAVE_TOKENS_CORREO,
+  urlWeb: config.URL_WEB,
+  logger,
+  margenRenovacionMs: config.MARGEN_RENOVACION_SEG * 1000,
+  gmail: adaptadoresConfig.gmail,
+  outlook: adaptadoresConfig.outlook,
+});
+
 const servidor = crearApp({
   region: config.REGION,
   puerto: config.PUERTO,
   logger,
   validador,
+  negocio,
   chequeos: {
     base: () => pool.query('SELECT 1'),
     broker: () => broker.verificar(),
