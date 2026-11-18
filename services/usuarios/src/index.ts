@@ -1,8 +1,9 @@
 // Arranque de usuarios: lee la configuración, abre las conexiones y empieza a escuchar.
 import { fileURLToPath } from 'node:url';
-import { cargarConfig, crearLogger } from '@trotamundos/comun';
 import {
+  cargarConfig,
   conectarBroker,
+  crearLogger,
   crearPool,
   crearValidador,
   iniciarPublicadorOutbox,
@@ -10,8 +11,9 @@ import {
   MIGRACIONES_EVENTOS,
   registroPorEvento,
 } from '@trotamundos/comun';
-import { crearApp, SERVICIO } from './app.ts';
-import { esquemaConfig } from './config.ts';
+import { crearApp, reglasDeRutas, SERVICIO } from './app.ts';
+import { crearViajes } from './clientes.ts';
+import { esquemaConfig, parsearAgencias } from './config.ts';
 
 const config = cargarConfig(esquemaConfig);
 const logger = crearLogger({ servicio: SERVICIO, region: config.REGION, nivel: config.NIVEL_LOG });
@@ -28,14 +30,14 @@ const broker = await conectarBroker({
   region: config.REGION,
   logger,
 });
+const registrar = registroPorEvento(broker, logger);
 const validador = crearValidador({
   servicio: SERVICIO,
   region: config.REGION,
   logger,
   claves: { [config.REGION]: { url: config.URL_JWKS } },
-  registrar: registroPorEvento(broker, logger),
-  // Rutas internas con token de servicio: 'MÉTODO /ruta': { servicios: [...] }
-  reglas: {},
+  registrar,
+  reglas: reglasDeRutas(),
 });
 const outbox = iniciarPublicadorOutbox({ pool, broker, logger });
 
@@ -44,6 +46,12 @@ const servidor = crearApp({
   puerto: config.PUERTO,
   logger,
   validador,
+  negocio: {
+    pool,
+    viajes: crearViajes({ urlViajes: config.URL_VIAJES, logger }),
+    agencias: parsearAgencias(config.AGENCIAS_CONFIGURADAS),
+    registrar,
+  },
   chequeos: {
     base: () => pool.query('SELECT 1'),
     broker: () => broker.verificar(),
