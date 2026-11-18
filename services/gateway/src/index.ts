@@ -1,7 +1,8 @@
 // Arranque de gateway: lee la configuración, abre las conexiones y empieza a escuchar.
 import { fileURLToPath } from 'node:url';
-import { cargarConfig, crearLogger } from '@trotamundos/comun';
 import {
+  cargarConfig,
+  crearLogger,
   conectarBroker,
   crearPool,
   crearValidador,
@@ -10,12 +11,14 @@ import {
   MIGRACIONES_EVENTOS,
   MIGRACIONES_REGISTRO_ACCESOS,
   registroEnBase,
+  type Region,
 } from '@trotamundos/comun';
 import { crearApp, SERVICIO } from './app.ts';
 import { esquemaConfig } from './config.ts';
 
 const config = cargarConfig(esquemaConfig);
 const logger = crearLogger({ servicio: SERVICIO, region: config.REGION, nivel: config.NIVEL_LOG });
+const otraRegion: Region = config.REGION === 'region-1' ? 'region-2' : 'region-1';
 
 const pool = crearPool({ url: config.URL_BASE });
 await migrar(
@@ -34,14 +37,19 @@ const broker = await conectarBroker({
   region: config.REGION,
   logger,
 });
+// El gateway guarda sus rechazos directo, sin pasar por el broker (CONVENCIONES 4.5).
+const registrar = registroEnBase(pool, logger);
 const validador = crearValidador({
   servicio: SERVICIO,
   region: config.REGION,
   logger,
-  claves: { [config.REGION]: { url: config.URL_JWKS } },
-  // El gateway guarda sus rechazos directo, sin pasar por el broker (CONVENCIONES 4.5).
-  registrar: registroEnBase(pool, logger),
-  // Rutas internas con token de servicio: 'MÉTODO /ruta': { servicios: [...] }
+  claves: {
+    [config.REGION]: { url: config.URL_JWKS },
+    // Solo para reconocer los JWT de la otra región y responder 403 (nunca se aceptan acá).
+    [otraRegion]: { url: config.URL_JWKS_OTRA_REGION },
+  },
+  registrar,
+  // Ninguna regla: un token de servicio nunca pasa por el gateway (403).
   reglas: {},
 });
 const outbox = iniciarPublicadorOutbox({ pool, broker, logger });
@@ -51,6 +59,10 @@ const servidor = crearApp({
   puerto: config.PUERTO,
   logger,
   validador,
+  registrar,
+  tiempoMaximoMs: config.TIEMPO_MAXIMO_MS,
+  limiteCuerpo: config.LIMITE_CUERPO,
+  origenWeb: config.ORIGEN_WEB,
   chequeos: {
     base: () => pool.query('SELECT 1'),
     broker: () => broker.verificar(),

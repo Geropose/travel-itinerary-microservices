@@ -95,6 +95,10 @@ services:
     environment:
       <<: *entorno
       URL_BASE: postgres://gateway:${CLAVE_BD_GATEWAY:?}@postgres:5432/registro_accesos
+      # JWKS de la otra región, por la puerta entre regiones: sus JWT responden 403 (CONST-6).
+      URL_JWKS_OTRA_REGION: http://nginx:8090/otra-region/autenticacion/.well-known/jwks.json
+      # Origen de la web (P1.8, Vite): el único con CORS.
+      ORIGEN_WEB: ${ORIGEN_WEB:-http://localhost:5173}
     labels:
       trotamundos.servicio: gateway
 

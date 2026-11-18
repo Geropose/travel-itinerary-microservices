@@ -51,7 +51,10 @@ componentes que no estén ahí.
   llega por ahí a `/interna/cuentas/existe` y al JWKS de la otra región (`http://nginx:8090/otra-region/autenticacion`).
 - `npm run infra:levantar` corre las semillas de Autenticación: analista de prueba
   `analista@trotamundos.example` con la contraseña `CONTRASENA_ANALISTA` del `.env`.
-- Las pruebas con todo levantado están en `tests/e2e/infra.test.ts` (`npm run e2e`).
+- El gateway (`services/gateway/src/enrutamiento.ts`) enruta `/api/<servicio>/*` solo a las
+  operaciones del contrato de cada servicio, con el Validador de Intercepción antes; las rutas
+  `/interna/...` responden 404 y quedan en el registro de accesos.
+- Las pruebas con todo levantado están en `tests/e2e/` (`npm run e2e`).
 
 ## Configuración compartida
 

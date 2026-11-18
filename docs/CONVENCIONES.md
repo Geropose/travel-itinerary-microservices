@@ -105,4 +105,4 @@ Todas las rutas públicas pasan por el gateway con el prefijo del servicio: `/ap
 - Itinerario compartido: lo ven el dueño y las personas designadas. El dueño lo resuelve Viajes con sus datos; las personas designadas las guarda Usuarios ("Permisos de itinerarios"), que no sabe de quién es cada viaje y se lo pregunta a Viajes (`GET /interna/viajes/{viajeId}/dueno`).
 - `analista`: solo accede a `/api/analitica/...`, nunca a datos personales.
 - `servicio`: solo lo tiene el token de servicio. Sirve únicamente en las rutas internas que lo piden; en el resto responde 403.
-- Toda solicitud rechazada se guarda de forma asíncrona en el registro de accesos (QA-9: menos de 1 s). Los microservicios la publican como evento `AccesoRechazado`; el gateway guarda las suyas directo.
+- Toda solicitud rechazada se guarda de forma asíncrona en el registro de accesos (QA-9: menos de 1 s). Los microservicios la publican como evento `AccesoRechazado`; el gateway guarda las suyas directo, incluidas las rutas `/interna/...` pedidas desde afuera (404, motivo `ruta-interna`).

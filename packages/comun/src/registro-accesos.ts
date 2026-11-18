@@ -2,14 +2,22 @@ import type { Broker } from './broker.ts';
 import type { ClienteDb, Pool } from './db.ts';
 import type { Logger } from './logger.ts';
 
-export type MotivoRechazo = 'sin-token' | 'token-invalido' | 'otra-region' | 'sin-permiso';
+/**
+ * Por qué se rechazó. ruta-interna (con status 404) solo lo usa el gateway: alguien pidió desde
+ * afuera una ruta /interna/... de un servicio. Nunca viaja como evento AccesoRechazado.
+ */
+export type MotivoRechazo =
+  'sin-token' | 'token-invalido' | 'otra-region' | 'sin-permiso' | 'ruta-interna';
 
-/** Un intento rechazado: los mismos campos que los datos del evento AccesoRechazado. */
+/**
+ * Un intento rechazado: los mismos campos que los datos del evento AccesoRechazado. El 404 es solo
+ * del gateway (ruta interna pedida desde afuera).
+ */
 export interface AccesoRechazado {
   servicio: string;
   metodo: string;
   ruta: string;
-  status: 401 | 403;
+  status: 401 | 403 | 404;
   motivo: MotivoRechazo;
   usuarioId?: string;
   ip?: string;

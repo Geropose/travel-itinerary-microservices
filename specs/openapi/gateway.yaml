@@ -30,9 +30,13 @@ info:
     - Las rutas `/interna/...` de cada servicio (tag `interna` en su contrato) **no** se exponen: son
       solo para llamadas entre servicios. Si alguien pide `/api/<servicio>/interna/...` desde afuera, el
       gateway responde `404` (problem+json) y registra el intento en el registro de accesos.
-    - Un prefijo que no está en la tabla responde `404` (problem+json).
+    - Un prefijo que no está en la tabla responde `404` (problem+json). Una operación que no está en
+      el contrato del servicio también: el gateway solo enruta las operaciones del contrato.
     - Si el servicio interno no responde dentro del tiempo máximo (2 s por defecto, configurable por
-      entorno), el gateway responde `503` (problem+json).
+      entorno), el gateway responde `503` (problem+json). El Asistente Virtual tiene 5 s, porque
+      responde hasta 3 s antes de pasar a `202` (`asistente.yaml`).
+    - Solo la web (`ORIGEN_WEB`) tiene CORS, y el cuerpo de una solicitud tiene un tamaño máximo
+      (1 MB por defecto, configurable por entorno): si lo supera, `413` (problem+json).
     - El gateway propaga el header `Authorization` tal como llegó: cada servicio vuelve a validar el JWT
       (defensa en profundidad, ADR-005 e Iteración 5).
 
@@ -51,8 +55,9 @@ info:
        llamar a la red en cada solicitud (~1 ms). Si falta, la firma es inválida o venció (`exp`, 15 min):
        `401`.
     4. **Región:** el claim `region` tiene que ser la región del gateway (CONST-6). Si no: `403`.
-    5. **Rol y permisos:** el rol `analista` solo accede a `/api/analitica/*`, y las rutas de
-       `/api/analitica/*` requieren el rol `analista`; el rol `usuario` accede solo a sus propios datos.
+    5. **Rol y permisos:** el rol `analista` solo accede a `/api/analitica/*` (y a cerrar su
+       sesión, `POST /api/autenticacion/logout`), y las rutas de `/api/analitica/*` requieren el
+       rol `analista`; el rol `usuario` accede solo a sus propios datos.
        Un token de servicio (rol `servicio`) nunca pasa por el gateway: `403`. El permiso sobre un
        itinerario compartido no lo verifica el gateway, porque no sabe de quién es cada viaje: lo
        verifica el Servicio de Viajes (dueño con sus datos; si no, consulta a Usuarios en

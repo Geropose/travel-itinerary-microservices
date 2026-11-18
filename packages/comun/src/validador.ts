@@ -40,6 +40,17 @@ export interface ReglaRuta {
   regiones?: Region[];
 }
 
+/**
+ * Reglas para interceptar las rutas de un contrato que no es el del propio servicio. Lo usa el
+ * gateway, que valida con un solo validador las rutas de todos los servicios (ADR-005).
+ */
+export interface AjustesContrato {
+  /** Reglas de las operaciones de ese contrato (en lugar de las del validador). */
+  reglas?: Record<string, ReglaRuta>;
+  /** Roles por defecto de las rutas con bearerJWT de ese contrato (en lugar de los del validador). */
+  rolesPorDefecto?: string[];
+}
+
 export interface OpcionesValidador {
   servicio: string;
   region: Region;
@@ -93,8 +104,11 @@ export interface Validador {
   detener(): void;
   /** Verifica firma, vencimiento, roles y región de un token. Lanza ErrorTokenInvalido. */
   verificarToken(token: string, regiones?: Region[]): Promise<Autenticacion>;
-  /** Middleware que intercepta todas las solicitudes según la seguridad del contrato. */
-  middleware(spec: Spec): RequestHandler;
+  /**
+   * Middleware que intercepta todas las solicitudes según la seguridad del contrato. Con ajustes,
+   * usa otras reglas y roles por defecto para ese contrato (el gateway, uno por servicio).
+   */
+  middleware(spec: Spec, ajustes?: AjustesContrato): RequestHandler;
   /** Solo el dueño: el sub del token tiene que ser el usuarioId del recurso. */
   soloDueno(
     obtenerDueno: (req: Request) => Promise<string | undefined> | string | undefined,
@@ -111,8 +125,8 @@ export interface Validador {
  */
 export function crearValidador(opciones: OpcionesValidador): Validador {
   const { servicio, region, logger, registrar } = opciones;
-  const reglas = opciones.reglas ?? {};
-  const rolesPorDefecto = opciones.rolesPorDefecto ?? ['usuario'];
+  const reglasValidador = opciones.reglas ?? {};
+  const rolesValidador = opciones.rolesPorDefecto ?? ['usuario'];
   const renovarCadaMs = opciones.renovarClavesCadaMs ?? 10 * 60 * 1000;
   const hacerFetch = opciones.fetch ?? fetch;
   const juegos = new Map<Region, JWTVerifyGetKey>();
@@ -238,27 +252,28 @@ export function crearValidador(opciones: OpcionesValidador): Validador {
   ): void {
     const requestId = contextoActual()?.requestId ?? '';
     const ip = ipDe(req);
+    // Ruta completa: en el gateway el validador está montado en /api/<servicio>.
+    const ruta = req.baseUrl + req.path;
     registrar({
       servicio,
       metodo: req.method,
-      ruta: req.path,
+      ruta,
       status: error.status as 401 | 403,
       motivo,
       ...(usuarioId ? { usuarioId } : {}),
       ...(ip ? { ip } : {}),
       requestId,
     });
-    logger.info(
-      { metodo: req.method, ruta: req.path, status: error.status, motivo },
-      'Acceso rechazado',
-    );
+    logger.info({ metodo: req.method, ruta, status: error.status, motivo }, 'Acceso rechazado');
     res.status(error.status).type('application/problem+json').json(aProblema(error, requestId));
   }
 
   /** usuarioId para el registro: solo si es un usuario (UUID), nunca el nombre de un servicio. */
   const usuarioDe = (auth: Autenticacion) => (auth.esServicio ? undefined : auth.sub);
 
-  function middleware(spec: Spec): RequestHandler {
+  function middleware(spec: Spec, ajustes: AjustesContrato = {}): RequestHandler {
+    const reglas = ajustes.reglas ?? reglasValidador;
+    const rolesPorDefecto = ajustes.rolesPorDefecto ?? rolesValidador;
     for (const clave of Object.keys(reglas)) {
       const [metodo = '', ruta = ''] = clave.split(' ');
       if (!spec.operaciones.some((o) => o.metodo === metodo && o.ruta === ruta)) {
