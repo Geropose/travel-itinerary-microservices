@@ -47,7 +47,7 @@ describe.skipIf(!hayDocker)('Servicio de Autenticación', { timeout: 60_000 }, (
   let postgres: ContenedorPostgres;
   let pool: Pool;
   let url: string;
-  let detener: () => Promise<void>;
+  let detener: (() => Promise<void>) | undefined;
 
   // Usuarios y la otra región, falsos y controlables desde cada prueba.
   const cuentasCreadas: NuevaCuenta[] = [];
@@ -107,13 +107,14 @@ describe.skipIf(!hayDocker)('Servicio de Autenticación', { timeout: 60_000 }, (
     await validador.iniciar();
     url = `http://127.0.0.1:${await servidor.iniciar()}`;
     detener = () => servidor.detener();
-  });
+    // En CI la primera vez hay que bajar la imagen de PostgreSQL.
+  }, 120_000);
 
   afterAll(async () => {
-    await detener();
-    await pool.end();
-    await postgres.detener();
-  });
+    await detener?.();
+    await pool?.end();
+    await postgres?.detener();
+  }, 60_000);
 
   beforeEach(() => {
     usuariosResponde = 'ok';
