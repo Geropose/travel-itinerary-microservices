@@ -1,0 +1,188 @@
+# Contrato mínimo para probar el kit: una ruta de cada tipo de seguridad y $ref a comun.yaml.
+openapi: 3.1.0
+info:
+  title: Servicio de prueba
+  version: 0.1.0
+servers:
+  - url: http://localhost:8000/api/prueba
+security:
+  - bearerJWT: []
+paths:
+  /health:
+    get:
+      operationId: consultarSalud
+      security: []
+      responses:
+        '200':
+          $ref: '../../../../specs/openapi/comun.yaml#/components/responses/Salud'
+        '503':
+          $ref: '../../../../specs/openapi/comun.yaml#/components/responses/NoDisponible'
+  /publica:
+    get:
+      operationId: verPublica
+      security: []
+      responses:
+        '200':
+          description: Ok.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Mensaje'
+  /privada:
+    get:
+      operationId: verPrivada
+      parameters:
+        - $ref: '../../../../specs/openapi/comun.yaml#/components/parameters/XRequestId'
+      responses:
+        '200':
+          description: Ok.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Mensaje'
+        '401':
+          $ref: '../../../../specs/openapi/comun.yaml#/components/responses/NoAutenticado'
+        '403':
+          $ref: '../../../../specs/openapi/comun.yaml#/components/responses/Prohibido'
+  /mal-respondida:
+    get:
+      operationId: verMalRespondida
+      security: []
+      responses:
+        '200':
+          description: Responde algo que no cumple el esquema.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Mensaje'
+  /falla:
+    get:
+      operationId: verFalla
+      security: []
+      responses:
+        '200':
+          description: Lanza un error no esperado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Mensaje'
+  /mensajes:
+    post:
+      operationId: crearMensaje
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Mensaje'
+      responses:
+        '201':
+          description: Creado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Mensaje'
+        '400':
+          $ref: '../../../../specs/openapi/comun.yaml#/components/responses/SolicitudInvalida'
+        '409':
+          $ref: '../../../../specs/openapi/comun.yaml#/components/responses/Conflicto'
+  /interna/tarea:
+    post:
+      operationId: ejecutarTarea
+      tags: [interna]
+      security:
+        - tokenServicio: []
+      responses:
+        '200':
+          description: Ok.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Mensaje'
+  /interna/cuentas/existe:
+    get:
+      operationId: consultarCuenta
+      tags: [interna]
+      security:
+        - tokenServicio: []
+      responses:
+        '200':
+          description: Ok.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Mensaje'
+  /analitica:
+    get:
+      operationId: verAnalitica
+      responses:
+        '200':
+          description: Ok.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Mensaje'
+  /viajes/proximos:
+    get:
+      operationId: verProximos
+      responses:
+        '200':
+          description: Ok.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Mensaje'
+  /viajes/{viajeId}:
+    parameters:
+      - name: viajeId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: verViaje
+      responses:
+        '200':
+          description: Ok.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Mensaje'
+        '403':
+          $ref: '../../../../specs/openapi/comun.yaml#/components/responses/Prohibido'
+        '404':
+          $ref: '../../../../specs/openapi/comun.yaml#/components/responses/NoEncontrado'
+        '503':
+          $ref: '../../../../specs/openapi/comun.yaml#/components/responses/NoDisponible'
+    delete:
+      operationId: borrarViaje
+      responses:
+        '200':
+          description: Ok.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Mensaje'
+        '403':
+          $ref: '../../../../specs/openapi/comun.yaml#/components/responses/Prohibido'
+        '404':
+          $ref: '../../../../specs/openapi/comun.yaml#/components/responses/NoEncontrado'
+        '503':
+          $ref: '../../../../specs/openapi/comun.yaml#/components/responses/NoDisponible'
+components:
+  securitySchemes:
+    bearerJWT:
+      $ref: '../../../../specs/openapi/comun.yaml#/components/securitySchemes/bearerJWT'
+    tokenServicio:
+      $ref: '../../../../specs/openapi/comun.yaml#/components/securitySchemes/tokenServicio'
+  schemas:
+    Mensaje:
+      type: object
+      additionalProperties: false
+      required: [texto]
+      properties:
+        texto:
+          type: string
+          minLength: 1
