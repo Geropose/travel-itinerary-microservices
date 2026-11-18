@@ -120,7 +120,11 @@ describe('global.compose.yaml', () => {
     });
     // Las bases no se publican: solo el enrutador y los mocks que abre el navegador.
     const conPuertos = Object.entries(global.services).filter(([, s]) => s.ports);
-    expect(conPuertos.map(([nombre]) => nombre)).toEqual(['enrutador', 'mock-gmail']);
+    expect(conPuertos.map(([nombre]) => nombre)).toEqual([
+      'enrutador',
+      'mock-gmail',
+      'mock-outlook',
+    ]);
   });
 
   it('el mock de Gmail publica el 4001 y manda los avisos de cada región por el enrutador', () => {
@@ -134,6 +138,14 @@ describe('global.compose.yaml', () => {
         `gmail-avisos-${region}=http://enrutador:8000/${region}/api/correo/notificaciones/gmail?token=`,
       );
     }
+  });
+
+  it('el mock de Outlook publica el 4002 en la red global', () => {
+    const outlook = global.services['mock-outlook'] ?? {};
+    expect(outlook.build?.dockerfile).toBe('mocks/outlook/Dockerfile');
+    expect(redes(outlook)).toEqual(['global']);
+    expect(outlook.ports).toEqual(['${PUERTO_MOCK_OUTLOOK:-4002}:4002']);
+    expect(outlook.environment?.CLIENT_SECRET).toBe('${SECRETO_CLIENTE_OUTLOOK:?}');
   });
 });
 

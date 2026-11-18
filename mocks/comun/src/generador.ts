@@ -3,8 +3,7 @@
 // de viaje y correos de viaje de remitentes que no son los proveedores de prueba.
 //
 // Con la misma semilla genera siempre los mismos correos, así las pruebas son repetibles.
-import type { Etiqueta } from './buzones.ts';
-import type { Correo } from './mime.ts';
+import type { Correo, Etiqueta } from './correo.ts';
 
 export const TIPOS = [
   'vuelo',

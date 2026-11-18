@@ -36,46 +36,15 @@ porque el navegador del usuario abre la pantalla de permiso.
   `POST /o/oauth2/v2/auth/decision` con `client_id`, `redirect_uri`, `scope`, `state`, `access_type`,
   `email` y `decision=permitir` (o `cancelar`). Responde `302` a `redirect_uri` igual que Google.
 
-## Administración (solo para pruebas, no es parte del formato real)
+## Administración, generador y semillas (`mocks/comun`)
 
-| Ruta | Qué hace |
-|---|---|
-| `GET /admin/buzones` | Lista los buzones con su cantidad de correos, `historyId` y si tienen `watch` |
-| `GET /admin/buzones/{email}/correos` | Correos del buzón con su tipo y la reserva que lleva (para comprobar lo que detectan los procesadores) |
-| `POST /admin/buzones/{email}/correos` | Inyecta correos (crea el buzón si no existe) y, si hay `watch`, sale el aviso |
-| `POST /admin/buzones/{email}/vencer-tokens` | Hace vencer los access tokens del buzón (para probar la renovación) |
-| `POST /admin/buzones/{email}/revocar-tokens` | Revoca los tokens del buzón: la renovación da `invalid_grant` |
+Las rutas `/admin`, el generador de correos y las semillas son las de [`mocks/comun`](../comun/README.md),
+iguales a las del mock de Outlook. En este mock:
 
-Cuerpo de `POST /admin/buzones/{email}/correos`, una de tres formas:
-
-```jsonc
-{ "tipo": "vuelo", "estado": "confirmada", "semilla": 7 }   // un correo generado
-{ "cantidad": 1000, "semilla": 2026 }                        // un lote mezclado
-{ "de": "Alguien <a@correo.example>", "asunto": "Hola", "texto": "...", "html": "<p>...</p>" }
-```
-
-Responde `201` con `{ "historyId": "...", "correos": [{ "id", "tipo", "reserva"? }] }`.
-
-## Generador de correos (`src/generador.ts`)
-
-Arma los correos de [`specs/externos/correos-reserva.md`](../../specs/externos/correos-reserva.md). Con
-la misma semilla genera siempre los mismos.
-
-| Tipo | Qué es |
-|---|---|
-| `vuelo`, `hotel`, `auto` | Reserva con JSON-LD de schema.org en el HTML, del remitente del proveedor de prueba. Usa los dos nombres de estado y de `@context` (Google y schema.org) que el procesador tiene que aceptar |
-| `vuelo-sin-marcado`, `hotel-sin-marcado`, `auto-sin-marcado` | La misma reserva, solo texto, con la plantilla fija de la sección 4 |
-| `no-viaje` | Noticias, facturas, compras, mensajes personales y una promoción de la aerolínea (que no es una reserva) |
-| `remitente-no-permitido` | Reserva con marcado válido de `reservas@viajes-baratos.example`, que no es un proveedor de prueba |
-
-El estado puede ser `confirmada`, `modificada` (con `modifiedTime`) o `cancelada`. Un lote mezcla 45 %
-de reservas con marcado, 15 % sin marcado, 30 % que no son de viaje y 10 % de remitentes no permitidos.
-
-## Semillas
-
-Al arrancar (`SEMILLAS=true`) crea 20 buzones de prueba, de `ana.garcia@gmail.example` a
-`valentina.rojas@gmail.example` (`src/semillas.ts`). Cada uno tiene una reserva de vuelo, una de hotel y
-una de auto con marcado, y 5 correos más al azar.
+- `GET /admin/buzones` muestra también el `historyId` de cada buzón y si tiene `watch`.
+- `POST /admin/buzones/{email}/correos` responde también el `historyId` nuevo y, si hay `watch`, sale el
+  aviso push.
+- Los 20 buzones de prueba van de `ana.garcia@gmail.example` a `valentina.rojas@gmail.example`.
 
 ## Configuración
 

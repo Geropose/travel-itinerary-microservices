@@ -1,11 +1,11 @@
 // Mock de Gmail (specs/externos/gmail.md): OAuth de Google, Gmail API v1 y avisos push con el
 // formato de Pub/Sub, en un solo puerto. Más las rutas /admin para las pruebas, que no son parte
 // del formato real.
-import { randomInt } from 'node:crypto';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { Logger } from '@trotamundos/comun';
 import express, { Router, type NextFunction, type Request, type Response } from 'express';
+import { cargarSemillas, crearRutasAdmin, direccion, nombreDe } from '@trotamundos/mocks-comun';
 import { z } from 'zod';
 import { crearAvisos, type Avisos } from './avisos.ts';
 import { crearAlmacen, type Almacen, type Buzon } from './buzones.ts';
@@ -17,10 +17,10 @@ import {
   limiteSuperado,
   noEncontrado,
 } from './errores.ts';
-import { crearAzar, generarCorreo, generarLote, TIPOS } from './generador.ts';
-import { direccion } from './mime.ts';
 import { crearOAuth, type OAuth } from './oauth.ts';
-import { BUZONES_PRUEBA, cargarSemillas } from './semillas.ts';
+
+/** Dominio de los buzones de prueba. */
+export const DOMINIO = 'gmail.example';
 
 /** Duración de un watch (Gmail: 7 días). */
 const VIDA_WATCH_MS = 7 * 86_400_000;
@@ -105,7 +105,13 @@ export function crearMock(opciones: OpcionesMock): Mock {
   }
 
   const almacen = crearAlmacen(avisarSiCorresponde);
-  if (opciones.semillas) cargarSemillas(almacen, new Date(reloj()));
+  if (opciones.semillas) {
+    cargarSemillas(
+      DOMINIO,
+      (email, correo, etiqueta) => almacen.agregar(email, correo, etiqueta),
+      new Date(reloj()),
+    );
+  }
 
   const oauth = crearOAuth({
     clientId: opciones.clientId,
@@ -298,111 +304,31 @@ export function crearMock(opciones: OpcionesMock): Mock {
 
   app.use('/gmail/v1/users/:userId', api);
 
-  // --- Administración (solo para pruebas) ----------------------------------------------------------
+  // --- Administración (solo para pruebas, rutas de mocks/comun) ----------------------------------
 
-  const admin = Router();
-  admin.use(express.json({ limit: '2mb' }));
-
-  const nombreDe = (email: string) =>
-    BUZONES_PRUEBA.find((b) => b.email === email.toLowerCase())?.nombre ??
-    email.split('@')[0] ??
-    email;
-
-  admin.get('/buzones', (_req, res) => {
-    res.json(
-      almacen.todos().map((b) => ({
-        email: b.email,
-        correos: b.guardados.length,
-        historyId: String(b.historyId),
-        watch: Boolean(b.watch && b.watch.expiration > reloj()),
-      })),
-    );
-  });
-
-  admin.get('/buzones/:email/correos', (req, res) => {
-    const buzon = almacen.buscar(req.params.email);
-    if (!buzon) return void res.status(404).json({ error: 'No existe ese buzón' });
-    res.json(
-      buzon.guardados.map((g) => ({
-        id: g.mensaje.id,
-        de: g.de,
-        asunto: g.mensaje.payload.headers.find((h) => h.name === 'Subject')?.value,
-        ...g.etiqueta,
-      })),
-    );
-  });
-
-  const esquemaCorreo = z.union([
-    z.object({
-      cantidad: z.number().int().min(1).max(5000),
-      semilla: z.number().int().optional(),
-      nombre: z.string().min(1).optional(),
-    }),
-    z.object({
-      tipo: z.enum(TIPOS),
-      estado: z.enum(['confirmada', 'modificada', 'cancelada']).optional(),
-      semilla: z.number().int().optional(),
-      nombre: z.string().min(1).optional(),
-    }),
-    z.object({
-      de: z.string().min(3),
-      asunto: z.string(),
-      texto: z.string(),
-      html: z.string().optional(),
-    }),
-  ]);
-
-  // Inyecta correos en un buzón (lo crea si no existe): generados por tipo, un lote mezclado o uno
-  // escrito a mano. Si el buzón tiene watch, sale el aviso push.
-  admin.post('/buzones/:email/correos', (req, res) => {
-    const datos = esquemaCorreo.safeParse(req.body);
-    if (!datos.success) return void res.status(400).json({ error: z.prettifyError(datos.error) });
-    const email = req.params.email.toLowerCase();
-    const ahora = new Date(reloj());
-    const cuerpo = datos.data;
-    const nombre = ('nombre' in cuerpo && cuerpo.nombre) || nombreDe(email);
-    const semilla = ('semilla' in cuerpo && cuerpo.semilla) || randomInt(2 ** 31);
-
-    const generados =
-      'cantidad' in cuerpo
-        ? generarLote({ cantidad: cuerpo.cantidad, para: email, nombre, semilla, hasta: ahora })
-        : 'tipo' in cuerpo
-          ? [
-              generarCorreo(crearAzar(semilla), {
-                tipo: cuerpo.tipo,
-                para: email,
-                nombre,
-                fecha: ahora,
-                ...(cuerpo.estado ? { estado: cuerpo.estado } : {}),
-              }),
-            ]
-          : [
-              {
-                correo: {
-                  de: cuerpo.de,
-                  para: email,
-                  asunto: cuerpo.asunto,
-                  fecha: ahora,
-                  texto: cuerpo.texto,
-                  ...(cuerpo.html ? { html: cuerpo.html } : {}),
-                },
-                etiqueta: { tipo: 'manual' },
-              },
-            ];
-    const correos = generados.map(({ correo, etiqueta }) => ({
-      id: almacen.agregar(email, correo, etiqueta).id,
-      ...etiqueta,
-    }));
-    res.status(201).json({ historyId: String(almacen.obtener(email).historyId), correos });
-  });
-
-  admin.post('/buzones/:email/vencer-tokens', (req, res) => {
-    res.json({ vencidos: oauth.vencerTokens(req.params.email) });
-  });
-
-  admin.post('/buzones/:email/revocar-tokens', (req, res) => {
-    res.json({ revocados: oauth.revocar(req.params.email) });
-  });
+  const admin = crearRutasAdmin(
+    {
+      resumen: () =>
+        almacen.todos().map((b) => ({
+          email: b.email,
+          correos: b.guardados.length,
+          historyId: String(b.historyId),
+          watch: Boolean(b.watch && b.watch.expiration > reloj()),
+        })),
+      correos: (email) =>
+        almacen.buscar(email)?.guardados.map((g) => ({
+          id: g.mensaje.id,
+          de: g.de,
+          asunto: g.mensaje.payload.headers.find((h) => h.name === 'Subject')?.value ?? '',
+          ...(g.etiqueta ? { etiqueta: g.etiqueta } : {}),
+        })),
+      agregar: (email, correo, etiqueta) => almacen.agregar(email, correo, etiqueta).id,
+      extra: (email) => ({ historyId: String(almacen.obtener(email).historyId) }),
+      vencerTokens: (email) => oauth.vencerTokens(email),
+      revocarTokens: (email) => oauth.revocar(email),
+    },
+    { reloj, nombreDe: (email) => nombreDe(email, DOMINIO) },
+  );
 
   app.use('/admin', admin);
 
