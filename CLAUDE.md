@@ -42,6 +42,9 @@ componentes que no estén ahí.
 | `npm run infra:logs` | Logs de las regiones (`-- --solo r1 gateway viajes`) |
 | `npm run infra:escalador` | Escala cada servicio con `docker compose --scale` según `docker stats`: +1 instancia con más del 70 % de procesador, −1 con menos del 30 % durante 2 min; mínimo 3 con el perfil ha (`-- --solo r1`, `-- --una-vez`) |
 | `npm run caos` | Pruebas de caos de `tests/caos` contra el sistema levantado (por ejemplo, matar una instancia del gateway) |
+| `npm run web` | Aplicación web (PWA) en http://localhost:5173, contra el enrutador global (`VITE_URL_API`, por defecto http://localhost:8000) |
+| `npm run web:api` | Regenera los tipos del cliente de API (`web/src/api/generado/`) desde `specs/openapi`; hay que correrlo después de cambiar un contrato |
+| `npm run e2e:web` | Pruebas de la web con Playwright (compila la PWA y simula la API; computadora y teléfono). La primera vez: `npx playwright install chromium` |
 
 ## Infraestructura
 
@@ -66,6 +69,18 @@ componentes que no estén ahí.
   reinicia. `GET /estado` (desde adentro de la región) muestra lo que ve. nginx deja de mandarle al
   gateway caído con `max_fails=3 fail_timeout=15s`.
 - Las pruebas con todo levantado están en `tests/e2e/` (`npm run e2e`) y `tests/caos/` (`npm run caos`).
+
+## Aplicación web (`web/`)
+
+- React + Vite + TypeScript, instalable como PWA (`vite-plugin-pwa`). El mismo código sirve de
+  aplicación móvil (CONST-1): diseño para teléfono primero, menú abajo.
+- Cliente de API: `web/src/api/cliente.ts` (`openapi-fetch` con los tipos generados). Agrega el JWT,
+  lo renueva con `/renovar` cuando vence y manda la región recordada en `X-Region`.
+- Textos y formatos de cada idioma en `web/src/idiomas/{es,en}.json`; fechas y monedas con `Intl`
+  (`web/src/idiomas/formatos.ts`).
+- Cache local: `guardarPanel` y `leerPanel` (`web/src/cache/panel.ts`, IndexedDB). El panel guardado
+  se muestra sin esperar a la red (QA-3).
+- Las pantallas de cada dueño están como "en construcción" en `web/src/App.tsx`.
 
 ## Configuración compartida
 

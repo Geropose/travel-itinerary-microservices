@@ -31,3 +31,23 @@ jobs:
 
       - name: Contratos
         run: npm run test:contratos
+
+  web:
+    name: Aplicación web (Playwright)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Instalar Chromium para Playwright
+        run: npx playwright install --with-deps chromium
+
+      - name: Pruebas de la web
+        run: npm run e2e:web
