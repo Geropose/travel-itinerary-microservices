@@ -144,6 +144,28 @@ paths:
                 status: 401
                 detail: El email o la contraseña no son correctos.
                 requestId: 7f3c1e2a-9b4d-4c6e-8a1f-2d3e4f5a6b7c
+        '429':
+          description: >-
+            Demasiados intentos fallidos con ese email: 5 en 15 minutos (QA-8). No se verifica la
+            contraseña hasta que pase el tiempo indicado en `Retry-After`.
+          headers:
+            Retry-After:
+              description: Segundos que hay que esperar para volver a intentar.
+              schema:
+                type: integer
+              example: 840
+            X-Request-Id:
+              $ref: './comun.yaml#/components/headers/XRequestId'
+          content:
+            application/problem+json:
+              schema:
+                $ref: './comun.yaml#/components/schemas/Problema'
+              example:
+                type: https://trotamundos.example/errores/demasiados-intentos
+                title: Demasiados intentos
+                status: 429
+                detail: Hubo 5 intentos fallidos con ese email. Probá de nuevo en 14 minutos.
+                requestId: 7f3c1e2a-9b4d-4c6e-8a1f-2d3e4f5a6b7c
         '503':
           $ref: './comun.yaml#/components/responses/NoDisponible'
 
