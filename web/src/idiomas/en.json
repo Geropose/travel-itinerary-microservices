@@ -1,0 +1,66 @@
+{
+  "formato": {
+    "locale": "en-US",
+    "moneda": "USD"
+  },
+  "app": {
+    "nombre": "Trotamundos",
+    "idioma": "Language",
+    "cerrarSesion": "Sign out",
+    "cargando": "Loading…",
+    "sinConexion": "Offline"
+  },
+  "menu": {
+    "titulo": "Main menu",
+    "panel": "Dashboard",
+    "archivados": "Archived",
+    "correo": "Email",
+    "whitelist": "Whitelist",
+    "asistente": "Assistant",
+    "analitica": "Analytics"
+  },
+  "login": {
+    "titulo": "Sign in",
+    "email": "Email",
+    "contrasena": "Password",
+    "entrar": "Sign in",
+    "sinCuenta": "Don't have an account?",
+    "irARegistro": "Sign up",
+    "errorCredenciales": "The email or password is incorrect.",
+    "errorBloqueado": "Too many attempts. Wait a few minutes and try again."
+  },
+  "registro": {
+    "titulo": "Create account",
+    "nombre": "Name",
+    "email": "Email",
+    "contrasena": "Password",
+    "ayudaContrasena": "At least 8 characters.",
+    "region": "Region where you live",
+    "regionAyuda": "Your personal data is stored only in this region.",
+    "crear": "Create account",
+    "conCuenta": "Already have an account?",
+    "irALogin": "Sign in",
+    "errorEmailUsado": "An account with that email already exists."
+  },
+  "regiones": {
+    "region-1": "Region 1",
+    "region-2": "Region 2"
+  },
+  "errores": {
+    "noDisponible": "The service is not available. Try again in a while.",
+    "sinPermiso": "You don't have permission to see this page.",
+    "volver": "Back to home",
+    "inesperado": "Something went wrong. Try again."
+  },
+  "panel": {
+    "titulo": "Dashboard",
+    "actualizado": "Updated on {{fecha}}",
+    "guardadoSinRed": "Offline: showing the last saved dashboard ({{fecha}}).",
+    "sinViajes": "There are no trips to show yet.",
+    "fechas": "From {{inicio}} to {{fin}}"
+  },
+  "construccion": {
+    "texto": "This page is under construction.",
+    "hoy": "Today is {{fecha}}. Sample price: {{precio}}."
+  }
+}

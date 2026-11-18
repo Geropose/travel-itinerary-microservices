@@ -1,0 +1,240 @@
+/* Primero el teléfono (CONST-1): una columna y el menú abajo. Desde 720 px, menú arriba. */
+:root {
+  --verde: #0f766e;
+  --verde-oscuro: #115e59;
+  --texto: #1f2937;
+  --suave: #6b7280;
+  --fondo: #f3f4f6;
+  --tarjeta: #ffffff;
+  --borde: #d1d5db;
+  --error: #b91c1c;
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
+  color: var(--texto);
+  background: var(--fondo);
+  line-height: 1.5;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100dvh;
+}
+
+h1 {
+  font-size: 1.4rem;
+  margin: 0 0 0.75rem;
+}
+
+a {
+  color: var(--verde);
+}
+
+button {
+  font: inherit;
+  border: 0;
+  border-radius: 8px;
+  padding: 0.7rem 1rem;
+  min-height: 44px;
+  background: var(--verde);
+  color: #fff;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.6;
+}
+
+button.secundario {
+  background: transparent;
+  color: inherit;
+  border: 1px solid currentColor;
+  padding: 0.4rem 0.8rem;
+}
+
+input,
+select {
+  font: inherit;
+  width: 100%;
+  min-height: 44px;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--borde);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.marca {
+  font-weight: 700;
+  font-size: 1.1rem;
+}
+
+.tarjeta {
+  background: var(--tarjeta);
+  border-radius: 12px;
+  padding: 1.25rem;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.08);
+}
+
+.nota,
+small {
+  color: var(--suave);
+  font-size: 0.9rem;
+}
+
+[role='alert'] {
+  color: var(--error);
+}
+
+/* Login y registro */
+.acceso {
+  max-width: 28rem;
+  margin: 0 auto;
+  padding: 1rem;
+}
+
+.acceso-cabecera {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.formulario {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.formulario label {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.selector-idioma {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.selector-idioma select {
+  width: auto;
+  min-height: 36px;
+  padding: 0.2rem 0.4rem;
+}
+
+/* Pantallas con sesión */
+.layout {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+.barra {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 1rem;
+  padding-top: max(0.6rem, env(safe-area-inset-top));
+  background: var(--verde);
+  color: #fff;
+}
+
+.barra-acciones {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.contenido {
+  flex: 1;
+  width: 100%;
+  max-width: 60rem;
+  margin: 0 auto;
+  padding: 1rem;
+  padding-bottom: 5rem;
+}
+
+.menu {
+  position: fixed;
+  inset: auto 0 0 0;
+  display: flex;
+  justify-content: space-around;
+  background: var(--tarjeta);
+  border-top: 1px solid var(--borde);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.menu a {
+  flex: 1;
+  text-align: center;
+  padding: 0.8rem 0.2rem;
+  font-size: 0.8rem;
+  text-decoration: none;
+  color: var(--suave);
+}
+
+.menu a.active {
+  color: var(--verde);
+  font-weight: 700;
+}
+
+.aviso {
+  margin: 0;
+  padding: 0.4rem 1rem;
+  background: #fef3c7;
+  text-align: center;
+}
+
+.viajes {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.viajes li {
+  display: grid;
+  border: 1px solid var(--borde);
+  border-radius: 8px;
+  padding: 0.7rem;
+}
+
+@media (min-width: 720px) {
+  .aviso {
+    order: 2;
+  }
+
+  .contenido {
+    order: 3;
+  }
+
+  .menu {
+    position: static;
+    order: 1;
+    justify-content: flex-start;
+    gap: 0.5rem;
+    padding: 0 1rem;
+    border-top: 0;
+    border-bottom: 1px solid var(--borde);
+  }
+
+  .menu a {
+    flex: none;
+    font-size: 1rem;
+    padding: 0.7rem 0.8rem;
+  }
+
+  .contenido {
+    padding-bottom: 1rem;
+  }
+}

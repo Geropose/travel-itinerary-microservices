@@ -1,0 +1,66 @@
+{
+  "formato": {
+    "locale": "es-AR",
+    "moneda": "ARS"
+  },
+  "app": {
+    "nombre": "Trotamundos",
+    "idioma": "Idioma",
+    "cerrarSesion": "Cerrar sesión",
+    "cargando": "Cargando…",
+    "sinConexion": "Sin conexión"
+  },
+  "menu": {
+    "titulo": "Menú principal",
+    "panel": "Panel",
+    "archivados": "Archivados",
+    "correo": "Correo",
+    "whitelist": "Whitelist",
+    "asistente": "Asistente",
+    "analitica": "Analítica"
+  },
+  "login": {
+    "titulo": "Iniciar sesión",
+    "email": "Email",
+    "contrasena": "Contraseña",
+    "entrar": "Entrar",
+    "sinCuenta": "¿No tenés cuenta?",
+    "irARegistro": "Registrate",
+    "errorCredenciales": "El email o la contraseña son incorrectos.",
+    "errorBloqueado": "Demasiados intentos. Esperá unos minutos y probá de nuevo."
+  },
+  "registro": {
+    "titulo": "Crear cuenta",
+    "nombre": "Nombre",
+    "email": "Email",
+    "contrasena": "Contraseña",
+    "ayudaContrasena": "Al menos 8 caracteres.",
+    "region": "Región donde vivís",
+    "regionAyuda": "Tus datos personales se guardan solo en esta región.",
+    "crear": "Crear cuenta",
+    "conCuenta": "¿Ya tenés cuenta?",
+    "irALogin": "Iniciá sesión",
+    "errorEmailUsado": "Ya existe una cuenta con ese email."
+  },
+  "regiones": {
+    "region-1": "Región 1",
+    "region-2": "Región 2"
+  },
+  "errores": {
+    "noDisponible": "El servicio no está disponible. Probá de nuevo en un rato.",
+    "sinPermiso": "No tenés permiso para ver esta pantalla.",
+    "volver": "Volver al inicio",
+    "inesperado": "Algo salió mal. Probá de nuevo."
+  },
+  "panel": {
+    "titulo": "Panel",
+    "actualizado": "Actualizado el {{fecha}}",
+    "guardadoSinRed": "Sin conexión: se muestra el último panel guardado ({{fecha}}).",
+    "sinViajes": "Todavía no hay viajes para mostrar.",
+    "fechas": "Del {{inicio}} al {{fin}}"
+  },
+  "construccion": {
+    "texto": "Esta pantalla está en construcción.",
+    "hoy": "Hoy es {{fecha}}. Ejemplo de precio: {{precio}}."
+  }
+}

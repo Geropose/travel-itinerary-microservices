@@ -12,7 +12,8 @@
     "mocks/*/src/**/*.ts",
     "mocks/*/test/**/*.ts",
     "tests/**/*.ts",
-    "infra/scripts/**/*.ts"
+    "infra/scripts/**/*.ts",
+    "web/scripts/**/*.ts"
   ],
   "exclude": ["node_modules", "**/dist"]
 }

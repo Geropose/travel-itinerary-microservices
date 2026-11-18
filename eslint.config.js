@@ -5,7 +5,13 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   {
-    ignores: ['**/node_modules/**', '**/dist/**', '**/coverage/**', '**/generado/**'],
+    ignores: [
+      '**/node_modules/**',
+      '**/dist/**',
+      '**/coverage/**',
+      '**/generado/**',
+      '**/dev-dist/**',
+    ],
   },
   js.configs.recommended,
   ...tseslint.configs.strict,
@@ -20,6 +26,11 @@ export default tseslint.config(
       '@typescript-eslint/consistent-type-imports': 'error',
       'no-console': 'error',
     },
+  },
+  {
+    // La aplicación web corre en el navegador.
+    files: ['web/src/**/*.{ts,tsx}'],
+    languageOptions: { globals: { ...globals.browser } },
   },
   prettier,
 );
