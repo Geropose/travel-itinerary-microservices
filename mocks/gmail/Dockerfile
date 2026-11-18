@@ -1,4 +1,4 @@
-# Imagen del mock de Gmail. Se construye desde la raíz del repositorio, porque usa packages/comun y specs/:
+# Imagen del mock de Gmail. Se construye desde la raíz del repositorio, porque usa packages/comun y mocks/comun:
 #   docker build -f mocks/gmail/Dockerfile -t trotamundos/mock-gmail .
 
 # 1) Dependencias de producción de este mock (y del kit común), con el lockfile del monorepo.
@@ -17,6 +17,7 @@ COPY --from=dependencias --chown=node:node /app/package.json ./
 COPY --from=dependencias --chown=node:node /app/node_modules ./node_modules
 COPY --from=dependencias --chown=node:node /app/packages/comun ./packages/comun
 COPY --from=dependencias --chown=node:node /app/specs ./specs
+COPY --from=dependencias --chown=node:node /app/mocks/comun ./mocks/comun
 COPY --from=dependencias --chown=node:node /app/mocks/gmail ./mocks/gmail
 USER node
 EXPOSE 4001

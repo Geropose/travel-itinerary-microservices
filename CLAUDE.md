@@ -60,6 +60,12 @@ componentes que no estén ahí.
   API y avisos push de Pub/Sub con los formatos de `specs/externos/gmail.md`, más rutas
   `/admin/buzones/{email}/correos` para inyectar correos generados. Arranca con 20 buzones de prueba
   (`mocks/gmail/README.md`).
+- Mock de Outlook (`mocks/outlook`, en `infra/global.compose.yaml`, puerto 4002): OAuth de Microsoft,
+  Graph (`/v1.0/me/messages`) y suscripciones con el handshake de `validationToken`
+  (`specs/externos/outlook.md`), con las mismas rutas `/admin` y semillas que Gmail
+  (`mocks/outlook/README.md`).
+- `mocks/comun`: lo compartido por los mocks de correo (generador de correos de
+  `specs/externos/correos-reserva.md`, semillas, rutas `/admin` y avisos con reintentos).
 - `GET /salud/<servicio>` en el nginx de cada región muestra el `/health` de cada servicio.
 - Puerta entre regiones: el nginx de cada región escucha también en 8090 (no publicado). Autenticación
   llega por ahí a `/interna/cuentas/existe` y al JWKS de la otra región (`http://nginx:8090/otra-region/autenticacion`).

@@ -4,8 +4,10 @@
 // Como Gmail y Pub/Sub:
 // - como máximo un aviso por segundo por buzón (si entran varios correos juntos, va uno solo con el
 //   historyId más nuevo);
-// - si la URL responde un error o tarda demasiado, reintenta más tarde con espera exponencial.
+// - si la URL responde un error o tarda demasiado, reintenta más tarde con espera exponencial
+//   (enviador de mocks/comun).
 import type { Logger } from '@trotamundos/comun';
+import { crearEnviador } from '@trotamundos/mocks-comun';
 
 export interface OpcionesAvisos {
   /** Tópico de Pub/Sub → URL de su suscripción push. */
@@ -59,22 +61,19 @@ export function crearAvisos({
   logger,
   reloj = Date.now,
   intervaloMs = 1000,
-  reintentos = 5,
-  esperaMs = 1000,
-  tiempoMaximoMs = 10_000,
+  reintentos,
+  esperaMs,
+  tiempoMaximoMs,
 }: OpcionesAvisos): Avisos {
   let numero = 2_070_443_601_311_540;
   const ultimoEnvio = new Map<string, number>();
   const pendientes = new Map<string, { historyId: number; topicName: string }>();
-  const temporizadores = new Set<NodeJS.Timeout>();
-
-  function esperar(ms: number, accion: () => void) {
-    const t = setTimeout(() => {
-      temporizadores.delete(t);
-      accion();
-    }, ms);
-    temporizadores.add(t);
-  }
+  const enviador = crearEnviador({
+    logger,
+    ...(reintentos === undefined ? {} : { reintentos }),
+    ...(esperaMs === undefined ? {} : { esperaMs }),
+    ...(tiempoMaximoMs === undefined ? {} : { tiempoMaximoMs }),
+  });
 
   function cuerpo(email: string, historyId: number, topicName: string): CuerpoPush {
     numero += 1;
@@ -95,29 +94,6 @@ export function crearAvisos({
     };
   }
 
-  async function enviar(url: string, datos: CuerpoPush, intento: number): Promise<void> {
-    let estado = 0;
-    try {
-      const respuesta = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(datos),
-        signal: AbortSignal.timeout(tiempoMaximoMs),
-      });
-      estado = respuesta.status;
-      await respuesta.body?.cancel();
-    } catch {
-      // Sin respuesta (error de red o tiempo máximo): se reintenta como un error.
-    }
-    if (estado >= 200 && estado < 300) return;
-    if (intento >= reintentos) {
-      logger.warn({ estado, intentos: intento + 1 }, 'aviso push descartado');
-      return;
-    }
-    // El mismo aviso (mismo messageId), como Pub/Sub cuando no recibe la confirmación.
-    esperar(esperaMs * 2 ** intento, () => void enviar(url, datos, intento + 1));
-  }
-
   function salir(email: string) {
     const pendiente = pendientes.get(email);
     if (!pendiente) return;
@@ -128,7 +104,8 @@ export function crearAvisos({
       return;
     }
     ultimoEnvio.set(email, Date.now());
-    void enviar(url, cuerpo(email, pendiente.historyId, pendiente.topicName), 0);
+    // El mismo aviso (mismo messageId) en cada reintento, como Pub/Sub.
+    enviador.enviar(url, cuerpo(email, pendiente.historyId, pendiente.topicName));
   }
 
   return {
@@ -140,11 +117,8 @@ export function crearAvisos({
       if (yaEsperaba) return;
       const falta = (ultimoEnvio.get(email) ?? -Infinity) + intervaloMs - Date.now();
       if (falta <= 0) salir(email);
-      else esperar(falta, () => salir(email));
+      else enviador.programar(falta, () => salir(email));
     },
-    detener() {
-      for (const t of temporizadores) clearTimeout(t);
-      temporizadores.clear();
-    },
+    detener: () => enviador.detener(),
   };
 }

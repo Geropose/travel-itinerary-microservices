@@ -1,17 +1,6 @@
 // Arma el árbol MIME de un correo con el formato de Gmail (`MessagePart`, specs/externos/gmail.md,
 // sección 3): headers en la parte de arriba y en cada parte, y `body.data` en base64url.
-
-/** Un correo tal como lo escribiría el remitente. */
-export interface Correo {
-  /** Header From, por ejemplo "Aerolínea Andina <reservas@aerolinea-andina.example>". */
-  de: string;
-  para: string;
-  asunto: string;
-  fecha: Date;
-  texto: string;
-  /** Si tiene HTML, el correo es multipart/alternative (texto y HTML). */
-  html?: string;
-}
+import { direccion, type Correo } from '@trotamundos/mocks-comun';
 
 export interface Header {
   name: string;
@@ -43,12 +32,6 @@ function parte(partId: string, mimeType: string, contenido: string): MessagePart
     headers: [{ name: 'Content-Type', value: `${mimeType}; charset=UTF-8` }],
     body: { size: Buffer.byteLength(contenido, 'utf8'), data: aBase64url(contenido) },
   };
-}
-
-/** Dirección de correo dentro de un header From ("Nombre <dir>" o solo "dir"). */
-export function direccion(header: string): string {
-  const entre = /<([^>]+)>/.exec(header);
-  return (entre?.[1] ?? header).trim().toLowerCase();
 }
 
 export function armarPayload(correo: Correo, messageId: string): MessagePart {

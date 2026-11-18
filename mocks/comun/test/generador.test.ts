@@ -2,7 +2,7 @@
 // JSON-LD, plantillas de texto y remitentes de prueba.
 import { describe, expect, it } from 'vitest';
 import { crearAzar, generarCorreo, generarLote, TIPOS, type TipoCorreo } from '../src/generador.ts';
-import { direccion } from '../src/mime.ts';
+import { direccion } from '../src/correo.ts';
 
 const desde = new Date('2026-11-28T12:00:00Z');
 const correo = (

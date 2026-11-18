@@ -1,12 +1,7 @@
 // Buzones del mock, en memoria. Cada buzón guarda sus mensajes, su historial de cambios (para
 // users.history.list) y su watch activo (para los avisos push).
-import { armarPayload, fragmento, type Correo, type MessagePart } from './mime.ts';
-
-/** Etiqueta que el generador pone en cada correo, para las pruebas (no la ve la Gmail API). */
-export interface Etiqueta {
-  tipo: string;
-  reserva?: { tipoReserva: string; proveedor: string; numeroReserva: string; estado: string };
-}
+import type { Correo, Etiqueta } from '@trotamundos/mocks-comun';
+import { armarPayload, fragmento, type MessagePart } from './mime.ts';
 
 /** Recurso `Message` de Gmail (specs/externos/gmail.md, sección 3). */
 export interface Mensaje {

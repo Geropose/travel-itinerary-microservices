@@ -1,7 +1,7 @@
 // Gmail API v1 contra specs/externos/gmail.md, secciones 1.6 a 4, y semillas.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { MessagePart } from '../src/mime.ts';
-import { BUZONES_PRUEBA } from '../src/semillas.ts';
+import { buzonesDePrueba } from '@trotamundos/mocks-comun';
 import { conectar, gmail, levantar, type Entorno } from './ayuda.ts';
 
 let e: Entorno;
@@ -35,7 +35,11 @@ describe('semillas', () => {
       email: string;
       correos: number;
     }[];
-    expect(buzones.map((b) => b.email).sort()).toEqual(BUZONES_PRUEBA.map((b) => b.email).sort());
+    expect(buzones.map((b) => b.email).sort()).toEqual(
+      buzonesDePrueba('gmail.example')
+        .map((b) => b.email)
+        .sort(),
+    );
     expect(new Set(buzones.map((b) => b.email)).size).toBe(20);
     for (const b of buzones) expect(b.correos).toBeGreaterThanOrEqual(8);
     const correos = (await (await fetch(`${e.url}/admin/buzones/${ANA}/correos`)).json()) as {
