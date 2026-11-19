@@ -1,5 +1,6 @@
 // API falsa para las pruebas de la web: responde como el enrutador global según los contratos de
-// Autenticación, Usuarios, Correo y Viajes, más mocks de OAuth de Gmail/Outlook, y anota cada solicitud.
+// Autenticación, Usuarios, Correo, Viajes y Analítica, más mocks de OAuth de Gmail/Outlook, y
+// anota cada solicitud.
 import { randomUUID } from 'node:crypto';
 import type { Page } from '@playwright/test';
 
@@ -38,6 +39,22 @@ export interface DesignadoPrueba {
   designadoEn: string;
 }
 
+export interface ReservaPrueba {
+  reservaId: string;
+  viajeId: string;
+  proveedor: string;
+  tipoReserva: 'vuelo' | 'hotel' | 'auto';
+  numeroReserva: string;
+  inicio: string;
+  fin: string;
+  origen?: string;
+  destino: string;
+  estado: 'confirmada' | 'modificada' | 'cancelada';
+  detalle: Record<string, unknown>;
+  origenCambio: 'correo' | 'proveedor' | 'manual' | 'archivado';
+  actualizadoEn: string;
+}
+
 export interface ViajePrueba {
   viajeId: string;
   usuarioId: string;
@@ -45,21 +62,42 @@ export interface ViajePrueba {
   inicio: string;
   fin: string;
   estado: 'activo' | 'archivado';
-  reservas: {
-    reservaId: string;
-    viajeId: string;
-    proveedor: string;
-    tipoReserva: 'vuelo' | 'hotel' | 'auto';
-    numeroReserva: string;
-    inicio: string;
-    fin: string;
-    origen?: string;
-    destino: string;
-    estado: 'confirmada' | 'modificada' | 'cancelada';
-    detalle: Record<string, unknown>;
-    origenCambio: 'correo' | 'proveedor' | 'manual' | 'archivado';
-    actualizadoEn: string;
-  }[];
+  reservas: ReservaPrueba[];
+}
+
+export interface OpcionesAnaliticaPrueba {
+  destinos?: {
+    desde: string;
+    hasta: string;
+    totalReservas: number;
+    destinos: { destino: string; reservas: number; proporcion: number }[];
+    generadoEn: string;
+  };
+  cancelaciones?: {
+    desde: string;
+    hasta: string;
+    agruparPor: 'proveedor' | 'destino';
+    total: { reservas: number; canceladas: number; tasaCancelacion: number };
+    grupos: { clave: string; reservas: number; canceladas: number; tasaCancelacion: number }[];
+    generadoEn: string;
+  };
+  tendencias?: {
+    anio: number;
+    agruparPor: 'mes';
+    periodos: {
+      mes: number;
+      reservas: number;
+      canceladas: number;
+      porTipoReserva: { vuelo: number; hotel: number; auto: number };
+    }[];
+    generadoEn: string;
+  };
+  /** Cantidad de sondeos en `enCurso` antes de pasar a `terminada` (por defecto 1). */
+  sondeosEnCurso?: number;
+  /** Si se define, la próxima ejecución Map-Reduce terminará en estado `fallida` con este mensaje. */
+  fallarEjecucionCon?: string;
+  /** Si se define, POST /consultas/:tipo/ejecutar devuelve 409 apuntando a este consultaId. */
+  conflictoConConsultaId?: string;
 }
 
 const b64 = (datos: unknown) => Buffer.from(JSON.stringify(datos)).toString('base64url');
@@ -96,9 +134,14 @@ export const analista: Cuenta = {
 
 export interface OpcionesApiFalsa {
   cuentas?: Cuenta[];
-  /** Respuesta de GET /api/viajes/panel (sin esto, 404 como hoy). */
+  /** Respuesta inicial de GET /api/viajes/panel (por defecto { viajes: [] }). */
   panel?: { viajes: ViajePrueba[] };
+  /** Respuesta de GET /api/viajes/archivados (por defecto []). */
+  archivados?: ViajePrueba[];
+  /** Otros viajes alcanzables por GET /api/viajes/viajes/:id (p. ej. compartidos por terceros). */
   viajes?: ViajePrueba[];
+  /** Si es true, POST /viajes/:id/compartir-red responde 503. */
+  fallarRedSocial?: boolean;
   cuentasCorreo?: CuentaCorreoPrueba[];
   whitelist?: {
     remitentesPermitidos: string[];
@@ -113,17 +156,22 @@ export interface OpcionesApiFalsa {
   };
   designados?: Record<string, DesignadoPrueba[]>;
   agenciasConfiguradas?: string[];
+  analitica?: OpcionesAnaliticaPrueba;
 }
 
-function subDelHeader(auth: string | undefined): string | undefined {
-  if (!auth?.startsWith('Bearer ')) return undefined;
+interface ClaimsSimulados {
+  sub?: string;
+  roles?: string[];
+}
+
+function claimsDelHeader(auth: string | undefined): ClaimsSimulados {
+  if (!auth?.startsWith('Bearer ')) return {};
   const carga = auth.slice(7).split('.')[1];
-  if (!carga) return undefined;
+  if (!carga) return {};
   try {
-    const parsed = JSON.parse(Buffer.from(carga, 'base64url').toString('utf8')) as { sub?: string };
-    return parsed.sub;
+    return JSON.parse(Buffer.from(carga, 'base64url').toString('utf8')) as ClaimsSimulados;
   } catch {
-    return undefined;
+    return {};
   }
 }
 
@@ -156,6 +204,97 @@ function pantallaOAuthHtml(proveedor: 'gmail' | 'outlook', state: string, emailS
 </html>`;
 }
 
+function recalcularViaje(viaje: ViajePrueba) {
+  viaje.reservas.sort((a, b) => new Date(a.inicio).getTime() - new Date(b.inicio).getTime());
+  const primera = viaje.reservas[0];
+  const ultima = viaje.reservas.reduce<ReservaPrueba | undefined>(
+    (acc, r) => (!acc || new Date(r.fin).getTime() > new Date(acc.fin).getTime() ? r : acc),
+    undefined,
+  );
+  if (primera && ultima) {
+    viaje.inicio = primera.inicio;
+    viaje.fin = ultima.fin;
+    viaje.destino = primera.destino;
+  }
+}
+
+function resultadoDestinosDefecto(desde: string, hasta: string, limite: number) {
+  const todos = [
+    { destino: 'Santiago (SCL)', reservas: 1840, proporcion: 0.46 },
+    { destino: 'Madrid (MAD)', reservas: 1200, proporcion: 0.3 },
+    { destino: 'Bariloche (BRC)', reservas: 960, proporcion: 0.24 },
+  ];
+  return {
+    desde,
+    hasta,
+    totalReservas: 4000,
+    destinos: todos.slice(0, limite),
+    generadoEn: '2026-11-18T18:00:00Z',
+  };
+}
+
+function resultadoCancelacionesDefecto(
+  desde: string,
+  hasta: string,
+  agruparPor: 'proveedor' | 'destino',
+) {
+  const grupos =
+    agruparPor === 'proveedor'
+      ? [
+          { clave: 'aerolinea-andina', reservas: 2500, canceladas: 300, tasaCancelacion: 0.12 },
+          { clave: 'hotel-cordillera', reservas: 1500, canceladas: 90, tasaCancelacion: 0.06 },
+        ]
+      : [
+          { clave: 'Santiago (SCL)', reservas: 2000, canceladas: 260, tasaCancelacion: 0.13 },
+          { clave: 'Madrid (MAD)', reservas: 2000, canceladas: 130, tasaCancelacion: 0.065 },
+        ];
+  return {
+    desde,
+    hasta,
+    agruparPor,
+    total: { reservas: 4000, canceladas: 390, tasaCancelacion: 0.0975 },
+    grupos,
+    generadoEn: '2026-11-18T18:00:00Z',
+  };
+}
+
+function resultadoTendenciasDefecto(anio: number) {
+  return {
+    anio,
+    agruparPor: 'mes' as const,
+    periodos: Array.from({ length: 12 }, (_, idx) => {
+      const mes = idx + 1;
+      const vuelo = 100 + mes * 10;
+      const hotel = 60 + mes * 5;
+      const auto = 20 + mes * 2;
+      return {
+        mes,
+        reservas: vuelo + hotel + auto,
+        canceladas: 10 + mes,
+        porTipoReserva: { vuelo, hotel, auto },
+      };
+    }),
+    generadoEn: '2026-11-18T18:00:00Z',
+  };
+}
+
+interface EjecucionInterna {
+  consultaId: string;
+  tipo: 'destinos' | 'cancelaciones' | 'tendencias';
+  parametros: Record<string, unknown>;
+  estado: 'pendiente' | 'enCurso' | 'terminada' | 'fallida';
+  procesadores: number;
+  progreso: number;
+  creadaEn: string;
+  iniciadaEn?: string;
+  terminadaEn?: string;
+  duracionMs?: number;
+  resultado?: unknown;
+  error?: string;
+  sondeosRestantes: number;
+  fallarCon?: string;
+}
+
 export async function apiFalsa(page: Page, opciones: OpcionesApiFalsa = {}) {
   const cuentas = [...(opciones.cuentas ?? [usuaria, analista])];
   const cuentasCorreo = [...(opciones.cuentasCorreo ?? [])];
@@ -175,15 +314,43 @@ export async function apiFalsa(page: Page, opciones: OpcionesApiFalsa = {}) {
     agenciaPreferida: opciones.perfil?.agenciaPreferida ?? null,
     creadoEn: '2026-11-01T12:00:00Z',
   };
-  const viajesLista: ViajePrueba[] = [
-    ...(opciones.panel?.viajes ?? []),
-    ...(opciones.viajes ?? []),
-  ];
+
+  let panelViajes: ViajePrueba[] = (opciones.panel?.viajes ?? []).map((v) => ({
+    ...v,
+    reservas: v.reservas.map((r) => ({ ...r, detalle: { ...r.detalle } })),
+  }));
+  const archivadosViajes: ViajePrueba[] = (opciones.archivados ?? []).map((v) => ({
+    ...v,
+    reservas: v.reservas.map((r) => ({ ...r, detalle: { ...r.detalle } })),
+  }));
+  const viajesExtra: ViajePrueba[] = (opciones.viajes ?? []).map((v) => ({
+    ...v,
+    reservas: v.reservas.map((r) => ({ ...r, detalle: { ...r.detalle } })),
+  }));
+
+  const todosLosViajes = () => [...panelViajes, ...archivadosViajes, ...viajesExtra];
+
   const designadosPorViaje: Record<string, DesignadoPrueba[]> = Object.fromEntries(
     Object.entries(opciones.designados ?? {}).map(([id, lista]) => [id, [...lista]]),
   );
   const agenciasValidas = new Set(opciones.agenciasConfiguradas ?? ['viajes-del-plata']);
   const statesOAuth = new Map<string, 'gmail' | 'outlook'>();
+  const ejecuciones = new Map<string, EjecucionInterna>();
+
+  if (opciones.analitica?.conflictoConConsultaId) {
+    const id = opciones.analitica.conflictoConConsultaId;
+    ejecuciones.set(id, {
+      consultaId: id,
+      tipo: 'destinos',
+      parametros: { desde: '2025-01-01', hasta: '2025-12-31', limite: 10 },
+      estado: 'enCurso',
+      procesadores: 8,
+      progreso: 0.5,
+      creadaEn: '2026-11-18T17:59:00Z',
+      iniciadaEn: '2026-11-18T17:59:01Z',
+      sondeosRestantes: 1,
+    });
+  }
 
   const pedidos: Pedido[] = [];
   let sinRed = false;
@@ -191,15 +358,45 @@ export async function apiFalsa(page: Page, opciones: OpcionesApiFalsa = {}) {
     'access-control-allow-origin': ORIGEN_WEB,
     'access-control-allow-headers': 'Authorization, Content-Type, X-Request-Id, X-Region',
     'access-control-allow-methods': 'GET, POST, PUT, PATCH, DELETE',
-    'access-control-expose-headers': 'X-Request-Id, Location, Retry-After',
+    'access-control-expose-headers': 'X-Request-Id, Location, Retry-After, X-Origen-Dato',
   };
-  const responder = (status: number, datos?: unknown) => ({
+  const responder = (status: number, datos?: unknown, extraHeaders?: Record<string, string>) => ({
     status,
-    headers: { ...cors, 'content-type': 'application/json' },
+    headers: { ...cors, 'content-type': 'application/json', ...extraHeaders },
     ...(datos === undefined ? {} : { body: JSON.stringify(datos) }),
   });
-  const problema = (status: number, title: string) =>
-    responder(status, { type: 'https://trotamundos.example/errores/x', title, status });
+  const problema = (status: number, title: string, detail?: string) =>
+    responder(status, {
+      type: 'https://trotamundos.example/errores/x',
+      title,
+      status,
+      ...(detail ? { detail } : {}),
+      requestId: randomUUID(),
+    });
+
+  const calcularResultadoAnalitica = (
+    tipo: 'destinos' | 'cancelaciones' | 'tendencias',
+    params: Record<string, unknown>,
+  ) => {
+    if (tipo === 'destinos') {
+      if (opciones.analitica?.destinos) return opciones.analitica.destinos;
+      return resultadoDestinosDefecto(
+        String(params.desde ?? '2025-01-01'),
+        String(params.hasta ?? '2025-12-31'),
+        Number(params.limite ?? 10),
+      );
+    }
+    if (tipo === 'cancelaciones') {
+      if (opciones.analitica?.cancelaciones) return opciones.analitica.cancelaciones;
+      return resultadoCancelacionesDefecto(
+        String(params.desde ?? '2025-01-01'),
+        String(params.hasta ?? '2025-12-31'),
+        params.agruparPor === 'destino' ? 'destino' : 'proveedor',
+      );
+    }
+    if (opciones.analitica?.tendencias) return opciones.analitica.tendencias;
+    return resultadoTendenciasDefecto(Number(params.anio ?? 2025));
+  };
 
   const manejarMockOAuth =
     (proveedor: 'gmail' | 'outlook') =>
@@ -242,7 +439,9 @@ export async function apiFalsa(page: Page, opciones: OpcionesApiFalsa = {}) {
     const cuerpo: unknown = pedido.postData() ? pedido.postDataJSON() : undefined;
     pedidos.push({ metodo: pedido.method(), ruta, headers, cuerpo });
     const datos = (cuerpo ?? {}) as Record<string, unknown>;
-    const subActual = subDelHeader(headers.authorization) ?? perfil.usuarioId;
+    const claims = claimsDelHeader(headers.authorization);
+    const subActual = claims.sub ?? perfil.usuarioId;
+    const rolesActuales = claims.roles ?? [];
 
     if (pedido.method() === 'GET' && /\/api\/correo\/oauth\/callback$/.test(ruta)) {
       const state = url.searchParams.get('state') ?? '';
@@ -305,9 +504,26 @@ export async function apiFalsa(page: Page, opciones: OpcionesApiFalsa = {}) {
       return route.fulfill({ status: 204, headers: cors });
     }
 
+    const matchCompartirRed = /^\/api\/viajes\/viajes\/([^/]+)\/compartir-red$/.exec(ruta);
+    if (pedido.method() === 'POST' && matchCompartirRed) {
+      const viaje = todosLosViajes().find((v) => v.viajeId === matchCompartirRed[1]);
+      if (!viaje) return route.fulfill(problema(404, 'Viaje no encontrado'));
+      if (viaje.usuarioId !== subActual) return route.fulfill(problema(403, 'Prohibido'));
+      if (opciones.fallarRedSocial) {
+        return route.fulfill(problema(503, 'Red social no disponible'));
+      }
+      return route.fulfill(
+        responder(201, {
+          red: String(datos.red ?? 'redsocial'),
+          url: `https://redsocial.example/@ana/publicacion-${viaje.viajeId.slice(0, 8)}`,
+          publicadaEn: '2026-11-18T18:30:00Z',
+        }),
+      );
+    }
+
     const matchViaje = /^\/api\/viajes\/viajes\/([^/]+)$/.exec(ruta);
     if (pedido.method() === 'GET' && matchViaje) {
-      const viaje = viajesLista.find((v) => v.viajeId === matchViaje[1]);
+      const viaje = todosLosViajes().find((v) => v.viajeId === matchViaje[1]);
       if (!viaje) return route.fulfill(problema(404, 'Viaje no encontrado'));
       const designados = designadosPorViaje[viaje.viajeId] ?? [];
       const esDesignado = designados.some((d) => d.usuarioId === subActual);
@@ -317,10 +533,85 @@ export async function apiFalsa(page: Page, opciones: OpcionesApiFalsa = {}) {
       return route.fulfill(responder(200, viaje));
     }
 
+    const matchReserva = /^\/api\/viajes\/reservas\/([^/]+)$/.exec(ruta);
+    if (matchReserva) {
+      const reservaId = matchReserva[1] ?? '';
+      const viajeArchivado = archivadosViajes.find((v) =>
+        v.reservas.some((r) => r.reservaId === reservaId),
+      );
+      if (viajeArchivado) {
+        return route.fulfill(problema(409, 'Viaje archivado'));
+      }
+      const viajeOrigen = panelViajes.find((v) =>
+        v.reservas.some((r) => r.reservaId === reservaId),
+      );
+      if (!viajeOrigen) return route.fulfill(problema(404, 'Reserva no encontrada'));
+      const idxReserva = viajeOrigen.reservas.findIndex((r) => r.reservaId === reservaId);
+      const actual = viajeOrigen.reservas[idxReserva];
+      if (!actual) return route.fulfill(problema(404, 'Reserva no encontrada'));
+
+      if (pedido.method() === 'PATCH') {
+        const nuevoInicio = typeof datos.inicio === 'string' ? datos.inicio : actual.inicio;
+        const nuevoFin = typeof datos.fin === 'string' ? datos.fin : actual.fin;
+        if (new Date(nuevoFin).getTime() < new Date(nuevoInicio).getTime()) {
+          return route.fulfill(problema(409, 'Fin anterior a inicio'));
+        }
+        const destinoViajeId = typeof datos.viajeId === 'string' ? datos.viajeId : actual.viajeId;
+        const viajeDestino = panelViajes.find((v) => v.viajeId === destinoViajeId);
+        if (!viajeDestino) return route.fulfill(problema(404, 'Viaje destino no encontrado'));
+
+        const actualizada: ReservaPrueba = {
+          ...actual,
+          viajeId: viajeDestino.viajeId,
+          inicio: nuevoInicio,
+          fin: nuevoFin,
+          ...(typeof datos.origen === 'string' ? { origen: datos.origen } : {}),
+          destino: typeof datos.destino === 'string' ? datos.destino : actual.destino,
+          estado:
+            datos.estado === 'confirmada' ||
+            datos.estado === 'modificada' ||
+            datos.estado === 'cancelada'
+              ? datos.estado
+              : actual.estado,
+          detalle:
+            datos.detalle && typeof datos.detalle === 'object'
+              ? (datos.detalle as Record<string, unknown>)
+              : actual.detalle,
+          origenCambio: 'manual',
+          actualizadoEn: new Date().toISOString(),
+        };
+
+        if (viajeDestino.viajeId === viajeOrigen.viajeId) {
+          viajeOrigen.reservas[idxReserva] = actualizada;
+          recalcularViaje(viajeOrigen);
+        } else {
+          viajeOrigen.reservas.splice(idxReserva, 1);
+          viajeDestino.reservas.push(actualizada);
+          recalcularViaje(viajeDestino);
+          if (viajeOrigen.reservas.length === 0) {
+            panelViajes = panelViajes.filter((v) => v.viajeId !== viajeOrigen.viajeId);
+          } else {
+            recalcularViaje(viajeOrigen);
+          }
+        }
+        return route.fulfill(responder(200, actualizada));
+      }
+
+      if (pedido.method() === 'DELETE') {
+        viajeOrigen.reservas.splice(idxReserva, 1);
+        if (viajeOrigen.reservas.length === 0) {
+          panelViajes = panelViajes.filter((v) => v.viajeId !== viajeOrigen.viajeId);
+        } else {
+          recalcularViaje(viajeOrigen);
+        }
+        return route.fulfill({ status: 204, headers: cors });
+      }
+    }
+
     const matchDesignados = /^\/api\/usuarios\/itinerarios\/([^/]+)\/designados$/.exec(ruta);
     if (matchDesignados) {
       const viajeId = matchDesignados[1] ?? '';
-      const viaje = viajesLista.find((v) => v.viajeId === viajeId);
+      const viaje = todosLosViajes().find((v) => v.viajeId === viajeId);
       if (viaje && viaje.usuarioId !== subActual) {
         return route.fulfill(problema(403, 'Solo el dueño puede gestionar designados'));
       }
@@ -354,7 +645,7 @@ export async function apiFalsa(page: Page, opciones: OpcionesApiFalsa = {}) {
     if (pedido.method() === 'DELETE' && matchQuitarDesignado) {
       const viajeId = matchQuitarDesignado[1] ?? '';
       const email = decodeURIComponent(matchQuitarDesignado[2] ?? '').toLowerCase();
-      const viaje = viajesLista.find((v) => v.viajeId === viajeId);
+      const viaje = todosLosViajes().find((v) => v.viajeId === viajeId);
       if (viaje && viaje.usuarioId !== subActual) {
         return route.fulfill(problema(403, 'Solo el dueño puede quitar designados'));
       }
@@ -363,6 +654,93 @@ export async function apiFalsa(page: Page, opciones: OpcionesApiFalsa = {}) {
       if (idx < 0) return route.fulfill(problema(404, 'No encontrado'));
       lista.splice(idx, 1);
       return route.fulfill({ status: 204, headers: cors });
+    }
+
+    const matchEjecutarAnalitica =
+      /^\/api\/analitica\/consultas\/(destinos|cancelaciones|tendencias)\/ejecutar$/.exec(ruta);
+    if (pedido.method() === 'POST' && matchEjecutarAnalitica) {
+      if (!rolesActuales.includes('analista')) return route.fulfill(problema(403, 'Prohibido'));
+      const tipo = matchEjecutarAnalitica[1] as 'destinos' | 'cancelaciones' | 'tendencias';
+      if (opciones.analitica?.conflictoConConsultaId) {
+        return route.fulfill(
+          problema(
+            409,
+            'Consulta ya en curso',
+            `Ya se está ejecutando la consulta ${opciones.analitica.conflictoConConsultaId} con los mismos parámetros.`,
+          ),
+        );
+      }
+      const consultaId = randomUUID();
+      const creadaEn = new Date().toISOString();
+      const procesadores = typeof datos.procesadores === 'number' ? datos.procesadores : 4;
+      ejecuciones.set(consultaId, {
+        consultaId,
+        tipo,
+        parametros: datos,
+        estado: 'pendiente',
+        procesadores,
+        progreso: 0,
+        creadaEn,
+        sondeosRestantes: opciones.analitica?.sondeosEnCurso ?? 1,
+        ...(opciones.analitica?.fallarEjecucionCon
+          ? { fallarCon: opciones.analitica.fallarEjecucionCon }
+          : {}),
+      });
+      return route.fulfill(
+        responder(
+          202,
+          { consultaId, tipo, estado: 'pendiente', creadaEn },
+          { Location: `/api/analitica/consultas/ejecuciones/${consultaId}` },
+        ),
+      );
+    }
+
+    const matchEjecucionAnalitica = /^\/api\/analitica\/consultas\/ejecuciones\/([^/]+)$/.exec(
+      ruta,
+    );
+    if (pedido.method() === 'GET' && matchEjecucionAnalitica) {
+      if (!rolesActuales.includes('analista')) return route.fulfill(problema(403, 'Prohibido'));
+      const consultaId = matchEjecucionAnalitica[1] ?? '';
+      const ej = ejecuciones.get(consultaId);
+      if (!ej) return route.fulfill(problema(404, 'Ejecución no encontrada'));
+
+      if (ej.estado === 'pendiente' || ej.estado === 'enCurso') {
+        if (ej.sondeosRestantes > 0) {
+          ej.sondeosRestantes -= 1;
+          ej.estado = 'enCurso';
+          ej.iniciadaEn ??= new Date().toISOString();
+          ej.progreso = 0.5;
+        } else if (ej.fallarCon) {
+          ej.estado = 'fallida';
+          ej.iniciadaEn ??= new Date().toISOString();
+          ej.terminadaEn = new Date().toISOString();
+          ej.duracionMs = 210;
+          ej.error = ej.fallarCon;
+        } else {
+          ej.estado = 'terminada';
+          ej.iniciadaEn ??= new Date().toISOString();
+          ej.terminadaEn = new Date().toISOString();
+          ej.progreso = 1;
+          ej.duracionMs = 420;
+          ej.resultado = calcularResultadoAnalitica(ej.tipo, ej.parametros);
+        }
+      }
+
+      const respuesta = {
+        consultaId: ej.consultaId,
+        tipo: ej.tipo,
+        parametros: ej.parametros,
+        estado: ej.estado,
+        procesadores: ej.procesadores,
+        progreso: ej.progreso,
+        creadaEn: ej.creadaEn,
+        ...(ej.iniciadaEn ? { iniciadaEn: ej.iniciadaEn } : {}),
+        ...(ej.terminadaEn ? { terminadaEn: ej.terminadaEn } : {}),
+        ...(ej.duracionMs !== undefined ? { duracionMs: ej.duracionMs } : {}),
+        ...(ej.resultado !== undefined ? { resultado: ej.resultado } : {}),
+        ...(ej.error ? { error: ej.error } : {}),
+      };
+      return route.fulfill(responder(200, respuesta));
     }
 
     switch (`${pedido.method()} ${ruta}`) {
@@ -432,8 +810,103 @@ export async function apiFalsa(page: Page, opciones: OpcionesApiFalsa = {}) {
         return route.fulfill(responder(200, perfil));
       }
       case 'GET /api/viajes/panel':
-        if (opciones.panel) return route.fulfill(responder(200, opciones.panel));
-        return route.fulfill(problema(404, 'No encontrado'));
+        return route.fulfill(responder(200, { viajes: panelViajes }, { 'X-Origen-Dato': 'cache' }));
+      case 'GET /api/viajes/archivados':
+        return route.fulfill(responder(200, { viajes: archivadosViajes }));
+      case 'POST /api/viajes/reservas': {
+        const proveedor = String(datos.proveedor ?? '');
+        const numeroReserva = String(datos.numeroReserva ?? '');
+        const duplicada = todosLosViajes().some((v) =>
+          v.reservas.some((r) => r.proveedor === proveedor && r.numeroReserva === numeroReserva),
+        );
+        if (duplicada) return route.fulfill(problema(409, 'Reserva duplicada'));
+
+        const inicio = String(datos.inicio ?? '');
+        const fin = String(datos.fin ?? '');
+        if (new Date(fin).getTime() < new Date(inicio).getTime()) {
+          return route.fulfill(problema(400, 'Fin anterior a inicio'));
+        }
+
+        let viajeDestino =
+          typeof datos.viajeId === 'string'
+            ? panelViajes.find((v) => v.viajeId === datos.viajeId)
+            : panelViajes.find((v) => {
+                const diffInicio = Math.abs(new Date(inicio).getTime() - new Date(v.fin).getTime());
+                const diffFin = Math.abs(new Date(v.inicio).getTime() - new Date(fin).getTime());
+                return Math.min(diffInicio, diffFin) <= 48 * 60 * 60 * 1000;
+              });
+
+        const nuevaReserva: ReservaPrueba = {
+          reservaId: randomUUID(),
+          viajeId: viajeDestino?.viajeId ?? randomUUID(),
+          proveedor,
+          tipoReserva:
+            datos.tipoReserva === 'hotel' || datos.tipoReserva === 'auto'
+              ? datos.tipoReserva
+              : 'vuelo',
+          numeroReserva,
+          inicio,
+          fin,
+          ...(typeof datos.origen === 'string' && datos.origen.length > 0
+            ? { origen: datos.origen }
+            : {}),
+          destino: String(datos.destino ?? ''),
+          estado: 'confirmada',
+          detalle:
+            datos.detalle && typeof datos.detalle === 'object'
+              ? (datos.detalle as Record<string, unknown>)
+              : {},
+          origenCambio: 'manual',
+          actualizadoEn: new Date().toISOString(),
+        };
+
+        if (!viajeDestino) {
+          viajeDestino = {
+            viajeId: nuevaReserva.viajeId,
+            usuarioId: subActual,
+            destino: nuevaReserva.destino,
+            inicio: nuevaReserva.inicio,
+            fin: nuevaReserva.fin,
+            estado: 'activo',
+            reservas: [nuevaReserva],
+          };
+          panelViajes.push(viajeDestino);
+          panelViajes.sort((a, b) => new Date(a.inicio).getTime() - new Date(b.inicio).getTime());
+        } else {
+          viajeDestino.reservas.push(nuevaReserva);
+          recalcularViaje(viajeDestino);
+        }
+
+        return route.fulfill(
+          responder(201, nuevaReserva, {
+            Location: `/api/viajes/reservas/${nuevaReserva.reservaId}`,
+          }),
+        );
+      }
+      case 'GET /api/analitica/consultas/destinos': {
+        if (!rolesActuales.includes('analista')) return route.fulfill(problema(403, 'Prohibido'));
+        const desde = url.searchParams.get('desde') ?? '2025-01-01';
+        const hasta = url.searchParams.get('hasta') ?? '2025-12-31';
+        const limite = Number(url.searchParams.get('limite') ?? '10');
+        return route.fulfill(
+          responder(200, calcularResultadoAnalitica('destinos', { desde, hasta, limite })),
+        );
+      }
+      case 'GET /api/analitica/consultas/cancelaciones': {
+        if (!rolesActuales.includes('analista')) return route.fulfill(problema(403, 'Prohibido'));
+        const desde = url.searchParams.get('desde') ?? '2025-01-01';
+        const hasta = url.searchParams.get('hasta') ?? '2025-12-31';
+        const agruparPor =
+          url.searchParams.get('agruparPor') === 'destino' ? 'destino' : 'proveedor';
+        return route.fulfill(
+          responder(200, calcularResultadoAnalitica('cancelaciones', { desde, hasta, agruparPor })),
+        );
+      }
+      case 'GET /api/analitica/consultas/tendencias': {
+        if (!rolesActuales.includes('analista')) return route.fulfill(problema(403, 'Prohibido'));
+        const anio = Number(url.searchParams.get('anio') ?? '2025');
+        return route.fulfill(responder(200, calcularResultadoAnalitica('tendencias', { anio })));
+      }
       default:
         return route.fulfill(problema(404, 'No encontrado'));
     }
@@ -446,6 +919,13 @@ export async function apiFalsa(page: Page, opciones: OpcionesApiFalsa = {}) {
     /** Simula que no hay red: la API deja de responder. */
     cortarRed: () => {
       sinRed = true;
+    },
+    /** Reemplaza los viajes activos devueltos por GET /api/viajes/panel. */
+    actualizarPanel: (viajes: ViajePrueba[]) => {
+      panelViajes = viajes.map((v) => ({
+        ...v,
+        reservas: v.reservas.map((r) => ({ ...r, detalle: { ...r.detalle } })),
+      }));
     },
   };
 }
