@@ -47,6 +47,7 @@ test('burbuja en pantallas del usuario y conversación de consulta de estado (oc
 
   // El analista no ve la burbuja del chat.
   await page.getByRole('button', { name: 'Cerrar sesión' }).click();
+  await expect(page).toHaveURL('/login');
   await iniciarSesion(page, analista);
   await expect(page).toHaveURL('/analitica');
   await expect(page.getByTestId('chat-burbuja')).toHaveCount(0);
