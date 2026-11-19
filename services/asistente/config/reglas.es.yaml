@@ -1,0 +1,163 @@
+# Reglas de intenciones y respuestas del Asistente Virtual en español (Iteración 7, QA-11).
+# Se recargan automáticamente sin reiniciar el servicio cuando cambia el archivo.
+
+idioma: es
+
+# Palabras clave que activan cada intención (insensibles a mayúsculas y tildes).
+intenciones:
+  derivar:
+    - agencia
+    - persona
+    - humano
+    - agente
+    - operador
+    - asesor
+    - derivar
+    - derivame
+    - hablar con alguien
+    - soporte humano
+    - atencion al cliente
+  reprogramar:
+    - reprogramar
+    - reprogramacion
+    - cambiar vuelo
+    - cambiar mi vuelo
+    - cambiar reserva
+    - cambiar fecha
+    - cambiar horario
+    - mover vuelo
+    - adelantar
+    - postergar
+    - posponer
+    - otro vuelo
+    - reubicar
+    - reubicacion
+  estado:
+    - estado
+    - reservas
+    - mis reservas
+    - mis viajes
+    - mi vuelo
+    - mi hotel
+    - mi auto
+    - itinerario
+    - horario
+    - cuando sale
+    - a que hora
+    - confirmado
+    - confirmada
+    - cancelado
+    - cancelada
+    - vuelo
+    - hotel
+    - auto
+  problemaMenor:
+    - equipaje
+    - valija
+    - maleta
+    - bolso
+    - carry on
+    - check-in
+    - checkin
+    - check in
+    - tarjeta de embarque
+    - boarding pass
+    - compartir
+    - designado
+    - red social
+    - asiento
+    - ayuda
+
+# Respuestas afirmativas que aceptan una derivación ofrecida previamente (`ofreceDerivar: true`).
+afirmaciones:
+  - si
+  - dale
+  - bueno
+  - ok
+  - okay
+  - por favor
+  - claro
+  - perfecto
+  - derivame
+  - hacelo
+  - de acuerdo
+
+# Respuestas configuradas del plug-in de problemas menores (sin llamadas a otros servicios).
+problemasMenores:
+  equipaje:
+    palabrasClave:
+      - equipaje
+      - valija
+      - maleta
+      - bolso
+      - carry on
+    respuesta: >-
+      En cabina podés llevar un bolso de hasta 8 kg. El equipaje despachado depende de la tarifa; lo
+      ves en el correo de tu reserva.
+  checkIn:
+    palabrasClave:
+      - check-in
+      - checkin
+      - check in
+      - tarjeta de embarque
+      - boarding pass
+      - asiento
+    respuesta: >-
+      El check-in online suele abrir entre 24 y 48 horas antes de la salida en la web de tu
+      aerolínea usando tu código de reserva.
+  compartir:
+    palabrasClave:
+      - compartir
+      - designado
+      - red social
+    respuesta: >-
+      Podés compartir un viaje desde su detalle en el panel: agregá el email de una persona
+      designada para darle acceso de solo lectura, o publicalo en tu red social sin códigos de
+      reserva.
+  general:
+    palabrasClave:
+      - ayuda
+    respuesta: >-
+      Puedo consultar el estado de tus reservas, buscar opciones para reprogramar vuelos, responder
+      dudas sobre equipaje, check-in o cómo compartir un itinerario, o derivar tu caso a tu agencia.
+
+textos:
+  saludo: Hola, soy el asistente de Trotamundos. ¿En qué te ayudo?
+  repregunta: >-
+    No te entendí. ¿Querés saber el estado de un viaje, reprogramar una reserva o hablar con tu
+    agencia?
+  derivacionAutomaticaMotivo: >-
+    El asistente no pudo comprender la consulta del usuario tras dos intentos consecutivos.
+  sinReservas: No encontré reservas activas en tu cuenta en este momento.
+  reservaNoEncontrada: No encontré la reserva {numeroReserva} entre tus viajes activos.
+  estadoEncabezado: 'Estas son tus reservas activas:'
+  estadoUnicaReserva: 'Tu {tipo} {numeroReserva} ({ruta}) inicia el {inicio} y está {estado}.'
+  pedirNumeroReprogramacion: >-
+    Tenés varias reservas activas. Indicame el código de reserva del vuelo que querés reprogramar
+    (por ejemplo: {ejemplo}).
+  reprogramacionSinReservas: No encontré reservas activas para reprogramar en tu cuenta.
+  opcionesEncontradas: La aerolínea ofrece estas opciones. ¿Cuál querés confirmar?
+  sinOpcionesReprogramacion: >-
+    No encontré opciones de reprogramación disponibles con el proveedor para {numeroReserva}.
+    ¿Querés que derive tu caso a tu agencia?
+  confirmacionUsuario: 'Confirmo la opción {descripcion}'
+  reprogramadoOk: >-
+    Listo, tu reserva {numeroReserva} quedó reprogramada para el {inicio}. Lo vas a ver actualizado
+    en tu panel.
+  opcionRechazada: >-
+    El proveedor ya no ofrece esa opción. ¿Querés que derive tu caso a tu agencia?
+  consultandoOpciones: Estoy consultando con la aerolínea. Te muestro las opciones en cuanto lleguen.
+  consultandoAplicar: Estoy confirmando el cambio con la aerolínea. Te aviso en cuanto responda.
+  derivadoOk: >-
+    Le pasé tu consulta y el resumen de esta conversación a {agencia}. Tu número de caso es
+    {numeroCaso}.
+  sinAgenciaPreferida: >-
+    Todavía no elegiste una agencia preferida en tu perfil. Configurala en Preferencias para que
+    pueda derivar tu consulta.
+  noDisponibleEstado: >-
+    Ahora no puedo consultar tus viajes. ¿Querés que derive tu consulta a tu agencia?
+  noDisponibleReprogramar: >-
+    Ahora no puedo reprogramar reservas. No se cambió nada. ¿Querés que derive tu caso a tu agencia?
+  noDisponibleDerivar: >-
+    Ahora no pude comunicarme con tu agencia. Intentá de nuevo en unos minutos o usá el botón
+    "Contactar a mi agencia".
