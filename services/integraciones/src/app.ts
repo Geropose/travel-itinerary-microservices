@@ -9,9 +9,15 @@ import {
   type Validador,
 } from '@trotamundos/comun';
 import {
+  crearRegistroAdaptadoresAgencias,
   crearRegistroAdaptadoresProveedores,
+  crearRegistroAdaptadoresRedes,
+  type FabricaAdaptadorAgencia,
   type FabricaAdaptadorProveedor,
+  type FabricaAdaptadorRed,
+  type RegistroAdaptadoresAgencias,
   type RegistroAdaptadoresProveedores,
+  type RegistroAdaptadoresRedes,
 } from './adaptadores/registro.ts';
 import { cargarConfigProveedores, type ConfigIntegracionesResuelta } from './config-proveedores.ts';
 import { crearConsultadorProveedores, type ConsultadorProveedores } from './consultador.ts';
@@ -22,6 +28,7 @@ import {
   registrarRutasAntesDelContrato,
   type NegocioIntegraciones,
 } from './rutas.ts';
+import { crearClienteUsuarios, type ClienteUsuarios } from './usuarios.ts';
 
 export const SERVICIO = 'integraciones';
 /** Contrato del servicio: las solicitudes y las respuestas se validan contra él. */
@@ -52,11 +59,17 @@ export interface OpcionesNegocioIntegraciones {
   configProveedores?: ConfigIntegracionesResuelta;
   rutaConfigProveedores?: string;
   env?: Record<string, string | number | undefined>;
+  urlUsuarios?: string;
+  usuarios?: ClienteUsuarios;
   intervaloGlobalSeg?: number;
   ventanaInicialMs?: number;
   demoraInicialConsultaMs?: number;
   fabricas?: Record<string, FabricaAdaptadorProveedor>;
+  fabricasAgencias?: Record<string, FabricaAdaptadorAgencia>;
+  fabricasRedes?: Record<string, FabricaAdaptadorRed>;
   registro?: RegistroAdaptadoresProveedores;
+  agencias?: RegistroAdaptadoresAgencias;
+  redes?: RegistroAdaptadoresRedes;
   ahora?: () => number;
   fetch?: typeof fetch;
 }
@@ -89,6 +102,31 @@ export function crearNegocioIntegraciones(
       ...(opciones.fetch ? { fetch: opciones.fetch } : {}),
     });
 
+  const agencias =
+    opciones.agencias ??
+    crearRegistroAdaptadoresAgencias({
+      agencias: configProveedores.agencias,
+      ...(opciones.fabricasAgencias ? { fabricas: opciones.fabricasAgencias } : {}),
+      ...(opciones.ahora ? { ahora: opciones.ahora } : {}),
+      ...(opciones.fetch ? { fetch: opciones.fetch } : {}),
+    });
+
+  const redes =
+    opciones.redes ??
+    crearRegistroAdaptadoresRedes({
+      redes: configProveedores.redes,
+      ...(opciones.fabricasRedes ? { fabricas: opciones.fabricasRedes } : {}),
+      ...(opciones.ahora ? { ahora: opciones.ahora } : {}),
+      ...(opciones.fetch ? { fetch: opciones.fetch } : {}),
+    });
+
+  const usuarios =
+    opciones.usuarios ??
+    crearClienteUsuarios({
+      urlBase: opciones.urlUsuarios ?? 'http://usuarios:3002',
+      ...(opciones.fetch ? { fetch: opciones.fetch } : {}),
+    });
+
   const procesador = crearProcesadorProveedores({
     pool: opciones.pool,
     region: opciones.region,
@@ -105,7 +143,7 @@ export function crearNegocioIntegraciones(
       ? { ventanaInicialMs: opciones.ventanaInicialMs }
       : {}),
     ...(opciones.demoraInicialConsultaMs !== undefined
-      ? { demoraInicialMs: opciones.demoraInicialConsultaMs }
+      ? { demoraInicialConsultaMs: opciones.demoraInicialConsultaMs }
       : {}),
     ...(opciones.ahora ? { ahora: opciones.ahora } : {}),
   });
@@ -113,10 +151,14 @@ export function crearNegocioIntegraciones(
   return {
     pool: opciones.pool,
     registro,
+    agencias,
+    redes,
     procesador,
     consultador,
+    usuarios,
     configProveedores,
     logger: opciones.logger,
+    ...(opciones.ahora ? { ahora: opciones.ahora } : {}),
   };
 }
 
@@ -146,8 +188,8 @@ export function crearApp(opciones: OpcionesApp): Servidor {
     servidor.registrarChequeo(nombre, chequeo);
   }
 
-  if (opciones.negocio) {
-    registrarRutas(servidor, opciones.negocio);
+  if (negocio) {
+    registrarRutas(servidor, negocio, opciones.validador);
   }
 
   return servidor;

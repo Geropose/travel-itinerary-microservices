@@ -236,3 +236,79 @@ export async function liberarLockConsulta(cliente: ClienteDb, proveedor: string)
     .query('SELECT pg_advisory_unlock(hashtext($1))', [`${PREFIJO_LOCK_CONSULTA}${proveedor}`])
     .catch(() => undefined);
 }
+
+export interface OpcionReprogramacionGuardada {
+  proveedor: string;
+  numeroReserva: string;
+  opcionId: string;
+  venceEn: string;
+  aplicadaEn?: string;
+}
+
+interface FilaOpcionReprogramacion {
+  proveedor: string;
+  numero_reserva: string;
+  opcion_id: string;
+  vence_en: Date | string;
+  aplicada_en: Date | string | null;
+}
+
+function aIso(valor: Date | string): string {
+  return valor instanceof Date ? valor.toISOString() : new Date(valor).toISOString();
+}
+
+export async function guardarOpcionesReprogramacion(
+  db: Ejecutor,
+  proveedor: string,
+  numeroReserva: string,
+  opciones: Array<{ opcionId: string; venceEn: string }>,
+): Promise<void> {
+  for (const opcion of opciones) {
+    await db.query(
+      `INSERT INTO opciones_reprogramacion_ofrecidas
+         (proveedor, numero_reserva, opcion_id, vence_en, ofrecida_en)
+       VALUES ($1, $2, $3, $4::timestamptz, now())
+       ON CONFLICT (proveedor, numero_reserva, opcion_id) DO UPDATE SET
+         vence_en = EXCLUDED.vence_en`,
+      [proveedor, numeroReserva, opcion.opcionId, opcion.venceEn],
+    );
+  }
+}
+
+export async function obtenerOpcionReprogramacion(
+  db: Ejecutor,
+  proveedor: string,
+  numeroReserva: string,
+  opcionId: string,
+): Promise<OpcionReprogramacionGuardada | undefined> {
+  const { rows } = await db.query<FilaOpcionReprogramacion>(
+    `SELECT proveedor, numero_reserva, opcion_id, vence_en, aplicada_en
+       FROM opciones_reprogramacion_ofrecidas
+      WHERE proveedor = $1 AND numero_reserva = $2 AND opcion_id = $3`,
+    [proveedor, numeroReserva, opcionId],
+  );
+  const fila = rows[0];
+  if (!fila) return undefined;
+  return {
+    proveedor: fila.proveedor,
+    numeroReserva: fila.numero_reserva,
+    opcionId: fila.opcion_id,
+    venceEn: aIso(fila.vence_en),
+    ...(fila.aplicada_en !== null ? { aplicadaEn: aIso(fila.aplicada_en) } : {}),
+  };
+}
+
+export async function marcarOpcionAplicada(
+  db: Ejecutor,
+  proveedor: string,
+  numeroReserva: string,
+  opcionId: string,
+  aplicadaEn: string,
+): Promise<void> {
+  await db.query(
+    `UPDATE opciones_reprogramacion_ofrecidas
+        SET aplicada_en = COALESCE(aplicada_en, $4::timestamptz)
+      WHERE proveedor = $1 AND numero_reserva = $2 AND opcion_id = $3`,
+    [proveedor, numeroReserva, opcionId, aplicadaEn],
+  );
+}

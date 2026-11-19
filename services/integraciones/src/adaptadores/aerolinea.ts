@@ -138,7 +138,7 @@ export function crearAdaptadorAerolinea(
     url,
     claveApi,
     secretoWebhook,
-    tiempoMaximoMs = 5000,
+    tiempoMaximoMs = 8000,
     toleranciaFirmaSeg = TOLERANCIA_FIRMA_DEFECTO_SEG,
     ahora = Date.now,
     fetch: hacerFetch = fetch,

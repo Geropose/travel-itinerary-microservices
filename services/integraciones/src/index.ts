@@ -52,6 +52,7 @@ const negocio = crearNegocioIntegraciones({
     ? { rutaConfigProveedores: config.RUTA_CONFIG_PROVEEDORES }
     : {}),
   env: { ...process.env, ...config },
+  urlUsuarios: config.URL_USUARIOS,
   intervaloGlobalSeg: config.INTERVALO_CONSULTA_PROVEEDORES_SEG,
   ventanaInicialMs: config.VENTANA_INICIAL_CONSULTA_SEG * 1000,
 });
