@@ -11,11 +11,12 @@ import {
   registroPorEvento,
 } from '@trotamundos/comun';
 import { crearApp, SERVICIO } from './app.ts';
+import { crearTareaArchivado } from './archivado.ts';
 import { crearCacheNula, crearCacheRedis } from './cache.ts';
 import { esquemaConfig } from './config.ts';
 import { registrarConsumidoresViajes } from './consumidores.ts';
 import { crearGestorViajes } from './gestor.ts';
-import { crearNegocioViajes } from './rutas.ts';
+import { crearNegocioViajes, REGLAS_VALIDADOR_VIAJES } from './rutas.ts';
 
 const config = cargarConfig(esquemaConfig);
 const logger = crearLogger({ servicio: SERVICIO, region: config.REGION, nivel: config.NIVEL_LOG });
@@ -62,13 +63,19 @@ const validador = crearValidador({
   logger,
   claves: { [config.REGION]: { url: config.URL_JWKS } },
   registrar: registrarRechazo,
-  // Rutas internas con token de servicio: 'MÉTODO /ruta': { servicios: [...] }
-  reglas: {},
+  reglas: REGLAS_VALIDADOR_VIAJES,
 });
 const gestor = crearGestorViajes({
   region: config.REGION,
   logger,
   margenAgrupacionMs: config.MARGEN_AGRUPACION_HORAS * 60 * 60 * 1000,
+});
+const tareaArchivado = crearTareaArchivado({
+  pool,
+  cache,
+  region: config.REGION,
+  logger,
+  cron: config.CRON_ARCHIVADO,
 });
 const negocio = crearNegocioViajes({
   poolPrincipal: pool,
@@ -77,6 +84,9 @@ const negocio = crearNegocioViajes({
   gestor,
   logger,
   registrar: registrarRechazo,
+  tareaArchivado,
+  urlUsuarios: config.URL_USUARIOS,
+  urlIntegraciones: config.URL_INTEGRACIONES,
 });
 await registrarConsumidoresViajes({
   broker,
@@ -88,6 +98,7 @@ await registrarConsumidoresViajes({
   alCambiarUsuario: (usuarioId) => cache.invalidar(usuarioId),
 });
 const outbox = iniciarPublicadorOutbox({ pool, broker, logger });
+tareaArchivado.iniciar();
 
 const servidor = crearApp({
   region: config.REGION,
@@ -100,7 +111,7 @@ const servidor = crearApp({
     broker: () => broker.verificar(),
   },
 });
-// Se apagan en orden inverso: primero el outbox, después cache/broker y al final las bases.
+// Se apagan en orden inverso: primero tarea de archivado y outbox, después cache/broker y al final las bases.
 servidor.alApagar(() => pool.end());
 if (poolLectura !== pool) {
   servidor.alApagar(() => poolLectura.end());
@@ -108,5 +119,6 @@ if (poolLectura !== pool) {
 servidor.alApagar(() => broker.cerrar());
 servidor.alApagar(() => cache.cerrar());
 servidor.alApagar(() => outbox.detener());
+servidor.alApagar(() => tareaArchivado.detener());
 
 await servidor.iniciar();

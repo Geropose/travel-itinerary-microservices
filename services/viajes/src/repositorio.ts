@@ -384,3 +384,133 @@ export async function listarViajesConReservas(
     reservas: porViaje.get(v.id) ?? [],
   }));
 }
+
+export async function buscarViajeConReservasPorId(
+  db: Db,
+  viajeId: string,
+): Promise<ViajeConReservas | null> {
+  const viaje = await buscarViajePorId(db, viajeId);
+  if (!viaje) return null;
+  const reservas = await listarReservasDeViaje(db, viajeId);
+  return { ...viaje, reservas };
+}
+
+/**
+ * Reservas de viajes activos de un usuario ordenadas por inicio (GET /interna/reservas, Asistente).
+ */
+export async function listarReservasActivasDeUsuario(
+  db: Db,
+  usuarioId: string,
+  estado?: EstadoReserva,
+): Promise<Reserva[]> {
+  const params: unknown[] = [usuarioId];
+  let filtroEstado = '';
+  if (estado) {
+    params.push(estado);
+    filtroEstado = ` AND r.estado = $${params.length}`;
+  }
+  const res = await db.query<FilaReserva>(
+    `SELECT r.id, r.viaje_id, r.usuario_id, r.proveedor, r.tipo_reserva, r.numero_reserva,
+            r.inicio, r.fin, r.origen, r.destino, r.detalle, r.estado, r.origen_cambio,
+            r.correo_id, r.actualizado_en
+     FROM reservas r
+     INNER JOIN viajes v ON v.id = r.viaje_id
+     WHERE r.usuario_id = $1
+       AND v.estado = 'activo'${filtroEstado}
+     ORDER BY r.inicio ASC, r.id ASC`,
+    params,
+  );
+  return res.rows.map(mapearReserva);
+}
+
+/**
+ * Usuarios de esta región con al menos un viaje activo en curso o que empieza dentro de la ventana
+ * [ahora, hasta] (GET /interna/usuarios-con-viaje-proximo, Examinador de Correo, ADR-010).
+ */
+export async function listarUsuariosConViajeProximo(
+  db: Db,
+  ahora: Date,
+  hasta: Date,
+): Promise<string[]> {
+  const res = await db.query<{ usuario_id: string }>(
+    `SELECT DISTINCT usuario_id
+     FROM viajes
+     WHERE estado = 'activo'
+       AND fin >= $1
+       AND inicio <= $2
+     ORDER BY usuario_id ASC`,
+    [ahora, hasta],
+  );
+  return res.rows.map((r) => r.usuario_id);
+}
+
+/**
+ * Viajes activos cuya última reserva ya terminó (v.fin <= ahora y sin reservas posteriores).
+ */
+export async function listarViajesTerminadosParaArchivar(
+  db: ClienteDb,
+  ahora: Date,
+): Promise<Viaje[]> {
+  const res = await db.query<FilaViaje>(
+    `SELECT v.id, v.usuario_id, v.nombre, v.destino, v.inicio, v.fin, v.estado
+     FROM viajes v
+     WHERE v.estado = 'activo'
+       AND v.fin <= $1
+       AND NOT EXISTS (
+         SELECT 1
+         FROM reservas r
+         WHERE r.viaje_id = v.id
+           AND r.fin > $1
+       )
+     ORDER BY v.usuario_id ASC, v.id ASC`,
+    [ahora],
+  );
+  return res.rows.map(mapearViaje);
+}
+
+/**
+ * Marca un viaje terminado como archivado y actualiza el origen_cambio de sus reservas a
+ * 'archivado' (preservando el estado de cada reserva). Devuelve null si el viaje ya no es elegible.
+ */
+export async function archivarViajeYReservas(
+  db: ClienteDb,
+  viajeId: string,
+  ahora: Date,
+): Promise<{ viaje: Viaje; reservas: Reserva[] } | null> {
+  const viajeRes = await db.query<FilaViaje>(
+    `UPDATE viajes v
+     SET estado = 'archivado',
+         actualizado_en = $2
+     WHERE v.id = $1
+       AND v.estado = 'activo'
+       AND v.fin <= $2
+       AND NOT EXISTS (
+         SELECT 1
+         FROM reservas r
+         WHERE r.viaje_id = v.id
+           AND r.fin > $2
+       )
+     RETURNING id, usuario_id, nombre, destino, inicio, fin, estado`,
+    [viajeId, ahora],
+  );
+  const filaViaje = viajeRes.rows[0];
+  if (!filaViaje) return null;
+
+  const reservasRes = await db.query<FilaReserva>(
+    `UPDATE reservas
+     SET origen_cambio = 'archivado',
+         actualizado_en = $2
+     WHERE viaje_id = $1
+     RETURNING id, viaje_id, usuario_id, proveedor, tipo_reserva, numero_reserva,
+               inicio, fin, origen, destino, detalle, estado, origen_cambio, correo_id, actualizado_en`,
+    [viajeId, ahora],
+  );
+  const reservas = reservasRes.rows
+    .map(mapearReserva)
+    .sort((a, b) => a.inicio.localeCompare(b.inicio) || a.reservaId.localeCompare(b.reservaId));
+
+  return {
+    viaje: mapearViaje(filaViaje),
+    reservas,
+  };
+}

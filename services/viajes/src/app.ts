@@ -48,7 +48,7 @@ export function crearApp(opciones: OpcionesApp): Servidor {
   }
 
   if (opciones.negocio) {
-    registrarRutas(servidor, SERVICIO, opciones.negocio);
+    registrarRutas(servidor, SERVICIO, opciones.negocio, opciones.validador);
   }
 
   return servidor;
