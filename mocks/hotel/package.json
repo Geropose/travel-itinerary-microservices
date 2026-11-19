@@ -1,0 +1,21 @@
+{
+  "name": "@trotamundos/mock-hotel",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Mock de Hotel Cordillera: reservas hoteleras consultables por modifiedSince (specs/externos/hotel.md)",
+  "type": "module",
+  "config": {
+    "puerto": 4004
+  },
+  "scripts": {
+    "start": "node src/index.ts",
+    "dev": "node --watch src/index.ts",
+    "test": "vitest run --root ../.. mocks/hotel"
+  },
+  "dependencies": {
+    "@trotamundos/comun": "0.1.0",
+    "@trotamundos/mocks-comun": "0.1.0",
+    "express": "^5.3.0",
+    "zod": "^4.6.7"
+  }
+}

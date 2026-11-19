@@ -1,0 +1,21 @@
+{
+  "name": "@trotamundos/mock-agencia",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Mock de Viajes del Plata (agencia de viajes): recepción de casos estilo Zendesk (specs/externos/agencia.md)",
+  "type": "module",
+  "config": {
+    "puerto": 4006
+  },
+  "scripts": {
+    "start": "node src/index.ts",
+    "dev": "node --watch src/index.ts",
+    "test": "vitest run --root ../.. mocks/agencia"
+  },
+  "dependencies": {
+    "@trotamundos/comun": "0.1.0",
+    "@trotamundos/mocks-comun": "0.1.0",
+    "express": "^5.3.0",
+    "zod": "^4.6.7"
+  }
+}
