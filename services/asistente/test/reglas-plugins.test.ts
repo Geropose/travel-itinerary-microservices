@@ -79,7 +79,8 @@ describe('Reglas externas (config/reglas.{es,en}.yaml) y detección rápida', ()
     expect(detectarIntencionConReglas('yes please', en, true)).toBe('derivar');
     const duracionMs = performance.now() - inicio;
 
-    expect(duracionMs).toBeLessThan(20);
+    // Promedio por mensaje muy por debajo de los 10 ms de Iteración 7 (QA-12).
+    expect(duracionMs / 14).toBeLessThan(10);
   });
 
   it('recarga reglas modificadas en disco sin reiniciar y conserva las válidas ante YAML roto', () => {

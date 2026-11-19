@@ -8,6 +8,7 @@ import {
   type Region,
   type RegistrarRechazo,
 } from '@trotamundos/comun';
+import type { MetricasAsistente } from './metricas.ts';
 import type { RegistroPlugins } from './plugins/registro.ts';
 import type { ContextoPlugin, MensajeHistorial, RespuestaPlugin } from './plugins/tipos.ts';
 import {
@@ -44,6 +45,9 @@ export interface OpcionesNucleoConversacion {
   reglas: GestorReglas;
   plugins: RegistroPlugins;
   logger: Logger;
+  metricas?: MetricasAsistente;
+  /** Umbral (ms) antes de responder 202 `consultando` en reprogramaciones lentas (QA-12: 3000 ms). */
+  umbralRespuestaLentaMs?: number;
   registrarRechazo?: RegistrarRechazo;
   ahora?: () => number;
 }
@@ -73,22 +77,38 @@ export interface NucleoConversacion {
     opcionId: string,
     acceso: MetadatosAcceso,
   ): Promise<ResultadoTurno>;
+  /** Espera las consultas en segundo plano antes de cerrar la base (apagado limpio). */
+  detener(): Promise<void>;
 }
 
 const MAX_INTENTOS_FALLIDOS = 2;
+const MARCA_LENTA = Symbol('consulta-lenta');
 
 function normalizarIdioma(idioma: string | undefined): IdiomaAsistente {
   return idioma?.toLowerCase().startsWith('en') ? 'en' : 'es';
 }
 
 /**
- * Núcleo de conversación del Asistente Virtual (Iteración 7, ADR-018):
+ * Núcleo de conversación del Asistente Virtual (Iteración 7, ADR-018, ADR-019, QA-12):
  * guarda el contexto por conversación, detecta intenciones con las reglas configuradas (~10 ms),
- * despacha al plug-in registrado, maneja repreguntas/derivación tras 2 intentos fallidos y exige
- * confirmación explícita para aplicar reprogramaciones.
+ * despacha al plug-in registrado, aplica degradación controlada, responde 202 `consultando` cuando
+ * una reprogramación supera 3 s y registra métricas de latencia por mensaje.
  */
 export function crearNucleoConversacion(opciones: OpcionesNucleoConversacion): NucleoConversacion {
-  const { pool, region, reglas, plugins, logger, registrarRechazo, ahora = Date.now } = opciones;
+  const {
+    pool,
+    region,
+    reglas,
+    plugins,
+    logger,
+    metricas,
+    umbralRespuestaLentaMs = 3000,
+    registrarRechazo,
+    ahora = Date.now,
+  } = opciones;
+
+  const tareasSegundoPlano = new Set<Promise<void>>();
+  let detenido = false;
 
   async function exigirConversacionPropia(
     conversacionId: string,
@@ -156,6 +176,118 @@ export function crearNucleoConversacion(opciones: OpcionesNucleoConversacion): N
     return mensajeAsistente;
   }
 
+  /**
+   * Ejecuta una operación de reprogramación con umbral de respuesta lenta (QA-12: 3 s):
+   * - Si termina antes del umbral, guarda y devuelve la respuesta definitiva (`200 respondido`).
+   * - Si supera el umbral, guarda el aviso `consultando`, devuelve `202 consultando` y completa la
+   *   operación en segundo plano dejando el resultado final en `mensajes` para polling.
+   */
+  async function ejecutarConUmbralLento(params: {
+    conversacionId: string;
+    promesa: Promise<RespuestaPlugin>;
+    textoConsultando: string;
+    textoNoDisponible: string;
+    alCompletar?: (resp: RespuestaPlugin) => Promise<void>;
+  }): Promise<{ estado: 'respondido' | 'consultando'; respuesta: MensajeHistorial }> {
+    const { conversacionId, promesa, textoConsultando, textoNoDisponible, alCompletar } = params;
+
+    let temporizador: NodeJS.Timeout | undefined;
+    let resolvioAntes = false;
+    const carrera = await Promise.race([
+      promesa.then(
+        (valor) => {
+          resolvioAntes = true;
+          return { tipo: 'ok' as const, valor };
+        },
+        (error: unknown) => {
+          resolvioAntes = true;
+          return { tipo: 'error' as const, error };
+        },
+      ),
+      new Promise<{ tipo: typeof MARCA_LENTA }>((resolve) => {
+        temporizador = setTimeout(() => resolve({ tipo: MARCA_LENTA }), umbralRespuestaLentaMs);
+      }),
+    ]);
+    clearTimeout(temporizador);
+
+    if (carrera.tipo === 'ok') {
+      if (alCompletar) await alCompletar(carrera.valor);
+      const respuesta = await guardarRespuestaAsistente(
+        conversacionId,
+        'reprogramar',
+        carrera.valor,
+        {
+          intentosFallidos: 0,
+          consultando: false,
+        },
+      );
+      return { estado: 'respondido', respuesta };
+    }
+
+    if (carrera.tipo === 'error') {
+      logger.warn({ err: carrera.error, conversacionId }, 'Error en plug-in de reprogramación');
+      const respuesta = await guardarRespuestaAsistente(
+        conversacionId,
+        'reprogramar',
+        {
+          texto: textoNoDisponible,
+          resultado: 'noDisponible',
+          noDisponible: { funcion: 'reprogramar', servicio: 'proveedor' },
+          ofreceDerivar: true,
+        },
+        { intentosFallidos: 0, consultando: false },
+      );
+      return { estado: 'respondido', respuesta };
+    }
+
+    // Superó el umbral de 3 s: respondemos enseguida `consultando` y continuamos en segundo plano.
+    const mensajeConsultando = await guardarRespuestaAsistente(
+      conversacionId,
+      'reprogramar',
+      {
+        texto: textoConsultando,
+        resultado: 'consultando',
+      },
+      { intentosFallidos: 0, consultando: true },
+    );
+
+    if (!resolvioAntes) {
+      const tarea = promesa
+        .then(async (respFinal) => {
+          if (detenido) return;
+          if (alCompletar) await alCompletar(respFinal);
+          await guardarRespuestaAsistente(conversacionId, 'reprogramar', respFinal, {
+            intentosFallidos: 0,
+            consultando: false,
+          });
+        })
+        .catch(async (error: unknown) => {
+          if (detenido) return;
+          logger.warn(
+            { err: error, conversacionId },
+            'Falló la consulta lenta al proveedor en segundo plano',
+          );
+          await guardarRespuestaAsistente(
+            conversacionId,
+            'reprogramar',
+            {
+              texto: textoNoDisponible,
+              resultado: 'noDisponible',
+              noDisponible: { funcion: 'reprogramar', servicio: 'proveedor' },
+              ofreceDerivar: true,
+            },
+            { intentosFallidos: 0, consultando: false },
+          );
+        })
+        .finally(() => {
+          tareasSegundoPlano.delete(tarea);
+        });
+      tareasSegundoPlano.add(tarea);
+    }
+
+    return { estado: 'consultando', respuesta: mensajeConsultando };
+  }
+
   async function crearConversacion(
     usuarioId: string,
     idiomaCrudo?: string,
@@ -211,6 +343,7 @@ export function crearNucleoConversacion(opciones: OpcionesNucleoConversacion): N
     texto: string,
     acceso: MetadatosAcceso,
   ): Promise<ResultadoTurno> {
+    const inicioTurno = performance.now();
     const conv = await exigirConversacionPropia(conversacionId, auth.sub, acceso);
     const reglasIdioma = reglas.obtener(conv.idioma);
 
@@ -240,6 +373,13 @@ export function crearNucleoConversacion(opciones: OpcionesNucleoConversacion): N
           },
           { intentosFallidos },
         );
+        metricas?.registrar({
+          conversacionId,
+          intencion: 'desconocida',
+          estado: 'respondido',
+          resultado: 'repregunta',
+          duracionMs: performance.now() - inicioTurno,
+        });
         return { estado: 'respondido', mensajeUsuario, respuesta };
       }
 
@@ -263,6 +403,13 @@ export function crearNucleoConversacion(opciones: OpcionesNucleoConversacion): N
       const respuesta = await guardarRespuestaAsistente(conversacionId, 'derivar', respDerivar, {
         intentosFallidos: 0,
       });
+      metricas?.registrar({
+        conversacionId,
+        intencion: 'derivar',
+        estado: 'respondido',
+        resultado: respDerivar.resultado,
+        duracionMs: performance.now() - inicioTurno,
+      });
       return { estado: 'respondido', mensajeUsuario, respuesta };
     }
 
@@ -282,9 +429,33 @@ export function crearNucleoConversacion(opciones: OpcionesNucleoConversacion): N
       historial,
     };
 
+    if (detectada === 'reprogramar') {
+      const { estado, respuesta } = await ejecutarConUmbralLento({
+        conversacionId,
+        promesa: plugin.atender(contexto, texto),
+        textoConsultando: reglasIdioma.textos.consultandoOpciones,
+        textoNoDisponible: reglasIdioma.textos.noDisponibleReprogramar,
+      });
+      metricas?.registrar({
+        conversacionId,
+        intencion: 'reprogramar',
+        estado,
+        resultado: respuesta.resultado ?? 'respondido',
+        duracionMs: performance.now() - inicioTurno,
+      });
+      return { estado, mensajeUsuario, respuesta };
+    }
+
     const respPlugin = await plugin.atender(contexto, texto);
     const respuesta = await guardarRespuestaAsistente(conversacionId, detectada, respPlugin, {
       intentosFallidos: 0,
+    });
+    metricas?.registrar({
+      conversacionId,
+      intencion: detectada,
+      estado: 'respondido',
+      resultado: respPlugin.resultado,
+      duracionMs: performance.now() - inicioTurno,
     });
     return { estado: 'respondido', mensajeUsuario, respuesta };
   }
@@ -295,6 +466,7 @@ export function crearNucleoConversacion(opciones: OpcionesNucleoConversacion): N
     opcionId: string,
     acceso: MetadatosAcceso,
   ): Promise<ResultadoTurno> {
+    const inicioTurno = performance.now();
     const conv = await exigirConversacionPropia(conversacionId, auth.sub, acceso);
     const reglasIdioma = reglas.obtener(conv.idioma);
 
@@ -343,21 +515,32 @@ export function crearNucleoConversacion(opciones: OpcionesNucleoConversacion): N
       historial,
     };
 
-    const respConfirmacion = await pluginReprogramar.confirmar(contexto, opcion);
-    if (
-      respConfirmacion.resultado === 'reprogramado' ||
-      respConfirmacion.resultado === 'opcionRechazada'
-    ) {
-      await repositorio.limpiarOpcionesPendientes(pool, conversacionId);
-    }
-
-    const respuesta = await guardarRespuestaAsistente(
+    const { estado, respuesta } = await ejecutarConUmbralLento({
       conversacionId,
-      'reprogramar',
-      respConfirmacion,
-      { intentosFallidos: 0 },
-    );
-    return { estado: 'respondido', mensajeUsuario, respuesta };
+      promesa: pluginReprogramar.confirmar(contexto, opcion),
+      textoConsultando: reglasIdioma.textos.consultandoAplicar,
+      textoNoDisponible: reglasIdioma.textos.noDisponibleReprogramar,
+      alCompletar: async (resp) => {
+        if (resp.resultado === 'reprogramado' || resp.resultado === 'opcionRechazada') {
+          await repositorio.limpiarOpcionesPendientes(pool, conversacionId);
+        }
+      },
+    });
+
+    metricas?.registrar({
+      conversacionId,
+      intencion: 'reprogramar',
+      estado,
+      resultado: respuesta.resultado ?? 'respondido',
+      duracionMs: performance.now() - inicioTurno,
+    });
+
+    return { estado, mensajeUsuario, respuesta };
+  }
+
+  async function detener(): Promise<void> {
+    detenido = true;
+    await Promise.allSettled([...tareasSegundoPlano]);
   }
 
   return {
@@ -366,5 +549,6 @@ export function crearNucleoConversacion(opciones: OpcionesNucleoConversacion): N
     listarMensajes,
     enviarMensaje,
     confirmarReprogramacion,
+    detener,
   };
 }
