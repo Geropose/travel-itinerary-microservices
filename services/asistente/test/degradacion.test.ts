@@ -5,7 +5,11 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { loggerDePrueba, USUARIO_PRUEBA } from '@trotamundos/comun/pruebas';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { crearClientesAsistente, ErrorDependenciaNoDisponible } from '../src/clientes.ts';
+import {
+  crearClientesAsistente,
+  ErrorDependenciaNoDisponible,
+  ErrorOpcionRechazada,
+} from '../src/clientes.ts';
 import { crearMetricasAsistente } from '../src/metricas.ts';
 
 describe('Métricas de latencia del asistente (QA-12)', () => {
@@ -60,7 +64,11 @@ describe('Clientes HTTP del asistente: timeout de 2 s y clasificación de fallas
 
   beforeAll(async () => {
     servidorLento = createServer((req, res) => {
-      if (req.url?.startsWith('/503-proveedor')) {
+      if (
+        req.url?.startsWith('/503-proveedor') ||
+        req.url === '/interna/agencias/casos' ||
+        req.url === '/interna/reprogramaciones/opciones'
+      ) {
         res.writeHead(503, { 'Content-Type': 'application/problem+json' });
         res.end(
           JSON.stringify({
@@ -68,6 +76,18 @@ describe('Clientes HTTP del asistente: timeout de 2 s y clasificación de fallas
             title: 'Tercero no disponible',
             status: 503,
             requestId: 'req-1',
+          }),
+        );
+        return;
+      }
+      if (req.url === '/interna/reprogramaciones/aplicar') {
+        res.writeHead(409, { 'Content-Type': 'application/problem+json' });
+        res.end(
+          JSON.stringify({
+            type: 'https://trotamundos.example/errores/conflicto',
+            title: 'Opción vencida',
+            status: 409,
+            requestId: 'req-2',
           }),
         );
         return;
@@ -114,5 +134,40 @@ describe('Clientes HTTP del asistente: timeout de 2 s y clasificación de fallas
       name: ErrorDependenciaNoDisponible.name,
       servicio: 'usuarios',
     });
+  });
+
+  it('distingue fallas de terceros (agencia / proveedor) y rechazos 409 en Integraciones', async () => {
+    const clientes = crearClientesAsistente({
+      urlViajes: urlLento,
+      urlUsuarios: urlLento,
+      urlIntegraciones: urlLento,
+      timeoutServiciosMs: 1000,
+    });
+
+    await expect(
+      clientes.integraciones.crearCasoAgencia(
+        {
+          agencia: 'viajes-del-plata',
+          usuarioId: USUARIO_PRUEBA,
+          resumen: 'Resumen',
+          conversacion: [],
+        },
+        'jwt',
+      ),
+    ).rejects.toMatchObject({
+      name: ErrorDependenciaNoDisponible.name,
+      servicio: 'agencia',
+    });
+
+    await expect(
+      clientes.integraciones.pedirOpcionesReprogramacion('aerolinea', 'AR-1', 'jwt'),
+    ).rejects.toMatchObject({
+      name: ErrorDependenciaNoDisponible.name,
+      servicio: 'proveedor',
+    });
+
+    await expect(
+      clientes.integraciones.aplicarReprogramacion('aerolinea', 'AR-1', 'opt-1', 'jwt'),
+    ).rejects.toBeInstanceOf(ErrorOpcionRechazada);
   });
 });

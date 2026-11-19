@@ -1,4 +1,4 @@
-import { crearClienteHttp, ErrorHttp } from '@trotamundos/comun';
+import { crearClienteHttp, ErrorRespuestaHttp } from '@trotamundos/comun';
 
 export type ServicioDependencia = 'viajes' | 'usuarios' | 'integraciones' | 'proveedor' | 'agencia';
 
@@ -111,12 +111,23 @@ export interface OpcionesClientesAsistente {
   fetch?: typeof fetch;
 }
 
+function extraerTipoProblema(cuerpo: unknown): string | undefined {
+  if (typeof cuerpo !== 'object' || cuerpo === null) return undefined;
+  const tipo = (cuerpo as { type?: unknown }).type;
+  return typeof tipo === 'string' ? tipo : undefined;
+}
+
 function clasificarErrorIntegraciones(
   error: unknown,
   servicioExterno: 'proveedor' | 'agencia',
 ): ErrorDependenciaNoDisponible {
-  if (error instanceof ErrorHttp) {
-    if (error.tipo === 'tercero-no-disponible' || error.tipo === 'error-tercero') {
+  if (error instanceof ErrorRespuestaHttp) {
+    const tipo = extraerTipoProblema(error.cuerpo) ?? '';
+    if (
+      tipo.endsWith('/tercero-no-disponible') ||
+      tipo.endsWith('/error-tercero') ||
+      error.status === 502
+    ) {
       return new ErrorDependenciaNoDisponible(servicioExterno, error.message, error);
     }
     return new ErrorDependenciaNoDisponible('integraciones', error.message, error);
@@ -200,7 +211,7 @@ export function crearClientesAsistente(opciones: OpcionesClientesAsistente): Cli
           }>('/interna/reprogramaciones/opciones', { proveedor, numeroReserva }, { token });
           return datos.opciones;
         } catch (error) {
-          if (error instanceof ErrorHttp && error.status === 404) {
+          if (error instanceof ErrorRespuestaHttp && error.status === 404) {
             return [];
           }
           throw clasificarErrorIntegraciones(error, 'proveedor');
@@ -216,7 +227,10 @@ export function crearClientesAsistente(opciones: OpcionesClientesAsistente): Cli
           );
           return datos;
         } catch (error) {
-          if (error instanceof ErrorHttp && (error.status === 409 || error.status === 404)) {
+          if (
+            error instanceof ErrorRespuestaHttp &&
+            (error.status === 409 || error.status === 404)
+          ) {
             throw new ErrorOpcionRechazada(error.message);
           }
           throw clasificarErrorIntegraciones(error, 'proveedor');
