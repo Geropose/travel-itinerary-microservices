@@ -214,7 +214,7 @@ describe.skipIf(!hayDocker)(
         }),
       });
       expect(respWebhooks.status).toBe(200);
-    });
+    }, 120_000);
 
     afterAll(async () => {
       await negocio?.consultador.detener();
@@ -224,7 +224,7 @@ describe.skipIf(!hayDocker)(
       await Promise.all([brokerConsumidor?.cerrar(), brokerIntegraciones?.cerrar()]);
       await pool?.end();
       await Promise.all([rabbit?.detener(), postgres?.detener()]);
-    });
+    }, 60_000);
 
     beforeEach(async () => {
       await negocio.consultador.detener();
