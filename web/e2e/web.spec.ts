@@ -81,7 +81,37 @@ test('login: recuerda la región de la cuenta y la manda en el próximo login', 
 });
 
 test('cambio de idioma: textos y formatos de fecha y moneda', async ({ page }) => {
-  await apiFalsa(page);
+  await apiFalsa(page, {
+    panel: {
+      viajes: [
+        {
+          viajeId: '9b2d6c1e-1f4a-4b7e-8c3d-2a1b0c9d8e7f',
+          usuarioId: '3fa85f64-5717-4562-b3fc-2c963f66afa6',
+          destino: 'Santiago de Chile',
+          inicio: '2026-12-10T12:00:00Z',
+          fin: '2026-12-15T12:00:00Z',
+          estado: 'activo',
+          reservas: [
+            {
+              reservaId: '4c2e8f1a-7b3d-4a5e-9c6f-0d1e2f3a4b5c',
+              viajeId: '9b2d6c1e-1f4a-4b7e-8c3d-2a1b0c9d8e7f',
+              proveedor: 'aerolinea-andina',
+              tipoReserva: 'vuelo',
+              numeroReserva: 'FMT123',
+              inicio: '2026-12-10T12:00:00Z',
+              fin: '2026-12-10T14:00:00Z',
+              origen: 'EZE',
+              destino: 'SCL',
+              estado: 'confirmada',
+              detalle: { precio: 1234.5 },
+              origenCambio: 'correo',
+              actualizadoEn: '2026-11-18T12:00:00Z',
+            },
+          ],
+        },
+      ],
+    },
+  });
   await page.goto('/login');
   await page.getByLabel('Idioma').selectOption('en');
   await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
@@ -92,11 +122,13 @@ test('cambio de idioma: textos y formatos de fecha y moneda', async ({ page }) =
   await page.getByLabel('Password').fill(usuaria.contrasena);
   await page.getByRole('button', { name: 'Sign in' }).click();
   await expect(page.getByRole('heading', { name: 'Panel' })).toBeVisible();
-  await expect(page.getByTestId('ejemplo-formato')).toContainText('1.234,50');
+  await expect(page.getByTestId('precio-reserva-FMT123')).toContainText('1.234,50');
+  await expect(page.getByText('Del 10/12/26 al 15/12/26')).toBeVisible();
 
   await page.getByLabel('Idioma').selectOption('en');
   await expect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible();
-  await expect(page.getByTestId('ejemplo-formato')).toContainText('$1,234.50');
+  await expect(page.getByTestId('precio-reserva-FMT123')).toContainText('$1,234.50');
+  await expect(page.getByText('From 12/10/26 to 12/15/26')).toBeVisible();
   await expect(
     page.getByRole('navigation', { name: 'Main menu' }).getByRole('link', { name: 'Archived' }),
   ).toBeVisible();

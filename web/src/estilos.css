@@ -112,7 +112,8 @@ small {
   gap: 0.9rem;
 }
 
-.formulario label {
+.formulario label,
+.formulario .campo {
   display: grid;
   gap: 0.3rem;
 }
@@ -366,7 +367,204 @@ small {
   margin: 0 0 0.5rem;
 }
 
+.cabecera-seccion {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.cabecera-seccion h1 {
+  margin-bottom: 0.25rem;
+}
+
+.lista-viajes {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 1rem;
+}
+
+.viaje-tarjeta {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.viaje-cabecera {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.viaje-cabecera h2 {
+  font-size: 1.15rem;
+  margin: 0;
+}
+
+.reservas-en-viaje {
+  margin-top: 0;
+}
+
+.reserva-item {
+  align-items: flex-start;
+  border-left: 4px solid var(--borde);
+}
+
+.reserva-confirmada {
+  border-left-color: var(--verde);
+}
+
+.reserva-modificada {
+  border-left-color: #d97706;
+}
+
+.reserva-cancelada {
+  border-left-color: var(--error);
+  background: #fef2f2;
+}
+
+.estado-confirmada,
+.estado-terminada {
+  border-color: var(--verde);
+  background: #ecfdf5;
+  color: var(--verde-oscuro);
+  font-weight: 600;
+}
+
+.estado-modificada,
+.estado-enCurso,
+.estado-pendiente {
+  border-color: #d97706;
+  background: #fffbeb;
+  color: #92400e;
+  font-weight: 600;
+}
+
+.estado-cancelada,
+.estado-fallida {
+  border-color: var(--error);
+  background: #fef2f2;
+  color: var(--error);
+  font-weight: 600;
+}
+
+.reserva-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.6rem;
+}
+
+.reserva-precio {
+  color: var(--verde-oscuro);
+}
+
+.acciones-reserva {
+  display: flex;
+  align-items: center;
+}
+
+.confirmacion-inline {
+  display: grid;
+  gap: 0.4rem;
+}
+
+button.peligro {
+  background: var(--error);
+  color: #fff;
+}
+
+button.peligro-texto {
+  color: var(--error);
+  border-color: var(--error);
+}
+
+.estado-vacio {
+  margin-top: 0.5rem;
+}
+
+.formulario-grid {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.metricas-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
+  gap: 0.6rem;
+  margin: 0.75rem 0;
+}
+
+.metrica {
+  border: 1px solid var(--borde);
+  border-radius: 8px;
+  padding: 0.6rem 0.75rem;
+  display: grid;
+  gap: 0.15rem;
+}
+
+.progreso-analitica {
+  width: 100%;
+  height: 0.75rem;
+  accent-color: var(--verde);
+}
+
+.tabla-contenedor {
+  overflow-x: auto;
+}
+
+.tabla-datos {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+
+.tabla-datos th,
+.tabla-datos td {
+  text-align: left;
+  padding: 0.55rem 0.5rem;
+  border-bottom: 1px solid var(--borde);
+  vertical-align: top;
+}
+
+.tabla-datos th.num,
+.tabla-datos td.num {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.barra-proporcion {
+  height: 6px;
+  background: var(--fondo);
+  border-radius: 999px;
+  margin-top: 0.3rem;
+  overflow: hidden;
+  min-width: 5rem;
+}
+
+.barra-relleno {
+  height: 100%;
+  background: var(--verde);
+  border-radius: 999px;
+}
+
+.barra-relleno-alerta {
+  background: var(--error);
+}
+
+.mes-nombre {
+  text-transform: capitalize;
+}
+
 @media (min-width: 720px) {
+  .formulario-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .aviso {
     order: 2;
   }

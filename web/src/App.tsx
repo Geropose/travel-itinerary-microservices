@@ -7,6 +7,8 @@ import type { Rol } from './api/sesion.ts';
 import { EnConstruccion, SinPermiso } from './componentes.tsx';
 import { tieneRol, useClaims } from './contexto.tsx';
 import { Login, Registro } from './pantallas/Acceso.tsx';
+import { Analitica } from './pantallas/Analitica.tsx';
+import { Archivados } from './pantallas/Archivados.tsx';
 import { Correo } from './pantallas/Correo.tsx';
 import { Layout } from './pantallas/Layout.tsx';
 import { Panel } from './pantallas/Panel.tsx';
@@ -76,7 +78,14 @@ export function App() {
             </ConRol>
           }
         />
-        <Route path="archivados" element={enConstruccion('menu.archivados')} />
+        <Route
+          path="archivados"
+          element={
+            <ConRol rol="usuario">
+              <Archivados />
+            </ConRol>
+          }
+        />
         <Route
           path="correo"
           element={
@@ -114,7 +123,7 @@ export function App() {
           path="analitica"
           element={
             <ConRol rol="analista">
-              <EnConstruccion titulo={t('menu.analitica')} />
+              <Analitica />
             </ConRol>
           }
         />
