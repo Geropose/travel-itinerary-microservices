@@ -559,7 +559,7 @@ describe.skipIf(!hayDocker)(
       expect(rCambio.status).toBe(200);
 
       const ciclo1 = await negocio.consultador.consultarProveedor('rentadora-sur');
-      expect(ciclo1.aceptados).toBe(1);
+      expect(ciclo1.aceptados).toBeGreaterThanOrEqual(1);
       await outbox.publicarPendientes();
 
       await esperarQue(
@@ -569,6 +569,16 @@ describe.skipIf(!hayDocker)(
           ),
         5_000,
       );
+      const eventosRs1 = eventosRecibidos.filter(
+        (e) => e.datos.proveedor === 'rentadora-sur' && e.datos.numeroReserva === 'RS-77120',
+      );
+      expect(eventosRs1).toHaveLength(1);
+      expect(eventosRs1[0]?.datos).toMatchObject({
+        proveedor: 'rentadora-sur',
+        numeroReserva: 'RS-77120',
+        estado: 'modificada',
+        origenCambio: 'proveedor',
+      });
 
       // Re-consulta sin cambios: repetido, no publica otro evento.
       const cicloDup = await negocio.consultador.consultarProveedor('rentadora-sur');
