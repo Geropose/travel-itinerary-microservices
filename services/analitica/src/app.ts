@@ -7,6 +7,7 @@ import {
   type Servidor,
   type Validador,
 } from '@trotamundos/comun';
+import { registrarRutas, type NegocioAnalitica } from './rutas.ts';
 
 export const SERVICIO = 'analitica';
 /** Contrato del servicio: las solicitudes y las respuestas se validan contra él. */
@@ -20,6 +21,8 @@ export interface OpcionesApp {
   logger: Logger;
   /** Validador de Intercepción. Sin él, toda ruta protegida responde 401. */
   validador?: Validador;
+  /** Fachada de negocio de consultas analíticas y ejecuciones Map-Reduce. */
+  negocio?: NegocioAnalitica;
   /** Chequeos de GET /health (base, broker...). */
   chequeos?: Record<string, Chequeo>;
   /** Escuchar SIGTERM para apagar en orden (las pruebas lo apagan). */
@@ -44,8 +47,9 @@ export function crearApp(opciones: OpcionesApp): Servidor {
     servidor.registrarChequeo(nombre, chequeo);
   }
 
-  // Rutas del servicio, una por operación de specs/openapi/analitica.yaml. Por ejemplo:
-  // servidor.app.get('/viajes', async (req, res) => { res.json(...) });
+  if (opciones.negocio) {
+    registrarRutas(servidor, opciones.negocio);
+  }
 
   return servidor;
 }

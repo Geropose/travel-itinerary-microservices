@@ -14,6 +14,7 @@ import {
 import { crearApp, SERVICIO } from './app.ts';
 import { esquemaConfig } from './config.ts';
 import { registrarConsumidorAnonimizador } from './consumidor.ts';
+import { crearNegocioAnalitica } from './rutas.ts';
 
 const config = cargarConfig(esquemaConfig);
 const logger = crearLogger({ servicio: SERVICIO, region: config.REGION, nivel: config.NIVEL_LOG });
@@ -69,11 +70,19 @@ await registrarConsumidorAnonimizador({
   prefetch: config.PREFETCH_CONSUMIDORES,
 });
 
+const negocio = crearNegocioAnalitica({
+  poolAnalitica,
+  urlBaseAnalitica: config.URL_BASE_ANALITICA ?? config.URL_BASE,
+  logger,
+  procesadoresDefecto: config.PROCESADORES_MAPREDUCE_DEFECTO,
+});
+
 const servidor = crearApp({
   region: config.REGION,
   puerto: config.PUERTO,
   logger,
   validador,
+  negocio,
   chequeos: {
     base: () => poolRegional.query('SELECT 1'),
     ...(poolAnalitica !== poolRegional
@@ -83,11 +92,12 @@ const servidor = crearApp({
   },
 });
 
-// Se apagan en orden inverso: primero el broker y al final las bases de datos.
+// Se apagan en orden inverso: primero ejecuciones Map-Reduce, después broker y al final bases.
 servidor.alApagar(() => poolRegional.end());
 if (poolAnalitica !== poolRegional) {
   servidor.alApagar(() => poolAnalitica.end());
 }
 servidor.alApagar(() => broker.cerrar());
+servidor.alApagar(() => negocio.detener());
 
 await servidor.iniciar();

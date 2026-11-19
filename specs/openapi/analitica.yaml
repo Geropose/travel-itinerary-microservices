@@ -468,7 +468,7 @@ components:
     AgrupacionTendencias:
       type: string
       enum: [mes]
-      default: mes
+      description: Período de agrupación de tendencias (por defecto mes).
 
     Procesadores:
       type: integer
@@ -500,7 +500,7 @@ components:
           type: integer
           minimum: 1
           maximum: 100
-          default: 10
+          description: Cantidad máxima de destinos a devolver (por defecto 10).
         procesadores:
           $ref: '#/components/schemas/Procesadores'
 

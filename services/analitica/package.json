@@ -10,7 +10,8 @@
   "scripts": {
     "start": "node src/index.ts",
     "dev": "node --watch src/index.ts",
-    "test": "vitest run --root ../.. services/analitica"
+    "test": "vitest run --root ../.. services/analitica",
+    "generar-historico": "node scripts/generar-historico.ts"
   },
   "dependencies": {
     "@trotamundos/comun": "0.1.0",
