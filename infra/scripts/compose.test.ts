@@ -118,12 +118,17 @@ describe('global.compose.yaml', () => {
       URL_REGION_1: 'http://nginx-region-1:8080',
       URL_REGION_2: 'http://nginx-region-2:8080',
     });
-    // Las bases no se publican: solo el enrutador y los mocks que abre el navegador.
+    // Las bases no se publican: solo el enrutador y los mocks externos (OAuth y /admin).
     const conPuertos = Object.entries(global.services).filter(([, s]) => s.ports);
     expect(conPuertos.map(([nombre]) => nombre)).toEqual([
       'enrutador',
       'mock-gmail',
       'mock-outlook',
+      'mock-aerolinea',
+      'mock-hotel',
+      'mock-rentadora',
+      'mock-agencia',
+      'mock-redsocial',
     ]);
   });
 
@@ -146,6 +151,28 @@ describe('global.compose.yaml', () => {
     expect(redes(outlook)).toEqual(['global']);
     expect(outlook.ports).toEqual(['${PUERTO_MOCK_OUTLOOK:-4002}:4002']);
     expect(outlook.environment?.CLIENT_SECRET).toBe('${SECRETO_CLIENTE_OUTLOOK:?}');
+  });
+
+  it('los 5 mocks de proveedores, agencia y red social (4003–4007) están en la red global', () => {
+    const esperados = [
+      ['mock-aerolinea', 'mocks/aerolinea/Dockerfile', '${PUERTO_MOCK_AEROLINEA:-4003}:4003'],
+      ['mock-hotel', 'mocks/hotel/Dockerfile', '${PUERTO_MOCK_HOTEL:-4004}:4004'],
+      ['mock-rentadora', 'mocks/rentadora/Dockerfile', '${PUERTO_MOCK_RENTADORA:-4005}:4005'],
+      ['mock-agencia', 'mocks/agencia/Dockerfile', '${PUERTO_MOCK_AGENCIA:-4006}:4006'],
+      ['mock-redsocial', 'mocks/redsocial/Dockerfile', '${PUERTO_MOCK_REDSOCIAL:-4007}:4007'],
+    ] as const;
+    for (const [nombre, dockerfile, puerto] of esperados) {
+      const servicio = global.services[nombre] ?? {};
+      expect(servicio.build?.dockerfile).toBe(dockerfile);
+      expect(redes(servicio)).toEqual(['global']);
+      expect(servicio.ports).toEqual([puerto]);
+    }
+    const webhooks = global.services['mock-aerolinea']?.environment?.WEBHOOK_URLS ?? '';
+    for (const region of ['region-1', 'region-2']) {
+      expect(webhooks).toContain(
+        `http://enrutador:8000/${region}/api/integraciones/webhooks/proveedores/aerolinea-andina`,
+      );
+    }
   });
 });
 

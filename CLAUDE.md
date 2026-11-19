@@ -64,8 +64,15 @@ componentes que no estén ahí.
   Graph (`/v1.0/me/messages`) y suscripciones con el handshake de `validationToken`
   (`specs/externos/outlook.md`), con las mismas rutas `/admin` y semillas que Gmail
   (`mocks/outlook/README.md`).
-- `mocks/comun`: lo compartido por los mocks de correo (generador de correos de
-  `specs/externos/correos-reserva.md`, semillas, rutas `/admin` y avisos con reintentos).
+- `mocks/comun`: lo compartido por los mocks externos (generador de correos de
+  `specs/externos/correos-reserva.md`, semillas coherentes entre correo y proveedores, rutas `/admin`,
+  control de demoras/fallas y envío de avisos/webhooks con reintentos).
+- Mocks de proveedores, agencia y red social (`mocks/{aerolinea,hotel,rentadora,agencia,redsocial}`,
+  en `infra/global.compose.yaml`, puertos 4003–4007): aerolínea con webhooks firmados HMAC y ofertas
+  de reprogramación (`specs/externos/aerolinea.md`), hotel y rentadora consultables por polling sin
+  avisos (`hotel.md`, `rentadora.md`), agencia de casos (`agencia.md`) y red social con
+  `Idempotency-Key` (`redsocial.md`). Todos comparten `/admin/comportamiento` (demoras y fallas `503`
+  o `no-responder`) y semillas coherentes con los mocks de correo.
 - `GET /salud/<servicio>` en el nginx de cada región muestra el `/health` de cada servicio.
 - Puerta entre regiones: el nginx de cada región escucha también en 8090 (no publicado). Autenticación
   llega por ahí a `/interna/cuentas/existe` y al JWKS de la otra región (`http://nginx:8090/otra-region/autenticacion`).

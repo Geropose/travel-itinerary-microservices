@@ -1,0 +1,21 @@
+{
+  "name": "@trotamundos/mock-redsocial",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Mock de Red Social: publicación de itinerarios estilo Mastodon con Idempotency-Key (specs/externos/redsocial.md)",
+  "type": "module",
+  "config": {
+    "puerto": 4007
+  },
+  "scripts": {
+    "start": "node src/index.ts",
+    "dev": "node --watch src/index.ts",
+    "test": "vitest run --root ../.. mocks/redsocial"
+  },
+  "dependencies": {
+    "@trotamundos/comun": "0.1.0",
+    "@trotamundos/mocks-comun": "0.1.0",
+    "express": "^5.3.0",
+    "zod": "^4.6.7"
+  }
+}

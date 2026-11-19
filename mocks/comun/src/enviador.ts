@@ -1,6 +1,5 @@
-// Envío de avisos con reintentos, para los avisos push de Gmail (Pub/Sub) y las change notifications
-// de Outlook (Graph): si la URL responde un error o tarda demasiado, el mismo aviso se reintenta más
-// tarde con espera exponencial.
+// Envío de avisos y webhooks con reintentos (Gmail Pub/Sub, Outlook Graph y Aerolínea): si la URL
+// responde un error o tarda demasiado, el mismo aviso se reintenta más tarde con espera exponencial.
 import type { Logger } from '@trotamundos/comun';
 
 export interface OpcionesEnviador {
@@ -12,9 +11,12 @@ export interface OpcionesEnviador {
   tiempoMaximoMs?: number;
 }
 
+export type HeadersAviso =
+  Record<string, string> | ((cuerpoTexto: string) => Record<string, string>);
+
 export interface Enviador {
   /** Manda el aviso (JSON) y lo reintenta si falla. No espera la respuesta. */
-  enviar(url: string, cuerpo: unknown): void;
+  enviar(url: string, cuerpo: unknown, headers?: HeadersAviso): void;
   /** Corre la acción después de `ms` (se cancela con detener). */
   programar(ms: number, accion: () => void): void;
   detener(): void;
@@ -36,12 +38,18 @@ export function crearEnviador({
     temporizadores.add(t);
   }
 
-  async function intentar(url: string, cuerpo: string, intento: number): Promise<void> {
+  async function intentar(
+    url: string,
+    cuerpo: string,
+    headers: HeadersAviso | undefined,
+    intento: number,
+  ): Promise<void> {
     let estado = 0;
     try {
+      const extra = typeof headers === 'function' ? headers(cuerpo) : (headers ?? {});
       const respuesta = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...extra },
         body: cuerpo,
         signal: AbortSignal.timeout(tiempoMaximoMs),
       });
@@ -55,11 +63,11 @@ export function crearEnviador({
       logger.warn({ estado, intentos: intento + 1 }, 'aviso descartado');
       return;
     }
-    programar(esperaMs * 2 ** intento, () => void intentar(url, cuerpo, intento + 1));
+    programar(esperaMs * 2 ** intento, () => void intentar(url, cuerpo, headers, intento + 1));
   }
 
   return {
-    enviar: (url, cuerpo) => void intentar(url, JSON.stringify(cuerpo), 0),
+    enviar: (url, cuerpo, headers) => void intentar(url, JSON.stringify(cuerpo), headers, 0),
     programar,
     detener() {
       for (const t of temporizadores) clearTimeout(t);
