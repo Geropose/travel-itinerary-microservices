@@ -1,14 +1,14 @@
 // Rutas de la aplicación. Registro y login son públicos; el resto necesita sesión. /analitica es
 // solo del rol analista y las demás del rol usuario (el gateway lo vuelve a verificar, ADR-005).
 import type { ReactNode } from 'react';
-import { useTranslation } from 'react-i18next';
 import { Navigate, Route, Routes } from 'react-router';
 import type { Rol } from './api/sesion.ts';
-import { EnConstruccion, SinPermiso } from './componentes.tsx';
+import { SinPermiso } from './componentes.tsx';
 import { tieneRol, useClaims } from './contexto.tsx';
 import { Login, Registro } from './pantallas/Acceso.tsx';
 import { Analitica } from './pantallas/Analitica.tsx';
 import { Archivados } from './pantallas/Archivados.tsx';
+import { Asistente } from './pantallas/ChatAsistente.tsx';
 import { Correo } from './pantallas/Correo.tsx';
 import { Layout } from './pantallas/Layout.tsx';
 import { Panel } from './pantallas/Panel.tsx';
@@ -39,12 +39,6 @@ function ConRol({ rol, children }: { rol: Rol; children: ReactNode }) {
 }
 
 export function App() {
-  const { t } = useTranslation();
-  const enConstruccion = (clave: string) => (
-    <ConRol rol="usuario">
-      <EnConstruccion titulo={t(clave)} />
-    </ConRol>
-  );
   return (
     <Routes>
       <Route
@@ -118,7 +112,14 @@ export function App() {
             </ConRol>
           }
         />
-        <Route path="asistente" element={enConstruccion('menu.asistente')} />
+        <Route
+          path="asistente"
+          element={
+            <ConRol rol="usuario">
+              <Asistente />
+            </ConRol>
+          }
+        />
         <Route
           path="analitica"
           element={

@@ -5,6 +5,7 @@ import { NavLink, Outlet } from 'react-router';
 import { cerrarSesion } from '../acciones.ts';
 import { SelectorIdioma, useEnLinea } from '../componentes.tsx';
 import { tieneRol, useApp, useClaims } from '../contexto.tsx';
+import { BurbujaAsistente } from './ChatAsistente.tsx';
 
 /** Pantallas del menú del usuario (rol usuario). */
 export const MENU_USUARIO = [
@@ -54,6 +55,7 @@ export function Layout() {
       <main className="contenido">
         <Outlet />
       </main>
+      {!esAnalista && <BurbujaAsistente />}
       <nav className="menu" aria-label={t('menu.titulo')}>
         {menu.map(({ ruta, clave }) => (
           <NavLink key={ruta} to={ruta} end>
