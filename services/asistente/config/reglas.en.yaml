@@ -55,6 +55,7 @@ intenciones:
     - check in
     - boarding pass
     - share
+    - sharing
     - designated
     - social network
     - seat
@@ -96,6 +97,7 @@ problemasMenores:
   compartir:
     palabrasClave:
       - share
+      - sharing
       - designated
       - social network
     respuesta: >-

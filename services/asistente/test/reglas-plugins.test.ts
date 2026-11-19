@@ -54,9 +54,10 @@ describe('Reglas externas (config/reglas.{es,en}.yaml) y detección rápida', ()
     expect(detectarIntencionConReglas('Quiero cambiar mi vuelo XKQ7PL para mañana', es)).toBe(
       'reprogramar',
     );
-    expect(detectarIntencionConReglas('¿Cuánto equipaje puedo llevar en cabina?', es)).toBe(
+    expect(detectarIntencionConReglas('¿Cuánto equipaje puedo llevar en mi vuelo?', es)).toBe(
       'problemaMenor',
     );
+    expect(detectarIntencionConReglas('¿Cómo comparto mi itinerario?', es)).toBe('problemaMenor');
     expect(detectarIntencionConReglas('Quiero hablar con una persona de mi agencia', es)).toBe(
       'derivar',
     );
@@ -69,7 +70,10 @@ describe('Reglas externas (config/reglas.{es,en}.yaml) y detección rápida', ()
     expect(detectarIntencionConReglas('I want to reschedule my flight XKQ7PL', en)).toBe(
       'reprogramar',
     );
-    expect(detectarIntencionConReglas('How much baggage can I bring?', en)).toBe('problemaMenor');
+    expect(detectarIntencionConReglas('How much baggage can I bring on my flight?', en)).toBe(
+      'problemaMenor',
+    );
+    expect(detectarIntencionConReglas('How do I share my itinerary?', en)).toBe('problemaMenor');
     expect(detectarIntencionConReglas('Please transfer me to a human agent', en)).toBe('derivar');
     expect(detectarIntencionConReglas('something random here', en)).toBe('desconocida');
     expect(detectarIntencionConReglas('yes please', en, true)).toBe('derivar');

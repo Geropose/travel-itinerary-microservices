@@ -81,7 +81,9 @@ export function interpolarTexto(plantilla: string, valores: Record<string, strin
   return plantilla.replace(/\{([a-zA-Z0-9_]+)\}/g, (_m, clave: string) => valores[clave] ?? '');
 }
 
-const ORDEN_INTENCIONES = ['derivar', 'reprogramar', 'estado', 'problemaMenor'] as const;
+// `problemaMenor` va antes que `estado` porque preguntas como "¿Cómo comparto mi itinerario?"
+// o "¿Cuánto equipaje lleva mi vuelo?" mencionan "itinerario" o "vuelo" junto a la duda específica.
+const ORDEN_INTENCIONES = ['derivar', 'reprogramar', 'problemaMenor', 'estado'] as const;
 
 /** Detecta la intención de un mensaje a partir de las reglas externas (en pocos ms). */
 export function detectarIntencionConReglas(
