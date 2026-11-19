@@ -1,0 +1,47 @@
+# Configuración de integraciones externas (Iteración 3, ADR-003, QA-10).
+# Los secretos nunca van en este archivo: cada entrada indica el nombre de la variable de entorno
+# donde vive su clave o secreto. Para sumar un nuevo proveedor (por ejemplo trenes o autobuses),
+# consultar docs/agregar-proveedor.md.
+
+proveedores:
+  - nombre: aerolinea-andina
+    tipo: aerolinea
+    modo: aviso
+    urlEnv: URL_AEROLINEA
+    urlPorDefecto: http://mock-aerolinea:4003
+    claveApiEnv: CLAVE_API_AEROLINEA
+    secretoWebhookEnv: SECRETO_WEBHOOK_AEROLINEA
+
+  - nombre: hotel-cordillera
+    tipo: hotel
+    modo: consulta
+    urlEnv: URL_HOTEL
+    urlPorDefecto: http://mock-hotel:4004
+    claveApiEnv: CLAVE_API_HOTEL
+    intervaloConsultaSegEnv: INTERVALO_CONSULTA_HOTEL_SEG
+    intervaloConsultaSeg: 120
+
+  - nombre: rentadora-sur
+    tipo: rentadora
+    modo: consulta
+    urlEnv: URL_RENTADORA
+    urlPorDefecto: http://mock-rentadora:4005
+    claveApiEnv: CLAVE_API_RENTADORA
+    intervaloConsultaSegEnv: INTERVALO_CONSULTA_RENTADORA_SEG
+    intervaloConsultaSeg: 120
+
+# Agencias de viaje para derivación de casos (Iteración 7, UC-6; usadas en P2.D3).
+agencias:
+  - nombre: viajes-del-plata
+    tipo: agencia
+    urlEnv: URL_AGENCIA
+    urlPorDefecto: http://mock-agencia:4006
+    claveApiEnv: CLAVE_API_AGENCIA
+
+# Redes sociales para publicación de itinerarios (Iteración 3, QA-7; usadas en P2.D3).
+redes:
+  - nombre: redsocial
+    tipo: redsocial
+    urlEnv: URL_REDSOCIAL
+    urlPorDefecto: http://mock-redsocial:4007
+    tokenEnv: TOKEN_REDSOCIAL
