@@ -9,6 +9,8 @@ export const esquemaConfig = esquemaBase.extend({
   URL_BROKER: z.url(),
   /** Clave pública del JWT: GET /.well-known/jwks.json de Autenticación de la región (ADR-014). */
   URL_JWKS: z.url(),
+  /** Servicio de Usuarios de la región (para consultar perfil en POST /agencias/casos). */
+  URL_USUARIOS: z.url().default('http://usuarios:3002'),
   /** Ruta opcional al archivo YAML de proveedores (por defecto config/proveedores.yaml). */
   RUTA_CONFIG_PROVEEDORES: z.string().min(1).optional(),
   /** Intervalo global de consulta para proveedores sin aviso (segundos; por defecto 120 s). */
