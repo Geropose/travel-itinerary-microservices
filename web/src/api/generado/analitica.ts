@@ -133,7 +133,7 @@ export interface components {
         /** @enum {string} */
         AgrupacionCancelaciones: "proveedor" | "destino";
         /**
-         * @default mes
+         * @description Período de agrupación de tendencias (por defecto mes).
          * @enum {string}
          */
         AgrupacionTendencias: "mes";
@@ -149,8 +149,8 @@ export interface components {
             desde: string;
             /** Format: date */
             hasta: string;
-            /** @default 10 */
-            limite: number;
+            /** @description Cantidad máxima de destinos a devolver (por defecto 10). */
+            limite?: number;
             procesadores?: components["schemas"]["Procesadores"];
         };
         ParametrosCancelaciones: {

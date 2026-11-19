@@ -17,6 +17,8 @@ export const esquemaConfig = esquemaBase.extend({
   CANTIDAD_CONSUMIDORES: z.coerce.number().int().min(1).max(50).default(2),
   /** Mensajes en vuelo por consumidor en RabbitMQ. */
   PREFETCH_CONSUMIDORES: z.coerce.number().int().min(1).max(100).default(10),
+  /** Cantidad por defecto de procesadores Map-Reduce cuando el cliente no la especifica (1..50). */
+  PROCESADORES_MAPREDUCE_DEFECTO: z.coerce.number().int().min(1).max(50).default(4),
 });
 
 export type Config = ReturnType<typeof esquemaConfig.parse>;
