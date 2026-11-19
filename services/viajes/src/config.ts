@@ -1,5 +1,6 @@
 import { esquemaBase } from '@trotamundos/comun';
 import { z } from 'zod';
+import { esCronValido } from './archivado.ts';
 
 /** Variables de entorno de viajes (ver .env.example). Si falta una, el servicio no arranca. */
 export const esquemaConfig = esquemaBase.extend({
@@ -17,6 +18,15 @@ export const esquemaConfig = esquemaBase.extend({
   URL_BROKER: z.url(),
   /** Clave pública del JWT: GET /.well-known/jwks.json de Autenticación de la región (ADR-014). */
   URL_JWKS: z.url(),
+  /** Servicio de Usuarios de la región para validar designados de itinerarios compartidos (ADR-005). */
+  URL_USUARIOS: z.url().default('http://usuarios:3002'),
+  /** Servicio de Integraciones de la región para publicar itinerarios en redes sociales (Iteración 3). */
+  URL_INTEGRACIONES: z.url().default('http://integraciones:3005'),
+  /** Expresión cron (5 campos en UTC) de la tarea nocturna de archivado (Iteración 2, UC-5). */
+  CRON_ARCHIVADO: z
+    .string()
+    .refine(esCronValido, 'CRON_ARCHIVADO debe ser una expresión cron válida de 5 campos.')
+    .default('0 3 * * *'),
   /** Cantidad de consumidores en paralelo por cola de eventos (ADR-009). */
   CANTIDAD_CONSUMIDORES: z.coerce.number().int().min(1).max(100).default(4),
   /** Mensajes en vuelo por consumidor en RabbitMQ. */

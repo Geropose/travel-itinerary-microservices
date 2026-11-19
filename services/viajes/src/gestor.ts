@@ -26,7 +26,8 @@ import {
 } from './modelo.ts';
 import * as repositorio from './repositorio.ts';
 
-export type CodigoErrorViajes = 'solicitud-invalida' | 'prohibido' | 'no-encontrado' | 'conflicto';
+export type CodigoErrorViajes =
+  'solicitud-invalida' | 'prohibido' | 'no-encontrado' | 'conflicto' | 'no-disponible';
 
 export class ErrorNegocioViajes extends Error {
   readonly codigo: CodigoErrorViajes;
