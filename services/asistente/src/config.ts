@@ -20,7 +20,7 @@ export const esquemaConfig = esquemaBase.extend({
   /** Umbral de respuesta lenta de reprogramación antes de responder 202 consultando (ms; QA-12: 3 s). */
   UMBRAL_RESPUESTA_LENTA_MS: z.coerce.number().int().positive().default(3000),
   /** Timeout máximo para llamadas de reprogramación hacia proveedores en segundo plano (ms). */
-  TIMEOUT_PROVEEDOR_MS: z.coerce.number().int().positive().default(10_000),
+  TIMEOUT_PROVEEDOR_MS: z.coerce.number().int().positive().default(15_000),
 });
 
 export type Config = ReturnType<typeof esquemaConfig.parse>;

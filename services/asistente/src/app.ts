@@ -10,6 +10,7 @@ import {
   type Validador,
 } from '@trotamundos/comun';
 import { crearClientesAsistente, type ClientesAsistente } from './clientes.ts';
+import { crearMetricasAsistente, type MetricasAsistente } from './metricas.ts';
 import { crearNucleoConversacion, type NucleoConversacion } from './nucleo.ts';
 import { crearPluginDerivacion } from './plugins/derivacion.ts';
 import { crearPluginEstado } from './plugins/estado.ts';
@@ -51,7 +52,9 @@ export interface OpcionesNegocioAsistente {
   urlUsuarios?: string;
   urlIntegraciones?: string;
   timeoutServiciosMs?: number;
+  umbralRespuestaLentaMs?: number;
   timeoutProveedorMs?: number;
+  metricas?: MetricasAsistente;
   pluginsExtra?: PluginConsulta[];
   registrarRechazo?: RegistrarRechazo;
   ahora?: () => number;
@@ -62,6 +65,7 @@ export interface NegocioAsistente {
   reglas: GestorReglas;
   plugins: RegistroPlugins;
   nucleo: NucleoConversacion;
+  metricas: MetricasAsistente;
 }
 
 /** Construye reglas externas recargables, los 4 plug-ins y el núcleo de conversación. */
@@ -102,17 +106,23 @@ export function crearNegocioAsistente(opciones: OpcionesNegocioAsistente): Negoc
     ...(opciones.pluginsExtra ?? []),
   ]);
 
+  const metricas = opciones.metricas ?? crearMetricasAsistente(opciones.logger);
+
   const nucleo = crearNucleoConversacion({
     pool: opciones.pool,
     region: opciones.region,
     reglas,
     plugins,
     logger: opciones.logger,
+    metricas,
+    ...(opciones.umbralRespuestaLentaMs !== undefined
+      ? { umbralRespuestaLentaMs: opciones.umbralRespuestaLentaMs }
+      : {}),
     ...(opciones.registrarRechazo ? { registrarRechazo: opciones.registrarRechazo } : {}),
     ...(opciones.ahora ? { ahora: opciones.ahora } : {}),
   });
 
-  return { reglas, plugins, nucleo };
+  return { reglas, plugins, nucleo, metricas };
 }
 
 /**

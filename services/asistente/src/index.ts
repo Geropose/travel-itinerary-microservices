@@ -47,6 +47,7 @@ const negocio = crearNegocioAsistente({
   urlUsuarios: config.URL_USUARIOS,
   urlIntegraciones: config.URL_INTEGRACIONES,
   timeoutServiciosMs: config.TIMEOUT_SERVICIOS_MS,
+  umbralRespuestaLentaMs: config.UMBRAL_RESPUESTA_LENTA_MS,
   timeoutProveedorMs: config.TIMEOUT_PROVEEDOR_MS,
   registrarRechazo,
 });
@@ -65,8 +66,9 @@ const servidor = crearApp({
   },
 });
 
-// Se apagan en orden inverso: primero el broker y al final la base.
+// Se apagan en orden inverso: primero las consultas en segundo plano, después broker y base.
 servidor.alApagar(() => pool.end());
 servidor.alApagar(() => broker.cerrar());
+servidor.alApagar(() => negocio.nucleo.detener());
 
 await servidor.iniciar();

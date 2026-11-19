@@ -134,7 +134,7 @@ function clasificarErrorIntegraciones(
  */
 export function crearClientesAsistente(opciones: OpcionesClientesAsistente): ClientesAsistente {
   const timeoutServiciosMs = opciones.timeoutServiciosMs ?? 2000;
-  const timeoutProveedorMs = opciones.timeoutProveedorMs ?? 10_000;
+  const timeoutProveedorMs = opciones.timeoutProveedorMs ?? 15_000;
 
   const httpViajes = crearClienteHttp({
     urlBase: opciones.urlViajes,
