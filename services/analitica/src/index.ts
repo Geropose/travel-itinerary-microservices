@@ -1,27 +1,46 @@
-// Arranque de analitica: lee la configuración, abre las conexiones y empieza a escuchar.
+// Arranque de analitica: lee la configuración, abre las conexiones (base regional + base global
+// de analítica + broker regional), inicia el Anonimizador y empieza a escuchar.
 import { fileURLToPath } from 'node:url';
-import { cargarConfig, crearLogger } from '@trotamundos/comun';
 import {
+  cargarConfig,
   conectarBroker,
+  crearLogger,
   crearPool,
   crearValidador,
-  iniciarPublicadorOutbox,
   migrar,
   MIGRACIONES_EVENTOS,
   registroPorEvento,
 } from '@trotamundos/comun';
 import { crearApp, SERVICIO } from './app.ts';
 import { esquemaConfig } from './config.ts';
+import { registrarConsumidorAnonimizador } from './consumidor.ts';
 
 const config = cargarConfig(esquemaConfig);
 const logger = crearLogger({ servicio: SERVICIO, region: config.REGION, nivel: config.NIVEL_LOG });
 
-const pool = crearPool({ url: config.URL_BASE });
-await migrar(
-  pool,
-  [MIGRACIONES_EVENTOS, fileURLToPath(new URL('../migrations/', import.meta.url))],
-  logger,
-);
+const dirMigraciones = fileURLToPath(new URL('../migrations/', import.meta.url));
+const poolRegional = crearPool({ url: config.URL_BASE });
+poolRegional.on('error', (err) => {
+  logger.warn({ err }, 'error en conexión inactiva de la base regional de analítica');
+});
+
+const poolAnalitica =
+  config.URL_BASE_ANALITICA && config.URL_BASE_ANALITICA !== config.URL_BASE
+    ? crearPool({ url: config.URL_BASE_ANALITICA, maximo: 15 })
+    : poolRegional;
+if (poolAnalitica !== poolRegional) {
+  poolAnalitica.on('error', (err) => {
+    logger.warn({ err }, 'error en conexión inactiva de la base global de analítica');
+  });
+}
+
+if (poolAnalitica === poolRegional) {
+  await migrar(poolRegional, [MIGRACIONES_EVENTOS, dirMigraciones], logger);
+} else {
+  await migrar(poolRegional, [MIGRACIONES_EVENTOS], logger);
+  await migrar(poolAnalitica, [dirMigraciones], logger);
+}
+
 const broker = await conectarBroker({
   url: config.URL_BROKER,
   servicio: SERVICIO,
@@ -34,10 +53,21 @@ const validador = crearValidador({
   logger,
   claves: { [config.REGION]: { url: config.URL_JWKS } },
   registrar: registroPorEvento(broker, logger),
-  // Rutas internas con token de servicio: 'MÉTODO /ruta': { servicios: [...] }
+  // Todas las rutas de specs/openapi/analitica.yaml (salvo /health) exigen el rol analista.
+  rolesPorDefecto: ['analista'],
   reglas: {},
 });
-const outbox = iniciarPublicadorOutbox({ pool, broker, logger });
+
+await registrarConsumidorAnonimizador({
+  broker,
+  poolRegional,
+  poolAnalitica,
+  region: config.REGION,
+  secretoAnalitica: config.SECRETO_ANALITICA,
+  logger,
+  cantidadConsumidores: config.CANTIDAD_CONSUMIDORES,
+  prefetch: config.PREFETCH_CONSUMIDORES,
+});
 
 const servidor = crearApp({
   region: config.REGION,
@@ -45,13 +75,19 @@ const servidor = crearApp({
   logger,
   validador,
   chequeos: {
-    base: () => pool.query('SELECT 1'),
+    base: () => poolRegional.query('SELECT 1'),
+    ...(poolAnalitica !== poolRegional
+      ? { baseAnalitica: () => poolAnalitica.query('SELECT 1') }
+      : {}),
     broker: () => broker.verificar(),
   },
 });
-// Se apagan en orden inverso: primero el outbox, después el broker y al final la base.
-servidor.alApagar(() => pool.end());
+
+// Se apagan en orden inverso: primero el broker y al final las bases de datos.
+servidor.alApagar(() => poolRegional.end());
+if (poolAnalitica !== poolRegional) {
+  servidor.alApagar(() => poolAnalitica.end());
+}
 servidor.alApagar(() => broker.cerrar());
-servidor.alApagar(() => outbox.detener());
 
 await servidor.iniciar();
