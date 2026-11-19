@@ -230,7 +230,7 @@ describe.skipIf(!hayDocker)(
       await negocio.consultador.detener();
       eventosRecibidos.length = 0;
       await pool.query(
-        'TRUNCATE cambios_procesados, estado_reservas_proveedor, cursores_consulta, no_traducidos, eventos_salientes, eventos_procesados',
+        'TRUNCATE cambios_procesados, estado_reservas_proveedor, cursores_consulta, no_traducidos, opciones_reprogramacion_ofrecidas, eventos_salientes, eventos_procesados',
       );
       await Promise.all([
         fetch(`${urlAerolinea}/admin/reiniciar`, { method: 'POST' }),
@@ -612,6 +612,157 @@ describe.skipIf(!hayDocker)(
           e.datos.estado === 'cancelada',
       );
       expect(cancelada?.datos.cambios).toEqual({});
+    });
+
+    it('reprogramación (P2.D3): pide opciones, rechaza opción inventada, aplica opción válida idempotentemente y vuelve a entrar como ReservaActualizada', async () => {
+      const tokenUsuario = await firmarJwt(claves);
+
+      // 1) Proveedor sin reprogramación (hotel) -> 200 con opciones vacío.
+      const respHotel = await fetch(`${urlIntegraciones}/interna/reprogramaciones/opciones`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${tokenUsuario}`,
+        },
+        body: JSON.stringify({ proveedor: 'hotel-cordillera', numeroReserva: 'HC-48213' }),
+      });
+      expect(respHotel.status).toBe(200);
+      expect(await respHotel.json()).toEqual({
+        proveedor: 'hotel-cordillera',
+        numeroReserva: 'HC-48213',
+        opciones: [],
+      });
+
+      // 2) Aplicar una opción inventada (nunca ofrecida) -> 404 sin llamar a la aerolínea.
+      const respInventada = await fetch(`${urlIntegraciones}/interna/reprogramaciones/aplicar`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${tokenUsuario}`,
+        },
+        body: JSON.stringify({
+          proveedor: 'aerolinea-andina',
+          numeroReserva: 'XKQ7PL',
+          opcionId: 'oco_inventada_999',
+        }),
+      });
+      expect(respInventada.status).toBe(404);
+
+      // 3) Pedir opciones reales a Aerolínea Andina.
+      const respOpciones = await fetch(`${urlIntegraciones}/interna/reprogramaciones/opciones`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${tokenUsuario}`,
+        },
+        body: JSON.stringify({ proveedor: 'aerolinea-andina', numeroReserva: 'XKQ7PL' }),
+      });
+      expect(respOpciones.status).toBe(200);
+      const { opciones } = (await respOpciones.json()) as {
+        opciones: Array<{ opcionId: string; inicio: string; fin: string }>;
+      };
+      expect(opciones.length).toBeGreaterThanOrEqual(1);
+      const elegida = opciones[0];
+      if (!elegida) throw new Error('Se esperaba al menos una opción');
+
+      // 4) Aplicar la opción elegida -> 200 aplicada + webhook order.updated -> ReservaActualizada en RabbitMQ.
+      const respAplicar = await fetch(`${urlIntegraciones}/interna/reprogramaciones/aplicar`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${tokenUsuario}`,
+        },
+        body: JSON.stringify({
+          proveedor: 'aerolinea-andina',
+          numeroReserva: 'XKQ7PL',
+          opcionId: elegida.opcionId,
+        }),
+      });
+      expect(respAplicar.status).toBe(200);
+      const resultadoAplicar = (await respAplicar.json()) as {
+        estado: string;
+        aplicadaEn: string;
+        opcionId: string;
+      };
+      expect(resultadoAplicar).toMatchObject({
+        proveedor: 'aerolinea-andina',
+        numeroReserva: 'XKQ7PL',
+        opcionId: elegida.opcionId,
+        estado: 'aplicada',
+      });
+
+      // El mock de aerolínea disparó webhook order.updated -> llega ReservaActualizada a RabbitMQ.
+      await esperarQue(
+        () =>
+          eventosRecibidos.some(
+            (e) =>
+              e.datos.proveedor === 'aerolinea-andina' &&
+              e.datos.numeroReserva === 'XKQ7PL' &&
+              e.datos.estado === 'modificada' &&
+              e.datos.cambios.inicio === elegida.inicio,
+          ),
+        5_000,
+      );
+
+      // 5) Repetir aplicar la misma opción -> 200 idempotente con el mismo aplicadaEn.
+      const respRepetida = await fetch(`${urlIntegraciones}/interna/reprogramaciones/aplicar`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${tokenUsuario}`,
+        },
+        body: JSON.stringify({
+          proveedor: 'aerolinea-andina',
+          numeroReserva: 'XKQ7PL',
+          opcionId: elegida.opcionId,
+        }),
+      });
+      expect(respRepetida.status).toBe(200);
+      expect(await respRepetida.json()).toEqual(resultadoAplicar);
+
+      // 6) Opción vencida -> 409 opcion-vencida.
+      const segunda = opciones[1];
+      if (segunda) {
+        await pool.query(
+          `UPDATE opciones_reprogramacion_ofrecidas
+              SET vence_en = now() - interval '1 minute'
+            WHERE proveedor = $1 AND numero_reserva = $2 AND opcion_id = $3`,
+          ['aerolinea-andina', 'XKQ7PL', segunda.opcionId],
+        );
+        const respVencida = await fetch(`${urlIntegraciones}/interna/reprogramaciones/aplicar`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${tokenUsuario}`,
+          },
+          body: JSON.stringify({
+            proveedor: 'aerolinea-andina',
+            numeroReserva: 'XKQ7PL',
+            opcionId: segunda.opcionId,
+          }),
+        });
+        expect(respVencida.status).toBe(409);
+        expect(await respVencida.json()).toMatchObject({
+          type: 'https://trotamundos.example/errores/opcion-vencida',
+          status: 409,
+        });
+      }
+
+      // 7) Aerolínea caída (503) al pedir opciones -> 503 tercero-no-disponible.
+      await fetch(`${urlAerolinea}/admin/comportamiento`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ modoFalla: '503' }),
+      });
+      const resp503 = await fetch(`${urlIntegraciones}/interna/reprogramaciones/opciones`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${tokenUsuario}`,
+        },
+        body: JSON.stringify({ proveedor: 'aerolinea-andina', numeroReserva: 'XKQ7PL' }),
+      });
+      expect(resp503.status).toBe(503);
     });
   },
 );
