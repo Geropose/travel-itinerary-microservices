@@ -1,16 +1,16 @@
 // Arranque de asistente: lee la configuración, abre las conexiones y empieza a escuchar.
 import { fileURLToPath } from 'node:url';
-import { cargarConfig, crearLogger } from '@trotamundos/comun';
 import {
+  cargarConfig,
   conectarBroker,
+  crearLogger,
   crearPool,
   crearValidador,
-  iniciarPublicadorOutbox,
   migrar,
   MIGRACIONES_EVENTOS,
   registroPorEvento,
 } from '@trotamundos/comun';
-import { crearApp, SERVICIO } from './app.ts';
+import { crearApp, crearNegocioAsistente, SERVICIO } from './app.ts';
 import { esquemaConfig } from './config.ts';
 
 const config = cargarConfig(esquemaConfig);
@@ -28,30 +28,45 @@ const broker = await conectarBroker({
   region: config.REGION,
   logger,
 });
+const registrarRechazo = registroPorEvento(broker, logger);
 const validador = crearValidador({
   servicio: SERVICIO,
   region: config.REGION,
   logger,
   claves: { [config.REGION]: { url: config.URL_JWKS } },
-  registrar: registroPorEvento(broker, logger),
-  // Rutas internas con token de servicio: 'MÉTODO /ruta': { servicios: [...] }
+  registrar: registrarRechazo,
   reglas: {},
 });
-const outbox = iniciarPublicadorOutbox({ pool, broker, logger });
+
+const negocio = crearNegocioAsistente({
+  pool,
+  region: config.REGION,
+  logger,
+  ...(config.DIR_REGLAS ? { dirReglas: config.DIR_REGLAS } : {}),
+  urlViajes: config.URL_VIAJES,
+  urlUsuarios: config.URL_USUARIOS,
+  urlIntegraciones: config.URL_INTEGRACIONES,
+  timeoutServiciosMs: config.TIMEOUT_SERVICIOS_MS,
+  timeoutProveedorMs: config.TIMEOUT_PROVEEDOR_MS,
+  registrarRechazo,
+});
 
 const servidor = crearApp({
   region: config.REGION,
   puerto: config.PUERTO,
   logger,
   validador,
+  nucleo: negocio.nucleo,
   chequeos: {
     base: () => pool.query('SELECT 1'),
-    broker: () => broker.verificar(),
+    reglas: async () => {
+      if (!negocio.reglas.estaCargado()) throw new Error('Reglas de intenciones no cargadas');
+    },
   },
 });
-// Se apagan en orden inverso: primero el outbox, después el broker y al final la base.
+
+// Se apagan en orden inverso: primero el broker y al final la base.
 servidor.alApagar(() => pool.end());
 servidor.alApagar(() => broker.cerrar());
-servidor.alApagar(() => outbox.detener());
 
 await servidor.iniciar();

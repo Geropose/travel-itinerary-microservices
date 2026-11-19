@@ -1,0 +1,154 @@
+# Intent rules and assistant responses in English (Iteration 7, QA-11).
+# Automatically reloaded without restarting the service when modified on disk.
+
+idioma: en
+
+intenciones:
+  derivar:
+    - agency
+    - human
+    - person
+    - agent
+    - representative
+    - support
+    - escalate
+    - transfer
+    - talk to someone
+    - speak to someone
+  reprogramar:
+    - reschedule
+    - rebook
+    - change flight
+    - change my flight
+    - change booking
+    - change reservation
+    - move flight
+    - postpone
+    - earlier flight
+    - later flight
+    - another flight
+  estado:
+    - status
+    - bookings
+    - my bookings
+    - my trips
+    - my flight
+    - my hotel
+    - my car
+    - itinerary
+    - schedule
+    - when does
+    - confirmed
+    - cancelled
+    - canceled
+    - flight
+    - hotel
+    - car
+  problemaMenor:
+    - baggage
+    - luggage
+    - suitcase
+    - bag
+    - carry on
+    - check-in
+    - checkin
+    - check in
+    - boarding pass
+    - share
+    - sharing
+    - designated
+    - social network
+    - seat
+    - help
+
+afirmaciones:
+  - yes
+  - yeah
+  - yep
+  - sure
+  - ok
+  - okay
+  - please
+  - go ahead
+  - transfer me
+  - escalate
+
+problemasMenores:
+  equipaje:
+    palabrasClave:
+      - baggage
+      - luggage
+      - suitcase
+      - bag
+      - carry on
+    respuesta: >-
+      You can bring one cabin bag up to 8 kg. Checked baggage depends on your fare; you can verify
+      it in your booking confirmation email.
+  checkIn:
+    palabrasClave:
+      - check-in
+      - checkin
+      - check in
+      - boarding pass
+      - seat
+    respuesta: >-
+      Online check-in usually opens 24 to 48 hours before departure on your airline website using
+      your booking reference.
+  compartir:
+    palabrasClave:
+      - share
+      - sharing
+      - designated
+      - social network
+    respuesta: >-
+      You can share a trip from its detail page in the dashboard: add a designated person's email
+      for read-only access, or post your itinerary to your social network without booking codes.
+  general:
+    palabrasClave:
+      - help
+    respuesta: >-
+      I can check your booking status, look for flight rescheduling options, answer questions about
+      baggage, check-in or sharing an itinerary, or escalate your case to your travel agency.
+
+textos:
+  saludo: Hi, I'm the Trotamundos assistant. How can I help you?
+  repregunta: >-
+    I didn't understand that. Would you like to check a trip status, reschedule a booking, or talk
+    to your agency?
+  derivacionAutomaticaMotivo: >-
+    The assistant could not understand the user's request after two consecutive attempts.
+  sinReservas: I couldn't find any active bookings in your account right now.
+  reservaNoEncontrada: I couldn't find booking {numeroReserva} among your active trips.
+  estadoEncabezado: 'Here are your active bookings:'
+  estadoUnicaReserva: 'Your {tipo} {numeroReserva} ({ruta}) starts on {inicio} and is {estado}.'
+  pedirNumeroReprogramacion: >-
+    You have multiple active bookings. Please share the booking reference for the flight you want to
+    reschedule (for example: {ejemplo}).
+  reprogramacionSinReservas: I couldn't find any active bookings to reschedule in your account.
+  opcionesEncontradas: The airline offers these options. Which one would you like to confirm?
+  sinOpcionesReprogramacion: >-
+    No rescheduling options are available from the provider for {numeroReserva}. Would you like me
+    to escalate your case to your agency?
+  confirmacionUsuario: 'I confirm option {descripcion}'
+  reprogramadoOk: >-
+    Done, your booking {numeroReserva} has been rescheduled to {inicio}. You will see it updated on
+    your dashboard.
+  opcionRechazada: >-
+    The provider no longer offers that option. Would you like me to escalate your case to your
+    agency?
+  consultandoOpciones: I'm checking with the airline. I'll show the options as soon as they arrive.
+  consultandoAplicar: I'm confirming the change with the airline. I'll let you know as soon as it responds.
+  derivadoOk: >-
+    I forwarded your request and the summary of this conversation to {agencia}. Your case number is
+    {numeroCaso}.
+  sinAgenciaPreferida: >-
+    You haven't selected a preferred travel agency in your profile yet. Please set one in
+    Preferences so I can escalate your case.
+  noDisponibleEstado: >-
+    I can't check your trips right now. Would you like me to escalate your request to your agency?
+  noDisponibleReprogramar: >-
+    I can't reschedule bookings right now. Nothing was changed. Would you like me to escalate your
+    case to your agency?
+  noDisponibleDerivar: >-
+    I couldn't reach your agency right now. Please try again in a few minutes or use the "Contact my
+    agency" button.
