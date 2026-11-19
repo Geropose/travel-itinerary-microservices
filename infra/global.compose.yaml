@@ -8,8 +8,7 @@
 # Las bases de cada región no están en esta red (CONST-6).
 #
 # Todavía no existen, y se agregan acá cuando se programen:
-# - procesadores Map-Reduce (parte de Analítica): fase 3 de Analítica;
-# - mocks de aerolínea, hotel, rentadora, agencia y red social (mocks/*): P2.
+# - procesadores Map-Reduce externos (si se separan del proceso de Analítica).
 
 services:
   # Enrutador global (Iteración 6, ADR-017): el único punto de entrada de la web. Manda cada
@@ -54,6 +53,65 @@ services:
     environment:
       NIVEL_LOG: ${NIVEL_LOG:-info}
       CLIENT_SECRET: ${SECRETO_CLIENTE_OUTLOOK:?}
+
+  # Mock de Aerolínea Andina (specs/externos/aerolinea.md, P2.D1): órdenes, webhooks firmados con
+  # HMAC hacia cada región por el enrutador global y ofertas de reprogramación.
+  mock-aerolinea:
+    image: trotamundos/mock-aerolinea:dev
+    build: { context: .., dockerfile: mocks/aerolinea/Dockerfile }
+    restart: unless-stopped
+    networks: [global]
+    ports: ['${PUERTO_MOCK_AEROLINEA:-4003}:4003']
+    environment:
+      NIVEL_LOG: ${NIVEL_LOG:-info}
+      API_KEY: ${CLAVE_API_AEROLINEA:?}
+      WEBHOOK_SECRET: ${SECRETO_WEBHOOK_AEROLINEA:?}
+      WEBHOOK_URLS: >-
+        http://enrutador:8000/region-1/api/integraciones/webhooks/proveedores/aerolinea-andina,http://enrutador:8000/region-2/api/integraciones/webhooks/proveedores/aerolinea-andina
+
+  # Mock de Hotel Cordillera (specs/externos/hotel.md, P2.D1): sin webhooks, consultado por polling.
+  mock-hotel:
+    image: trotamundos/mock-hotel:dev
+    build: { context: .., dockerfile: mocks/hotel/Dockerfile }
+    restart: unless-stopped
+    networks: [global]
+    ports: ['${PUERTO_MOCK_HOTEL:-4004}:4004']
+    environment:
+      NIVEL_LOG: ${NIVEL_LOG:-info}
+      API_KEY: ${CLAVE_API_HOTEL:?}
+
+  # Mock de Rentadora Sur (specs/externos/rentadora.md, P2.D1): sin webhooks, consultado por polling.
+  mock-rentadora:
+    image: trotamundos/mock-rentadora:dev
+    build: { context: .., dockerfile: mocks/rentadora/Dockerfile }
+    restart: unless-stopped
+    networks: [global]
+    ports: ['${PUERTO_MOCK_RENTADORA:-4005}:4005']
+    environment:
+      NIVEL_LOG: ${NIVEL_LOG:-info}
+      API_KEY: ${CLAVE_API_RENTADORA:?}
+
+  # Mock de Viajes del Plata / agencia (specs/externos/agencia.md, P2.D1): recepción de casos.
+  mock-agencia:
+    image: trotamundos/mock-agencia:dev
+    build: { context: .., dockerfile: mocks/agencia/Dockerfile }
+    restart: unless-stopped
+    networks: [global]
+    ports: ['${PUERTO_MOCK_AGENCIA:-4006}:4006']
+    environment:
+      NIVEL_LOG: ${NIVEL_LOG:-info}
+      API_KEY: ${CLAVE_API_AGENCIA:?}
+
+  # Mock de Red Social (specs/externos/redsocial.md, P2.D1): publicación de itinerarios.
+  mock-redsocial:
+    image: trotamundos/mock-redsocial:dev
+    build: { context: .., dockerfile: mocks/redsocial/Dockerfile }
+    restart: unless-stopped
+    networks: [global]
+    ports: ['${PUERTO_MOCK_REDSOCIAL:-4007}:4007']
+    environment:
+      NIVEL_LOG: ${NIVEL_LOG:-info}
+      API_TOKEN: ${TOKEN_REDSOCIAL:?}
 
   # Base de analítica (Iteración 6): una sola, con el histórico anonimizado de todas las regiones.
   # No guarda datos personales, por eso puede estar en una sola región sin incumplir CONST-6.
