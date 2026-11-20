@@ -29,6 +29,7 @@
     "infra:logs": "node infra/scripts/infra.ts logs",
     "infra:reset": "node infra/scripts/infra.ts reset",
     "infra:escalador": "node infra/scripts/escalador.ts",
+    "semillas": "node scripts/semillas.ts",
     "caos": "vitest run --passWithNoTests --config tests/caos/vitest.config.ts",
     "web": "npm run dev -w web",
     "web:api": "npm run api -w web"

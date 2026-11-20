@@ -12,6 +12,7 @@ export default defineConfig({
       'web/{src,test}/**/*.test.{ts,tsx}',
       'tests/contratos/**/*.test.ts',
       'infra/scripts/**/*.test.ts',
+      'scripts/**/*.test.ts',
     ],
     exclude: ['**/node_modules/**', '**/dist/**', 'tests/{e2e,carga,caos}/**'],
   },
