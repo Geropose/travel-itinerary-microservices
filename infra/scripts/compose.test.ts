@@ -102,6 +102,18 @@ describe('region.compose.yaml', () => {
       ['rabbitmq-3', ['ha']],
     ]);
   });
+
+  it('correo recibe secretos de Gmail/Outlook y servicio, y viajes espera a su read replica', () => {
+    const envCorreo = region.services.correo?.environment ?? {};
+    expect(envCorreo.SECRETO_CLIENTE_GMAIL).toBeDefined();
+    expect(envCorreo.SECRETO_AVISOS_GMAIL).toBeDefined();
+    expect(envCorreo.SECRETO_CLIENTE_OUTLOOK).toBeDefined();
+    expect(envCorreo.SECRETO_SERVICIO_CORREO).toBeDefined();
+    expect(envCorreo.URL_WEB).toBeDefined();
+    expect(textoRegion).toMatch(
+      /postgres-viajes-replica:\s*\{\s*condition:\s*service_healthy\s*\}/,
+    );
+  });
 });
 
 describe('global.compose.yaml', () => {

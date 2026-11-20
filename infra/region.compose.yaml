@@ -32,13 +32,15 @@ x-postgres: &postgres
   image: postgres:17-alpine
   restart: unless-stopped
   networks: [region]
+  # En contenedores de desarrollo (WSL2/VHDX), syncfs evita cientos de fsync() secuenciales al arrancar.
+  command: [postgres, -c, recovery_init_sync_method=syncfs]
   healthcheck:
     # Por TCP: durante la inicialización la imagen solo escucha por socket local.
     test: [CMD-SHELL, pg_isready -h 127.0.0.1 -U admin -d postgres]
     interval: 5s
     timeout: 3s
-    retries: 10
-    start_period: 30s
+    retries: 30
+    start_period: 120s
 
 x-rabbitmq: &rabbitmq
   image: rabbitmq:4-alpine
@@ -152,6 +154,12 @@ services:
       <<: *entorno
       URL_BASE: postgres://correo:${CLAVE_BD_CORREO:?}@postgres:5432/correo
       CLAVE_TOKENS_CORREO: ${CLAVE_TOKENS_CORREO:?}
+      URL_WEB: ${ORIGEN_WEB:-http://localhost:5173}
+      SECRETO_CLIENTE_GMAIL: ${SECRETO_CLIENTE_GMAIL:?}
+      SECRETO_AVISOS_GMAIL: ${SECRETO_AVISOS_GMAIL:?}
+      SECRETO_CLIENTE_OUTLOOK: ${SECRETO_CLIENTE_OUTLOOK:?}
+      SECRETO_SERVICIO_CORREO: ${SECRETO_SERVICIO_CORREO:?}
+      INTERVALO_EXAMINADOR_SEG: ${INTERVALO_EXAMINADOR_SEG:-30}
     labels:
       trotamundos.servicio: correo
 
@@ -162,6 +170,7 @@ services:
     depends_on:
       <<: *dependencias
       postgres-viajes: { condition: service_healthy }
+      postgres-viajes-replica: { condition: service_healthy }
       redis: { condition: service_healthy }
     environment:
       <<: *entorno
@@ -187,6 +196,7 @@ services:
       CLAVE_API_RENTADORA: ${CLAVE_API_RENTADORA:?}
       CLAVE_API_AGENCIA: ${CLAVE_API_AGENCIA:?}
       TOKEN_REDSOCIAL: ${TOKEN_REDSOCIAL:?}
+      INTERVALO_CONSULTA_PROVEEDORES_SEG: ${INTERVALO_CONSULTA_PROVEEDORES_SEG:-120}
     labels:
       trotamundos.servicio: integraciones
 
@@ -221,6 +231,8 @@ services:
     image: trotamundos/monitor:dev
     build: { context: .., dockerfile: services/monitor/Dockerfile }
     restart: unless-stopped
+    depends_on:
+      nginx: { condition: service_healthy }
     networks: [region]
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
@@ -244,6 +256,7 @@ services:
     environment:
       POSTGRES_USER: admin
       POSTGRES_PASSWORD: ${CLAVE_BD_ADMIN:?}
+      POSTGRES_INITDB_ARGS: --no-sync
       BASES: >-
         registro_accesos:gateway autenticacion:autenticacion usuarios:usuarios correo:correo
         integraciones:integraciones analitica:analitica asistente:asistente
@@ -264,10 +277,11 @@ services:
   postgres-viajes:
     <<: *postgres
     # Guarda WAL de sobra por si la réplica se queda atrás un rato.
-    command: [postgres, -c, wal_keep_size=256MB]
+    command: [postgres, -c, wal_keep_size=256MB, -c, recovery_init_sync_method=syncfs]
     environment:
       POSTGRES_USER: admin
       POSTGRES_PASSWORD: ${CLAVE_BD_ADMIN:?}
+      POSTGRES_INITDB_ARGS: --no-sync
       BASES: viajes:viajes
       CLAVE_BD_VIAJES: ${CLAVE_BD_VIAJES:?}
       CLAVE_BD_REPLICACION: ${CLAVE_BD_REPLICACION:?}

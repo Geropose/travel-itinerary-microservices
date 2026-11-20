@@ -10,4 +10,7 @@
 !.env.example
 **/test
 tests
+docs
+infra
+scripts
 *.log

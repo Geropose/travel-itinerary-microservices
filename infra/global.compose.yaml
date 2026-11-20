@@ -119,9 +119,11 @@ services:
     image: postgres:17-alpine
     restart: unless-stopped
     networks: [global]
+    command: [postgres, -c, recovery_init_sync_method=syncfs]
     environment:
       POSTGRES_USER: admin
       POSTGRES_PASSWORD: ${CLAVE_BD_ADMIN:?}
+      POSTGRES_INITDB_ARGS: --no-sync
       BASES: analitica:analitica
       CLAVE_BD_ANALITICA: ${CLAVE_BD_ANALITICA_GLOBAL:?}
     volumes:
@@ -131,8 +133,8 @@ services:
       test: [CMD-SHELL, pg_isready -h 127.0.0.1 -U admin -d postgres]
       interval: 5s
       timeout: 3s
-      retries: 10
-      start_period: 30s
+      retries: 30
+      start_period: 120s
 
 networks:
   global:
