@@ -86,6 +86,71 @@ if (!existsSync('.env')) {
 }
 const env = leerEnv(readFileSync('.env', 'utf8'));
 
+const SERVICIOS_REGIONALES = [
+  'gateway',
+  'autenticacion',
+  'usuarios',
+  'correo',
+  'viajes',
+  'integraciones',
+  'analitica',
+  'asistente',
+  'monitor',
+] as const;
+
+const PUERTOS_MOCKS = [
+  ['mock-gmail', 'PUERTO_MOCK_GMAIL', '4001'],
+  ['mock-outlook', 'PUERTO_MOCK_OUTLOOK', '4002'],
+  ['mock-aerolinea', 'PUERTO_MOCK_AEROLINEA', '4003'],
+  ['mock-hotel', 'PUERTO_MOCK_HOTEL', '4004'],
+  ['mock-rentadora', 'PUERTO_MOCK_RENTADORA', '4005'],
+  ['mock-agencia', 'PUERTO_MOCK_AGENCIA', '4006'],
+  ['mock-redsocial', 'PUERTO_MOCK_REDSOCIAL', '4007'],
+] as const;
+
+async function esperarUrlSana(nombre: string, url: string, timeoutMs = 45_000): Promise<void> {
+  const limite = Date.now() + timeoutMs;
+  let ultimoMotivo = 'sin respuesta';
+  while (Date.now() < limite) {
+    try {
+      const resp = await fetch(url, { signal: AbortSignal.timeout(2000) });
+      if (resp.ok) return;
+      ultimoMotivo = `HTTP ${resp.status}`;
+    } catch (error) {
+      ultimoMotivo = error instanceof Error ? error.message : String(error);
+    }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  salir(`El servicio ${nombre} no respondió sano en ${url} (${ultimoMotivo}).`);
+}
+
+async function verificarSaludCompleta(
+  regiones: Proyecto[],
+  env: Record<string, string>,
+): Promise<void> {
+  process.stdout.write('\n▶ Verificando salud de enrutador, mocks y servicios regionales\n');
+  const puertoEnrutador = env.PUERTO_ENRUTADOR ?? '8000';
+  const chequeos: [string, string][] = [
+    ['enrutador', `http://localhost:${puertoEnrutador}/health`],
+  ];
+  for (const [nombre, variable, defecto] of PUERTOS_MOCKS) {
+    chequeos.push([nombre, `http://localhost:${env[variable] ?? defecto}/health`]);
+  }
+  for (const proyecto of regiones) {
+    const numero = proyecto.slice(1);
+    const puertoNginx = env[`PUERTO_NGINX_REGION_${numero}`] ?? (numero === '1' ? '8081' : '8082');
+    chequeos.push([`${proyecto}/nginx`, `http://localhost:${puertoNginx}/nginx/salud`]);
+    for (const servicio of SERVICIOS_REGIONALES) {
+      chequeos.push([
+        `${proyecto}/${servicio}`,
+        `http://localhost:${puertoNginx}/salud/${servicio}`,
+      ]);
+    }
+  }
+  await Promise.all(chequeos.map(([nombre, url]) => esperarUrlSana(nombre, url)));
+  process.stdout.write(`  ✓ ${chequeos.length}/${chequeos.length} endpoints de salud OK\n`);
+}
+
 switch (comando) {
   case 'levantar': {
     const conHa = opciones.ha ? [] : regionesConHa(opciones.regiones);
@@ -95,6 +160,7 @@ switch (comando) {
       );
     }
     for (const paso of pasosLevantar(opciones, env, conHa)) correr(paso);
+    await verificarSaludCompleta(opciones.regiones, env);
     process.stdout.write(
       `\nListo. Enrutador global: http://localhost:${env.PUERTO_ENRUTADOR ?? '8000'}. nginx: ${opciones.regiones
         .map((p) => `${p} http://localhost:${env[`PUERTO_NGINX_REGION_${p.slice(1)}`] ?? '?'}`)
