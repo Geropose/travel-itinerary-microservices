@@ -5,6 +5,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   CONFIG_E2E,
+  ejecutarArchivadoEnRegion,
   eliminarReservasUsuario,
   esperarCondicion,
   idAleatorio,
@@ -56,6 +57,9 @@ describe.skipIf(!haySistema)('UC-5: Ciclo de vida del viaje (archivado automáti
     expect(alta.status).toBe(201);
     const viajeId = alta.datos?.viajeId ?? '';
     expect(viajeId).toBeTruthy();
+
+    // Ejecutar la tarea de archivado de la región (specs/openapi/viajes.yaml).
+    ejecutarArchivadoEnRegion(sesion.region);
 
     // 2. Comprobar que el viaje terminado aparece en /archivados.
     interface ViajeArchivado {

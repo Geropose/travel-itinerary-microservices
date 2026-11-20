@@ -36,9 +36,7 @@ describe.skipIf(!haySistema)('UC-2: Filtros y whitelist de remitentes', () => {
     await desconectarCuentasCorreo(sesion);
   });
 
-  it(
-    'descarta correos fuera de la whitelist y solo acepta remitentes permitidos',
-    async () => {
+  it('descarta correos fuera de la whitelist y solo acepta remitentes permitidos', async () => {
     // 1. Configurar whitelist activa con solo el remitente seguro.
     const respWhitelist = await pedirJson(`${CONFIG_E2E.urlEnrutador}/api/usuarios/whitelist`, {
       method: 'PUT',

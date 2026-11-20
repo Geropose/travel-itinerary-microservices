@@ -1,6 +1,7 @@
 // Utilidades compartidas para las pruebas de extremo a extremo (tests/e2e).
 // Conecta con el sistema levantado a través del enrutador global (http://localhost:8000)
 // y las rutas /admin de los 7 mocks externos.
+import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -23,6 +24,7 @@ export const CONFIG_E2E = {
   urlMockAgencia: `http://localhost:${val('PUERTO_MOCK_AGENCIA', '4006')}`,
   urlMockRedSocial: `http://localhost:${val('PUERTO_MOCK_REDSOCIAL', '4007')}`,
   contrasenaAnalista: val('CONTRASENA_ANALISTA', ''),
+  secretoServicioPruebas: val('SECRETO_SERVICIO_PRUEBAS', ''),
   contrasenaDefecto: 'Viajar-E2E-2026!',
 };
 
@@ -172,6 +174,21 @@ export async function conectarOAuthMock(params: {
   const { proveedor, emailBuzon, jwt, region } = params;
   const urlMock = proveedor === 'gmail' ? CONFIG_E2E.urlMockGmail : CONFIG_E2E.urlMockOutlook;
 
+  // Asegurar que el buzón exista en el mock antes de aprobar el permiso OAuth.
+  const buzonCodificado = encodeURIComponent(emailBuzon.toLowerCase());
+  const existeBuzon = await fetch(`${urlMock}/admin/buzones/${buzonCodificado}/correos`);
+  if (existeBuzon.status === 404) {
+    await fetch(`${urlMock}/admin/buzones/${buzonCodificado}/correos`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        de: 'bienvenida@sistema.example',
+        asunto: 'Bienvenida',
+        texto: 'Buzón inicializado.',
+      }),
+    });
+  }
+
   const { status, datos, texto } = await pedirJson<{ urlAutorizacion: string }>(
     `${CONFIG_E2E.urlEnrutador}/api/correo/cuentas-correo/${proveedor}/conectar`,
     {
@@ -282,6 +299,40 @@ export async function reiniciarMock(urlMock: string): Promise<void> {
   } catch {
     // Si el mock no tiene reiniciar o no responde, omitir.
   }
+}
+
+/**
+ * Dispara en el acto la tarea de archivado en la región indicada (`POST /interna/archivado/ejecutar`,
+ * specs/openapi/viajes.yaml) usando el token de servicio `pruebas` desde la red interna.
+ */
+export function ejecutarArchivadoEnRegion(region: Region = 'region-1'): void {
+  const proyecto = region === 'region-1' ? 'r1' : 'r2';
+  const codigo = `
+    const rTok = await fetch('http://autenticacion:3001/interna/tokens-servicio', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ servicio: 'pruebas', secreto: process.argv[1] }),
+    });
+    const { token } = await rTok.json();
+    const rArc = await fetch('http://127.0.0.1:3004/interna/archivado/ejecutar', {
+      method: 'POST',
+      headers: { authorization: 'Bearer ' + token },
+    });
+    if (!rArc.ok && rArc.status !== 409) process.exit(1);
+  `;
+  execFileSync(
+    'docker',
+    [
+      'exec',
+      `${proyecto}-viajes-1`,
+      'node',
+      '--input-type=module',
+      '-e',
+      codigo,
+      CONFIG_E2E.secretoServicioPruebas,
+    ],
+    { encoding: 'utf8' },
+  );
 }
 
 /** Espera hasta que una condición asíncrona retorne un valor definido. */

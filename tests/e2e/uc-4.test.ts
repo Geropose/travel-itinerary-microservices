@@ -29,9 +29,7 @@ describe.skipIf(!haySistema)('UC-4: Gestión manual de reservas (alta, edición 
     await eliminarReservasUsuario(sesion);
   });
 
-  it(
-    'permite dar de alta, editar y eliminar una reserva a mano reflejando los cambios en el panel',
-    async () => {
+  it('permite dar de alta, editar y eliminar una reserva a mano reflejando los cambios en el panel', async () => {
     // 1. Alta manual: POST /api/viajes/reservas
     const alta = await pedirJson<{
       reservaId: string;

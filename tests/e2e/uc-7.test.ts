@@ -21,12 +21,10 @@ describe.skipIf(!haySistema)('UC-7: Consultas analíticas pesadas y anonimizaci�
     jwtAnalista = sesion.jwt;
   });
 
-  it(
-    'el analista ejecuta consultas síncronas y Map-Reduce agregadas sin datos personales',
-    async () => {
+  it('el analista ejecuta consultas síncronas y Map-Reduce agregadas sin datos personales', async () => {
     // 1. Consulta síncrona de destinos populares.
-    const respDestinos = await pedirJson<{ destinos: { destino: string; total: number }[] }>(
-      `${CONFIG_E2E.urlEnrutador}/api/analitica/consultas/destinos`,
+    const respDestinos = await pedirJson<{ destinos: { destino: string; reservas: number }[] }>(
+      `${CONFIG_E2E.urlEnrutador}/api/analitica/consultas/destinos?desde=2026-01-01&hasta=2026-12-31`,
       { headers: { Authorization: `Bearer ${jwtAnalista}` } },
     );
     expect(respDestinos.status).toBe(200);
@@ -34,12 +32,15 @@ describe.skipIf(!haySistema)('UC-7: Consultas analíticas pesadas y anonimizaci�
 
     // 2. Consulta síncrona de cancelaciones.
     const respCancelaciones = await pedirJson<{
-      cancelaciones: { proveedor: string; porcentaje: number }[];
-    }>(`${CONFIG_E2E.urlEnrutador}/api/analitica/consultas/cancelaciones`, {
-      headers: { Authorization: `Bearer ${jwtAnalista}` },
-    });
+      grupos: { clave: string; tasaCancelacion: number }[];
+    }>(
+      `${CONFIG_E2E.urlEnrutador}/api/analitica/consultas/cancelaciones?desde=2026-01-01&hasta=2026-12-31&agruparPor=proveedor`,
+      {
+        headers: { Authorization: `Bearer ${jwtAnalista}` },
+      },
+    );
     expect(respCancelaciones.status).toBe(200);
-    expect(respCancelaciones.datos?.cancelaciones).toBeDefined();
+    expect(respCancelaciones.datos?.grupos).toBeDefined();
 
     // 3. Consulta asíncrona pesada de tendencias con Map-Reduce (worker_threads).
     const ejecucion = await pedirJson<{ consultaId: string; estado: string }>(
@@ -59,10 +60,10 @@ describe.skipIf(!haySistema)('UC-7: Consultas analíticas pesadas y anonimizaci�
 
     interface ResultadoEjecucion {
       consultaId: string;
-      estado: 'en-curso' | 'completada' | 'fallida';
+      estado: 'pendiente' | 'enCurso' | 'terminada' | 'fallida';
       resultado?: {
         anio: number;
-        periodos: { mes: number; total: number }[];
+        periodos: { mes: number; reservas: number }[];
       };
     }
 
@@ -72,12 +73,12 @@ describe.skipIf(!haySistema)('UC-7: Consultas analíticas pesadas y anonimizaci�
           `${CONFIG_E2E.urlEnrutador}/api/analitica/consultas/ejecuciones/${consultaId}`,
           { headers: { Authorization: `Bearer ${jwtAnalista}` } },
         );
-        return resp.datos?.estado === 'completada' ? resp.datos : undefined;
+        return resp.datos?.estado === 'terminada' ? resp.datos : undefined;
       },
       20_000,
       1_000,
     );
-    expect(resultadoFinal.estado).toBe('completada');
+    expect(resultadoFinal.estado).toBe('terminada');
     expect(resultadoFinal.resultado?.periodos).toBeDefined();
 
     // 4. Verificación de privacidad: ningún resultado analítico debe contener datos personales

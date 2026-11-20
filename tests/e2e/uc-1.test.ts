@@ -35,9 +35,7 @@ describe.skipIf(!haySistema)('UC-1: Procesamiento de correo (Gmail y Outlook)', 
     await desconectarCuentasCorreo(sesion);
   });
 
-  it(
-    'conecta cuentas de Gmail y Outlook y detecta reservas automáticamente en el panel',
-    async () => {
+  it('conecta cuentas de Gmail y Outlook y detecta reservas automáticamente en el panel', async () => {
     // 1. Conectar buzón de Gmail por OAuth.
     await conectarOAuthMock({
       proveedor: 'gmail',
