@@ -22,7 +22,9 @@ import {
 
 const haySistema = await sistemaDisponible();
 
-describe.skipIf(!haySistema)('UC-8: Asistente virtual (estado, reprogramación, problema menor y derivación)', () => {
+describe.skipIf(!haySistema)(
+  'UC-8: Asistente virtual (estado, reprogramación, problema menor y derivación)',
+  () => {
   let sesion: SesionE2E;
   const buzonGmail = `uc8-gmail-${idAleatorio()}@gmail.example`;
   const codigoVuelo = 'XKQ7PL';
@@ -71,7 +73,10 @@ describe.skipIf(!haySistema)('UC-8: Asistente virtual (estado, reprogramación, 
       de: 'Aerolínea Andina <reservas@aerolinea-andina.example>',
       asunto: `Confirmación de vuelo AN 1234 — ${codigoVuelo}`,
       texto: `Vuelo ${codigoVuelo} confirmado.`,
-      html: `<!doctype html><html><head><script type="application/ld+json">${JSON.stringify(jsonLdVuelo)}</script></head><body>Confirmado</body></html>`,
+      html:
+        '<!doctype html><html><head><script type="application/ld+json">' +
+        JSON.stringify(jsonLdVuelo) +
+        '</script></head><body>Confirmado</body></html>',
     });
 
     // Esperar que la reserva aparezca en el panel de viajes.
@@ -97,7 +102,9 @@ describe.skipIf(!haySistema)('UC-8: Asistente virtual (estado, reprogramación, 
     await reiniciarMock(CONFIG_E2E.urlMockAgencia);
   });
 
-  it('atiende consultas de estado, reprogramación confirmada, problemas menores y derivación a agencia', async () => {
+  it(
+    'atiende estado, reprogramación confirmada, problemas menores y derivación a agencia',
+    async () => {
     // 1. Abrir conversación con el asistente virtual.
     const respConv = await pedirJson<{ conversacionId: string }>(
       `${CONFIG_E2E.urlEnrutador}/api/asistente/conversaciones`,
@@ -186,7 +193,7 @@ describe.skipIf(!haySistema)('UC-8: Asistente virtual (estado, reprogramación, 
     expect(respConfirmacion.status).toBe(200);
     expect(respConfirmacion.datos?.respuesta.resultado).toBe('confirmada');
 
-    // 4. PROBLEMA MENOR: pregunta frecuente sobre equipaje (se resuelve en el asistente sin escalar).
+    // 4. PROBLEMA MENOR: pregunta frecuente sobre equipaje (se resuelve sin escalar).
     const respProblemaMenor = await pedirJson<RespuestaMensaje>(
       `${CONFIG_E2E.urlEnrutador}/api/asistente/conversaciones/${conversacionId}/mensajes`,
       {
@@ -219,9 +226,9 @@ describe.skipIf(!haySistema)('UC-8: Asistente virtual (estado, reprogramación, 
     expect(respDerivacion.datos?.respuesta.texto).toMatch(/agencia|caso|ticket/i);
 
     // Verificar en mock-agencia que el caso derivado fue registrado.
-    const respCasosAdmin = await pedirJson<{ casos: { id: string | number; subject?: string; asunto?: string }[] }>(
-      `${CONFIG_E2E.urlMockAgencia}/admin/casos`,
-    );
+    const respCasosAdmin = await pedirJson<{
+      casos: { id: string | number; subject?: string; asunto?: string }[];
+    }>(`${CONFIG_E2E.urlMockAgencia}/admin/casos`);
     expect(respCasosAdmin.status).toBe(200);
     const casosAgencia = respCasosAdmin.datos?.casos ?? [];
     expect(casosAgencia.length).toBeGreaterThan(0);

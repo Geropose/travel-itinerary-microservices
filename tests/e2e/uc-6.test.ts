@@ -27,7 +27,9 @@ describe.skipIf(!haySistema)('UC-6: Derivación de problemas a la agencia prefer
     await reiniciarMock(CONFIG_E2E.urlMockAgencia);
   });
 
-  it('crea un caso en la agencia preferida del perfil con el resumen y los datos de contacto', async () => {
+  it(
+    'crea un caso en la agencia preferida del perfil con el resumen y los datos de contacto',
+    async () => {
     // 1. Configurar agencia preferida en el perfil de Usuarios.
     const respPerfil = await pedirJson(`${CONFIG_E2E.urlEnrutador}/api/usuarios/perfil`, {
       method: 'PATCH',
@@ -59,7 +61,8 @@ describe.skipIf(!haySistema)('UC-6: Derivación de problemas a la agencia prefer
     const numeroCaso = respCaso.datos?.numeroCaso ?? '';
     expect(numeroCaso).toBeTruthy();
 
-    // 3. Verificar en mock-agencia (GET /admin/casos) que el ticket fue recibido con los datos esperados.
+    // 3. Verificar en mock-agencia (GET /admin/casos) que el ticket
+    // fue recibido con los datos esperados.
     interface CasoAdmin {
       id: string | number;
       asunto?: string;

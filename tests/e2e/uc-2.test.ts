@@ -1,5 +1,5 @@
 // Caso de Uso 2 (UC-2, Iteración 5): Filtros y whitelist de remitentes.
-// Un usuario configura su whitelist; los correos de remitentes fuera de la lista segura se descartan
+// Un usuario configura su whitelist; correos de remitentes fuera de la lista segura se descartan
 // y sus reservas nunca llegan al panel de viajes (ADR-005, ADR-015).
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -36,7 +36,9 @@ describe.skipIf(!haySistema)('UC-2: Filtros y whitelist de remitentes', () => {
     await desconectarCuentasCorreo(sesion);
   });
 
-  it('descarta correos de remitentes fuera de la whitelist y solo acepta remitentes permitidos', async () => {
+  it(
+    'descarta correos fuera de la whitelist y solo acepta remitentes permitidos',
+    async () => {
     // 1. Configurar whitelist activa con solo el remitente seguro.
     const respWhitelist = await pedirJson(`${CONFIG_E2E.urlEnrutador}/api/usuarios/whitelist`, {
       method: 'PUT',
@@ -80,7 +82,10 @@ describe.skipIf(!haySistema)('UC-2: Filtros y whitelist de remitentes', () => {
       de: `Remitente No Autorizado <${remitenteFuera}>`,
       asunto: `Vuelo bloqueado — ${codigoRechazado}`,
       texto: `Vuelo ${codigoRechazado} que no debe procesarse.`,
-      html: `<!doctype html><html><head><script type="application/ld+json">${JSON.stringify(jsonLdBloqueado)}</script></head><body>Bloqueado</body></html>`,
+      html:
+        '<!doctype html><html><head><script type="application/ld+json">' +
+        JSON.stringify(jsonLdBloqueado) +
+        '</script></head><body>Bloqueado</body></html>',
     });
 
     // 4. Inyectar correo con reserva desde el remitente permitido en la whitelist.
@@ -104,7 +109,10 @@ describe.skipIf(!haySistema)('UC-2: Filtros y whitelist de remitentes', () => {
       de: `Aerolínea Andina <${remitenteValido}>`,
       asunto: `Vuelo permitido — ${codigoAceptado}`,
       texto: `Vuelo ${codigoAceptado} confirmado.`,
-      html: `<!doctype html><html><head><script type="application/ld+json">${JSON.stringify(jsonLdPermitido)}</script></head><body>Permitido</body></html>`,
+      html:
+        '<!doctype html><html><head><script type="application/ld+json">' +
+        JSON.stringify(jsonLdPermitido) +
+        '</script></head><body>Permitido</body></html>',
     });
 
     // 5. Esperar a que el correo permitido llegue al panel.

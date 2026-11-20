@@ -35,7 +35,9 @@ describe.skipIf(!haySistema)('UC-1: Procesamiento de correo (Gmail y Outlook)', 
     await desconectarCuentasCorreo(sesion);
   });
 
-  it('conecta cuentas de Gmail y Outlook y detecta reservas automáticamente en el panel', async () => {
+  it(
+    'conecta cuentas de Gmail y Outlook y detecta reservas automáticamente en el panel',
+    async () => {
     // 1. Conectar buzón de Gmail por OAuth.
     await conectarOAuthMock({
       proveedor: 'gmail',
@@ -84,7 +86,10 @@ describe.skipIf(!haySistema)('UC-1: Procesamiento de correo (Gmail y Outlook)', 
       de: 'Aerolínea Andina <reservas@aerolinea-andina.example>',
       asunto: `Confirmación de vuelo AN 2044 — ${codigoVuelo}`,
       texto: `Tu vuelo AN 2044 (${codigoVuelo}) está confirmado.`,
-      html: `<!doctype html><html><head><script type="application/ld+json">${JSON.stringify(jsonLdVuelo)}</script></head><body>Confirmado</body></html>`,
+      html:
+        '<!doctype html><html><head><script type="application/ld+json">' +
+        JSON.stringify(jsonLdVuelo) +
+        '</script></head><body>Confirmado</body></html>',
     });
 
     // 5. Inyectar correo de confirmación de hotel en mock-outlook (genera suscripción push Graph).
@@ -111,10 +116,14 @@ describe.skipIf(!haySistema)('UC-1: Procesamiento de correo (Gmail y Outlook)', 
       de: 'Hotel Cordillera <reservas@hotel-cordillera.example>',
       asunto: `Confirmación de estadía Hotel Cordillera — ${codigoHotel}`,
       texto: `Tu estadía ${codigoHotel} está confirmada.`,
-      html: `<!doctype html><html><head><script type="application/ld+json">${JSON.stringify(jsonLdHotel)}</script></head><body>Confirmado</body></html>`,
+      html:
+        '<!doctype html><html><head><script type="application/ld+json">' +
+        JSON.stringify(jsonLdHotel) +
+        '</script></head><body>Confirmado</body></html>',
     });
 
-    // 6. Esperar a que el procesamiento asíncrono (Correo → RabbitMQ → Viajes) agregue ambas reservas al panel.
+    // 6. Esperar a que el procesamiento asíncrono (Correo → RabbitMQ → Viajes)
+    // agregue ambas reservas al panel.
     interface ReservaPanel {
       numeroReserva: string;
       tipoReserva: string;

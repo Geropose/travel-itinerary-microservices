@@ -21,31 +21,35 @@ import {
 
 const haySistema = await sistemaDisponible();
 
-describe.skipIf(!haySistema)('UC-3: Cambios y cancelaciones desde proveedores (Aerolínea y Hotel)', () => {
-  let sesion: SesionE2E;
-  const buzonGmail = `uc3-gmail-${idAleatorio()}@gmail.example`;
-  const codigoVuelo = `UC3-AIR-${idAleatorio()}`;
-  const codigoHotel = `UC3-HTL-${idAleatorio()}`;
+describe.skipIf(!haySistema)(
+  'UC-3: Cambios y cancelaciones desde proveedores (Aerolínea y Hotel)',
+  () => {
+    let sesion: SesionE2E;
+    const buzonGmail = `uc3-gmail-${idAleatorio()}@gmail.example`;
+    const codigoVuelo = `UC3-AIR-${idAleatorio()}`;
+    const codigoHotel = `UC3-HTL-${idAleatorio()}`;
 
-  beforeAll(async () => {
-    sesion = await registrarYLogin({ nombre: 'Viajero UC3' });
-    await conectarOAuthMock({
-      proveedor: 'gmail',
-      emailBuzon: buzonGmail,
-      jwt: sesion.jwt,
-      region: sesion.region,
+    beforeAll(async () => {
+      sesion = await registrarYLogin({ nombre: 'Viajero UC3' });
+      await conectarOAuthMock({
+        proveedor: 'gmail',
+        emailBuzon: buzonGmail,
+        jwt: sesion.jwt,
+        region: sesion.region,
+      });
     });
-  });
 
-  afterAll(async () => {
-    if (!sesion) return;
-    await eliminarReservasUsuario(sesion);
-    await desconectarCuentasCorreo(sesion);
-    await reiniciarMock(CONFIG_E2E.urlMockAerolinea);
-    await reiniciarMock(CONFIG_E2E.urlMockHotel);
-  });
+    afterAll(async () => {
+      if (!sesion) return;
+      await eliminarReservasUsuario(sesion);
+      await desconectarCuentasCorreo(sesion);
+      await reiniciarMock(CONFIG_E2E.urlMockAerolinea);
+      await reiniciarMock(CONFIG_E2E.urlMockHotel);
+    });
 
-  it('procesa cambio y cancelación de aerolínea (aviso webhook) y de hotel (consulta periódica)', async () => {
+    it(
+      'procesa cambio y cancelación de aerolínea (aviso webhook) y de hotel (consulta periódica)',
+      async () => {
     // 1. Crear la orden de vuelo en mock-aerolínea.
     const respOrdenAir = await fetch(`${CONFIG_E2E.urlMockAerolinea}/admin/ordenes`, {
       method: 'POST',
@@ -86,7 +90,8 @@ describe.skipIf(!haySistema)('UC-3: Cambios y cancelaciones desde proveedores (A
     });
     expect(respReservaHotel.status).toBe(201);
 
-    // 3. Inyectar correos de confirmación inicial para asociar ambas reservas al usuario en Trotamundos.
+    // 3. Inyectar correos de confirmación inicial para asociar
+    // ambas reservas al usuario en Trotamundos.
     const jsonLdVuelo = {
       '@context': 'https://schema.org',
       '@type': 'FlightReservation',
@@ -108,7 +113,10 @@ describe.skipIf(!haySistema)('UC-3: Cambios y cancelaciones desde proveedores (A
       de: 'Aerolínea Andina <reservas@aerolinea-andina.example>',
       asunto: `Vuelo AN 1234 — ${codigoVuelo}`,
       texto: `Confirmación vuelo ${codigoVuelo}`,
-      html: `<!doctype html><html><head><script type="application/ld+json">${JSON.stringify(jsonLdVuelo)}</script></head><body>Confirmado</body></html>`,
+      html:
+        '<!doctype html><html><head><script type="application/ld+json">' +
+        JSON.stringify(jsonLdVuelo) +
+        '</script></head><body>Confirmado</body></html>',
     });
 
     const jsonLdHotel = {
@@ -134,7 +142,10 @@ describe.skipIf(!haySistema)('UC-3: Cambios y cancelaciones desde proveedores (A
       de: 'Hotel Cordillera <reservas@hotel-cordillera.example>',
       asunto: `Estadía ${codigoHotel}`,
       texto: `Confirmación hotel ${codigoHotel}`,
-      html: `<!doctype html><html><head><script type="application/ld+json">${JSON.stringify(jsonLdHotel)}</script></head><body>Confirmado</body></html>`,
+      html:
+        '<!doctype html><html><head><script type="application/ld+json">' +
+        JSON.stringify(jsonLdHotel) +
+        '</script></head><body>Confirmado</body></html>',
     });
 
     // 4. Esperar que ambas reservas aparezcan confirmadas en el panel.

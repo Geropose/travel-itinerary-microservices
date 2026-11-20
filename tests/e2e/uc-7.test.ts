@@ -21,7 +21,9 @@ describe.skipIf(!haySistema)('UC-7: Consultas analíticas pesadas y anonimizaci�
     jwtAnalista = sesion.jwt;
   });
 
-  it('el analista ejecuta consultas síncronas y Map-Reduce obteniendo datos agregados sin información personal', async () => {
+  it(
+    'el analista ejecuta consultas síncronas y Map-Reduce agregadas sin datos personales',
+    async () => {
     // 1. Consulta síncrona de destinos populares.
     const respDestinos = await pedirJson<{ destinos: { destino: string; total: number }[] }>(
       `${CONFIG_E2E.urlEnrutador}/api/analitica/consultas/destinos`,

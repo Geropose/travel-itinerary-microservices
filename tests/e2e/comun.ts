@@ -213,7 +213,8 @@ export async function conectarOAuthMock(params: {
   if (respCallback.status !== 302 || !destinoFinal.includes('resultado=conectada')) {
     const detalle = await respCallback.text();
     throw new Error(
-      `Callback OAuth ${proveedor} falló: HTTP ${respCallback.status} Location=${destinoFinal} ${detalle}`,
+      `Callback OAuth ${proveedor} falló: HTTP ${respCallback.status} Location=${destinoFinal} ` +
+        detalle,
     );
   }
 }
@@ -300,5 +301,7 @@ export async function esperarCondicion<T>(
     }
     await new Promise((r) => setTimeout(r, intervaloMs));
   }
-  throw new Error(`Tiempo de espera agotado (${timeoutMs} ms). Último error: ${String(ultimoError)}`);
+  throw new Error(
+    `Tiempo de espera agotado (${timeoutMs} ms). Último error: ${String(ultimoError)}`,
+  );
 }
