@@ -23,6 +23,11 @@ export async function buscarPorEmail(db: Db, email: string): Promise<Credencial 
   return rows[0];
 }
 
+/** Guarda el idioma nuevo de la cuenta (evento IdiomaActualizado de Usuarios). */
+export async function actualizarIdioma(db: Db, usuarioId: string, idioma: string): Promise<void> {
+  await db.query('UPDATE credenciales SET idioma = $1 WHERE usuario_id = $2', [idioma, usuarioId]);
+}
+
 export async function existeEmail(db: Db, email: string): Promise<boolean> {
   const { rowCount } = await db.query('SELECT 1 FROM credenciales WHERE email = $1', [
     normalizarEmail(email),

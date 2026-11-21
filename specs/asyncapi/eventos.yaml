@@ -75,6 +75,21 @@ channels:
     bindings:
       $ref: '#/components/channelBindings/exchangeEventos'
 
+  IdiomaActualizado:
+    address: IdiomaActualizado
+    title: Idioma de la cuenta actualizado
+    description: >-
+      El usuario cambió su idioma en el perfil (QA-11, Iteración 4). Usuarios es el dueño de las
+      preferencias; Autenticación guarda una copia del idioma en la credencial para ponerla en el claim
+      idioma del JWT, y la mantiene al día con este evento.
+    servers:
+      - $ref: '#/servers/broker'
+    messages:
+      IdiomaActualizado:
+        $ref: '#/components/messages/IdiomaActualizado'
+    bindings:
+      $ref: '#/components/channelBindings/exchangeEventos'
+
   ViajeActualizado:
     address: ViajeActualizado
     title: Reserva de un viaje guardada
@@ -185,6 +200,33 @@ operations:
     x-servicio: correo
     x-componente: Filtro de remitentes
     x-cola: correo.FiltrosActualizados
+
+  publicarIdiomaActualizado:
+    action: send
+    channel:
+      $ref: '#/channels/IdiomaActualizado'
+    summary: Cuentas y preferencias publica el idioma nuevo cada vez que PATCH /perfil lo cambia.
+    messages:
+      - $ref: '#/channels/IdiomaActualizado/messages/IdiomaActualizado'
+    bindings:
+      $ref: '#/components/operationBindings/publicar'
+    x-servicio: usuarios
+    x-componente: Cuentas y preferencias
+
+  consumirIdiomaActualizado:
+    action: receive
+    channel:
+      $ref: '#/channels/IdiomaActualizado'
+    summary: >-
+      Autenticación guarda el idioma en la credencial: el próximo JWT (login o renovación) lo lleva en
+      el claim idioma.
+    messages:
+      - $ref: '#/channels/IdiomaActualizado/messages/IdiomaActualizado'
+    bindings:
+      $ref: '#/components/operationBindings/consumir'
+    x-servicio: autenticacion
+    x-componente: Credenciales
+    x-cola: autenticacion.IdiomaActualizado
 
   publicarViajeActualizado:
     action: send
@@ -322,6 +364,29 @@ components:
           summary: Whitelist con una dirección y un dominio entero.
           payload:
             $ref: '../schemas/ejemplos/FiltrosActualizados.valido.json'
+
+    IdiomaActualizado:
+      name: IdiomaActualizado
+      title: IdiomaActualizado v1
+      contentType: application/json
+      payload:
+        schemaFormat: application/schema+json;version=draft-07
+        schema:
+          allOf:
+            - $ref: '../schemas/Sobre.json'
+            - type: object
+              properties:
+                tipo:
+                  const: IdiomaActualizado
+                version:
+                  const: 1
+                datos:
+                  $ref: '../schemas/IdiomaActualizado.json'
+      examples:
+        - name: pasaAIngles
+          summary: El usuario pasó la cuenta a inglés desde Preferencias.
+          payload:
+            $ref: '../schemas/ejemplos/IdiomaActualizado.valido.json'
 
     ViajeActualizado:
       name: ViajeActualizado

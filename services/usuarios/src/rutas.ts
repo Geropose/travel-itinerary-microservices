@@ -102,8 +102,19 @@ export function registrarRutas(
         { campo: 'agenciaPreferida', mensaje: 'Agencia desconocida.' },
       ]);
     }
-    const perfil = await repositorio.actualizarPerfil(pool, sub, cuerpo);
-    if (!perfil) throw errores.noEncontrado('La cuenta no existe.');
+    const perfil = await enTransaccion(pool, async (db) => {
+      const actualizado = await repositorio.actualizarPerfil(db, sub, cuerpo);
+      if (!actualizado) throw errores.noEncontrado('La cuenta no existe.');
+      // El idioma también va en el claim idioma del JWT: Autenticación guarda su copia con este
+      // evento (specs/asyncapi/eventos.yaml, IdiomaActualizado).
+      if (cuerpo.idioma !== undefined) {
+        await guardarEnOutbox(
+          db,
+          crearEvento('IdiomaActualizado', { usuarioId: sub, idioma: actualizado.idioma }, region),
+        );
+      }
+      return actualizado;
+    });
     res.json(perfil);
   });
 

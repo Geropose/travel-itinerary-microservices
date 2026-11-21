@@ -30,6 +30,7 @@ const EVENTOS = [
   'ReservaDetectada',
   'ReservaActualizada',
   'FiltrosActualizados',
+  'IdiomaActualizado',
   'ViajeActualizado',
   'AccesoRechazado',
 ] as const;
@@ -54,6 +55,8 @@ const MOTIVO_INVALIDO: Record<Evento | 'ViajeAnonimizado', { keyword: string; ru
   ReservaActualizada: { keyword: 'const', ruta: '/datos/origenCambio' },
   // "hotelesdelsur" no es ni una dirección ni un dominio (@dominio).
   FiltrosActualizados: { keyword: 'pattern', ruta: '/datos/remitentesPermitidos/1' },
+  // "fr" no es uno de los idiomas de la aplicación.
+  IdiomaActualizado: { keyword: 'enum', ruta: '/datos/idioma' },
   // "archivado" es un origen de cambio, no un estado de la reserva.
   ViajeActualizado: { keyword: 'enum', ruta: '/datos/estado' },
   // El validador solo rechaza con 401 o 403.
@@ -67,6 +70,7 @@ const TABLA: Record<Evento, { publica: string | string[]; consume: string }> = {
   ReservaDetectada: { publica: 'correo', consume: 'viajes' },
   ReservaActualizada: { publica: 'integraciones', consume: 'viajes' },
   FiltrosActualizados: { publica: 'usuarios', consume: 'correo' },
+  IdiomaActualizado: { publica: 'usuarios', consume: 'autenticacion' },
   ViajeActualizado: { publica: 'viajes', consume: 'analitica' },
   AccesoRechazado: { publica: MICROSERVICIOS, consume: 'gateway' },
 };

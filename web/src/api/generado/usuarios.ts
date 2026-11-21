@@ -39,7 +39,7 @@ export interface paths {
         head?: never;
         /**
          * Cambiar las preferencias del usuario
-         * @description Cambia solo los campos enviados (al menos uno). agenciaPreferida tiene que ser una de las agencias configuradas en Integraciones; null la quita. El cambio de idioma se refleja en el claim idioma del JWT recién cuando se renueva.
+         * @description Cambia solo los campos enviados (al menos uno). agenciaPreferida tiene que ser una de las agencias configuradas en Integraciones; null la quita. Si cambia el idioma, en la misma transacción guarda el evento IdiomaActualizado en el outbox (specs/asyncapi/eventos.yaml, datos según specs/schemas/IdiomaActualizado.json): Autenticación lo guarda en la credencial y el cambio se refleja en el claim idioma del JWT recién cuando se renueva o en el próximo login.
          */
         patch: operations["actualizarPerfil"];
         trace?: never;
