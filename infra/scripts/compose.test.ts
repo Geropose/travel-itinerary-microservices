@@ -94,6 +94,12 @@ describe('region.compose.yaml', () => {
     expect(plantilla).toMatch(/server gateway:3000 resolve max_fails=3 fail_timeout=15s;/);
   });
 
+  it('nginx solo saca al gateway que no contesta, no por un 502 o 503 de un servicio de atrás (ADR-001)', () => {
+    const plantilla = readFileSync(join(raiz, 'infra/nginx/region.conf.template'), 'utf8');
+    const reintentos = plantilla.match(/^\s*proxy_next_upstream\s+([^;]+);/m)?.[1]?.split(/\s+/);
+    expect(reintentos).toEqual(['error', 'timeout']);
+  });
+
   it('RabbitMQ: un nodo por defecto y dos más con el perfil ha', () => {
     const nodos = Object.entries(region.services).filter(([n]) => n.startsWith('rabbitmq'));
     expect(nodos.map(([n, s]) => [n, s.profiles ?? []])).toEqual([
