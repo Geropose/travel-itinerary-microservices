@@ -53,8 +53,11 @@ server {
     proxy_set_header Host $host;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
-    # Si una instancia no contesta, se reintenta en otra.
-    proxy_next_upstream error timeout http_502 http_503;
+    # Si una instancia no contesta (no acepta la conexión o no responde a tiempo), se reintenta en
+    # otra y cuenta como falla de esa instancia. Un 502 o 503 que manda el gateway no cuenta: es
+    # de un servicio de atrás, y sacar al gateway sano dejaría sin servicio a toda la región
+    # (ADR-001, ADR-008; medido en docs/mediciones.md, QA-4).
+    proxy_next_upstream error timeout;
     proxy_connect_timeout 2s;
   }
 }

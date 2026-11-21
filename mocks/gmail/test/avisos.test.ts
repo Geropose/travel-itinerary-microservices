@@ -126,6 +126,25 @@ describe('6. aviso push', () => {
     const ids = r.recibidos.map((a) => (a.cuerpo.message as { messageId: string }).messageId);
     expect(new Set(ids).size).toBe(1);
   });
+
+  it('al volver a arrancar no repite el messageId de un arranque anterior', async () => {
+    const idDe = (i: number) =>
+      BigInt((r.recibidos[i]?.cuerpo.message as { messageId: string }).messageId);
+    await watch();
+    await esperarA(() => r.recibidos.length === 1);
+
+    // El mismo mock, arrancado otra vez un minuto después (como con npm run infra:levantar).
+    await e.cerrar();
+    e = await levantar({
+      suscripciones: new Map([[TOPICO, r.url]]),
+      avisos: { intervaloMs: 200, esperaMs: 20, reintentos: 2 },
+      reloj: () => Date.parse('2026-11-28T12:01:00Z'),
+    });
+    ({ access_token: token } = await conectar(e.url, ANA));
+    await watch();
+    await esperarA(() => r.recibidos.length === 2);
+    expect(idDe(1)).toBeGreaterThan(idDe(0));
+  });
 });
 
 describe('7. límites de uso (QA-7)', () => {
