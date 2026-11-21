@@ -294,3 +294,43 @@ El procesador es el de un núcleo: Viajes es un proceso de Node, así que 100 % 
   * La wiki estima unos 150 ms desde la cache y unos 300 ms desde la read replica, con 100 ms de red. Sin la red, el prototipo responde en milisegundos, también cuando el panel sale de la read replica: a 500/s ninguna solicitud tardó más de 48 ms.
   * La proporción de la cache coincide: 90,5 % medido contra el 90 % estimado.
   * La wiki supone 500 solicitudes por segundo por instancia. Viajes las atiende usando un poco más de medio núcleo, y se satura cerca de 1.000 por segundo: ahí el p95 sube a 89 ms, todavía muy debajo de 800 ms. Pasado ese punto hay que agregar instancias, que es lo que mide QA-5.
+
+## 7. Primer contenido en el móvil (`QA-3`, P4.1)
+
+Mediciones contra el sistema levantado con `npm run infra:levantar` (global, `r1` y `r2`) y la web compilada (`vite build` y `vite preview`), el 21/11/2026.
+
+* **Medida pedida (Análisis inicial, SEI 3):** el usuario abre la aplicación móvil en operación normal y el primer contenido del panel aparece en menos de 1,4 s. La prueba pide medir el First Contentful Paint (FCP) en móvil con Lighthouse.
+* **Qué dice la wiki (Iteración 4, Paso 7):** cumplido. El móvil muestra el último panel guardado apenas se abre la app, sin esperar a la red; se estima 1 s para abrir la app y dibujarlo. Se mide en el prototipo.
+* **Máquina:** la misma de la sección 2. La aplicación móvil es la misma PWA de `web/` (CONST-1). Lighthouse 13.6.0 corre con el `chrome-headless-shell` que instala Playwright (en esta computadora el `chrome.exe` completo no se puede lanzar desde Node; con `CHROME_PATH` se puede usar otro).
+* **Escala de la carga:** la medida es de una persona abriendo la app, no de volumen: 1 usuario con un viaje de 2 reservas y 5 corridas de Lighthouse por caso (se informa la mediana, como recomienda Lighthouse).
+* **Cómo se midió ([`tests/carga/primer-contenido.ts`](../tests/carga/primer-contenido.ts)):** Lighthouse en modo móvil (teléfono de gama media, 4G lenta y procesador 4 veces más lento), solo la categoría de rendimiento, de dos formas:
+  * **Simulado (`simulate`):** lo que Lighthouse informa por defecto. Carga la página rápido y calcula cuánto habría tardado en el teléfono lento.
+  * **Aplicado (`devtools`):** hace lento de verdad el procesador y la red mientras carga.
+  * Casos:
+    * **Primera vez:** navegador vacío, abre `/login` (todavía no hay sesión ni panel guardado).
+    * **App ya usada** (el escenario de QA-3): un perfil donde el usuario ya entró y vio su panel (sesión, service worker de la PWA y panel guardado en IndexedDB). Lighthouse abre `/` sin borrar nada.
+    * **Sin red:** el mismo perfil con el teléfono sin conexión (Playwright, Pixel 7); se mide cuánto tarda en verse el panel.
+* **Comandos reproducibles:**
+  ```bash
+  npm run infra:levantar
+  npm run carga:primer-contenido               # QA-3: compila la web, la sirve en 5173 y corre Lighthouse móvil
+  ```
+
+| Caso | FCP simulado (mediana) | FCP con el teléfono lento aplicado (mediana) | LCP aplicado (mediana) |
+|---|---|---|---|
+| **App ya usada** (`/`, sesión y panel guardados) | 16 ms (ver nota) | **293 ms** (de 257 a 389 ms) | 427 ms |
+| Primera vez (`/login`, sin nada guardado) | 904 ms | **2,1 s** | 2,1 s |
+| Sin red, con el panel guardado | | Panel visible en 109 ms (sin hacer lento el teléfono) | |
+
+* **Nota sobre el FCP simulado de la app ya usada:** con la app ya usada, el service worker sirve la página desde el teléfono y no hay pedidos de red para que Lighthouse simule la 4G lenta: por eso da 16 ms. El número creíble es el aplicado (293 ms).
+
+| Medida pedida | Cómo se midió | Resultado medido | ¿Cumple? |
+|---|---|---|---|
+| El primer contenido del panel aparece en menos de 1,4 s al abrir la app móvil | Lighthouse móvil, app ya usada, teléfono lento aplicado | FCP 293 ms y LCP 427 ms (mediana de 5) | Sí |
+| | Sin red, con el panel guardado | El panel se ve en 109 ms, sin pedir nada a la red | Sí |
+| (Referencia) Primera vez, sin nada guardado | Lighthouse móvil en `/login` | Simulado: 904 ms. Aplicado: 2,1 s | Simulado sí; aplicado no |
+
+* **¿Cumple QA-3?** Sí, en el escenario de la wiki: al abrir la app ya usada, el primer contenido aparece en 293 ms con el teléfono lento y el panel guardado se ve aunque no haya red.
+* **Diferencias con la wiki:**
+  * La wiki estima 1 s para abrir la app y dibujar el panel guardado. Medido: 293 ms de FCP y 427 ms de LCP con el teléfono lento aplicado. La cache local (service worker y panel en IndexedDB) hace lo que dice la Iteración 4.
+  * La wiki no habla de la primera vez que se abre la app, sin nada guardado. Ahí todo depende de bajar la web: un solo archivo de JavaScript de 449 KB (137 KB comprimido, con el CSS). Con la simulación de Lighthouse da 904 ms, pero con la 4G lenta aplicada da 2,1 s, más de 1,4 s. No contradice el Paso 7 (que habla del panel guardado), pero conviene que el grupo lo sepa: si se quiere cumplir también la primera vez, habría que dividir el JavaScript en partes.

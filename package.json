@@ -41,6 +41,7 @@
     "carga:idioma": "node tests/carga/idioma.ts",
     "carga:proveedor-sin-aviso": "node tests/carga/proveedor-sin-aviso.ts",
     "carga:panel": "docker run --rm -i -e URL_API=http://host.docker.internal:8000 grafana/k6:1.0.0 run - < tests/carga/panel.k6.js",
+    "carga:primer-contenido": "npm run build -w web && node tests/carga/primer-contenido.ts",
     "carga:publicacion:demora": "docker run --rm -i -e URL_API=http://host.docker.internal:8000 -e URL_MOCK_RED=http://host.docker.internal:4007 -e DEMORA_RED_MS=1000 grafana/k6:1.0.0 run - < tests/carga/publicacion.k6.js",
     "web": "npm run dev -w web",
     "web:api": "npm run api -w web"
@@ -56,6 +57,7 @@
     "eslint": "^10.15.0",
     "eslint-config-prettier": "^10.1.8",
     "globals": "^17.14.0",
+    "lighthouse": "13.6.0",
     "prettier": "^3.10.1",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.73.0",
