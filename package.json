@@ -32,6 +32,10 @@
     "infra:failover-viajes": "node infra/scripts/failover-viajes.ts",
     "semillas": "node scripts/semillas.ts",
     "caos": "vitest run --passWithNoTests --config tests/caos/vitest.config.ts",
+    "carga:correos": "node tests/carga/primeros-correos.ts",
+    "carga:proveedores": "node tests/carga/proveedores.ts",
+    "carga:publicacion": "docker run --rm -i -e URL_API=http://host.docker.internal:8000 -e URL_MOCK_RED=http://host.docker.internal:4007 grafana/k6:1.0.0 run - < tests/carga/publicacion.k6.js",
+    "carga:publicacion:demora": "docker run --rm -i -e URL_API=http://host.docker.internal:8000 -e URL_MOCK_RED=http://host.docker.internal:4007 -e DEMORA_RED_MS=1000 grafana/k6:1.0.0 run - < tests/carga/publicacion.k6.js",
     "web": "npm run dev -w web",
     "web:api": "npm run api -w web"
   },
