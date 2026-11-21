@@ -213,3 +213,43 @@ Mediciones contra el sistema levantado con `npm run infra:levantar` (global, `r1
   1. **El idioma del perfil no llega al JWT.** `PATCH /perfil` de Usuarios cambia `cuentas.idioma`, pero `credenciales.idioma` de Autenticación (de donde sale el claim `idioma`) queda con el valor del registro, y la web (`web/src/acciones.ts`, `iniciarSesion`) pasa la interfaz a ese idioma al entrar.
   2. **La conversación del asistente no cambia de idioma** al cambiar el de la interfaz (menor).
 * **Protocolo para la prueba con usuarios (pendiente del grupo):** al menos 5 personas que no conozcan la aplicación, con una cuenta de prueba en español y un viaje cargado. Tarea: "Poné la aplicación en inglés y decime la fecha y el precio de tu vuelo". Se mide con cronómetro desde que ven el panel hasta que responden, y se anota como error cada paso equivocado (entrar a una pantalla que no era, elegir otra opción) y cada dato mal leído. Cumple si todas terminan en menos de 2 minutos y los errores son menos del 5 % de los pasos.
+
+## 5. Cambios de un proveedor sin aviso (`QA-1`, P4.1)
+
+Mediciones contra el sistema levantado con `npm run infra:levantar` (global, `r1` y `r2`), el 21/11/2026.
+
+* **Medida pedida (Análisis inicial, SEI 1):** un proveedor (aerolínea, hotel o rentadora) cambia una reserva en operación normal y el cambio se ve en la aplicación dentro de los 5 minutos posteriores.
+* **Qué dice la wiki (Iteración 3, Paso 7):** cumplido. Peor caso: proveedor sin aviso, consultado cada 2 min, más segundos de traducción y broker, más 100 s de cola en un pico (Iteración 2): alrededor de 3 min 50 s.
+* **Máquina:** la misma de la sección 2. La consulta de Integraciones y el camino por el broker no dependen de la cantidad de usuarios, así que un cambio por usuario alcanza para medir el tiempo.
+* **Escala de la carga:** 6 cambios, uno por usuario, en un ciclo de consulta. La cola de 100 s del pico es la tormenta de QA-5 (500.000 actualizaciones): se mide en esa sección con la escala del prototipo, y acá no se suma un número estimado.
+* **Cómo se midió ([`tests/carga/proveedor-sin-aviso.ts`](../tests/carga/proveedor-sin-aviso.ts)):** el proveedor sin aviso es el mock del hotel, que Integraciones consulta cada 2 min (`INTERVALO_CONSULTA_PROVEEDORES_SEG=120`).
+  * **Hora de cada consulta:** una reserva "faro" del mock cambia cada segundo. Así cada consulta de la región 1 encuentra un cambio y actualiza `cursores_consulta.actualizado_en`, que el script lee cada 250 ms (corrigiendo la diferencia entre el reloj de la base y el de la computadora).
+  * **Cambios:** 6 usuarios con una reserva del hotel cada uno (en el mock y en Viajes, con el mismo número). Justo después de una consulta, cada reserva cambia su salida en el mock, una a los 0 s (el peor caso: espera la consulta siguiente entera) y las otras a los 20, 40, 60, 80 y 100 s.
+  * **Se ve en la aplicación:** se pide `GET /api/viajes/panel` de cada usuario cada 250 ms hasta que muestra la salida nueva. La resolución es de unos 0,4 s.
+* **Comandos reproducibles:**
+  ```bash
+  npm run infra:levantar
+  npm run carga:proveedor-sin-aviso            # QA-1: hotel sin aviso, cambio a los 0, 20, 40, 60, 80 y 100 s de una consulta
+  ```
+
+| Cambio después de una consulta | Espera hasta la consulta siguiente | De la consulta al panel | Total hasta verse en el panel |
+|---|---|---|---|
+| 0 s (peor caso) | 2 min 00 s | 0,29 s | **2 min 00 s** |
+| 20 s | 1 min 40 s | 0,29 s | 1 min 40 s |
+| 40 s | 1 min 20 s | 0,29 s | 1 min 20 s |
+| 60 s | 1 min 00 s | 0,29 s | 1 min 00 s |
+| 80 s | 40,0 s | 0,29 s | 40,3 s |
+| 100 s | 19,9 s | 0,29 s | 20,2 s |
+
+Las consultas se vieron cada 2 min 00 s (120,0 s las dos veces).
+
+| Medida pedida | Cómo se midió | Resultado medido | ¿Cumple? |
+|---|---|---|---|
+| El cambio se ve en la aplicación en menos de 5 min | Peor caso sin pico: proveedor sin aviso, cambio justo después de una consulta | 2 min 00 s (2 min de espera a la consulta y 0,3 s de traducción, broker, Viajes y panel) | Sí |
+| | Cambios en otros momentos del ciclo | De 20 s a 1 min 40 s: la espera es lo que falta para la próxima consulta | Sí |
+
+* **¿Cumple QA-1?** Sí en operación normal, que es el ambiente del escenario: el peor caso tarda 2 min 00 s contra los 5 min pedidos. Con pico, el peor caso es este más la cola de la tormenta medida en QA-5.
+* **Diferencias con la wiki:**
+  * La wiki estima "segundos" para traducir y pasar por el broker. Medido: 0,3 s de la consulta al panel (Integraciones, outbox, broker, Viajes y el panel).
+  * La espera a la consulta es justo el intervalo configurado (120 s). El peor caso sin pico es 2 min 00 s, contra los 2 min y segundos que estima la wiki. Los 100 s de cola del pico se comparan en QA-5.
+  * La aerolínea avisa por webhook y no espera ninguna consulta: en QA-6 (sección 2.1) Integraciones procesó 1.000 cambios por webhook en 5,3 s. Por eso el peor caso es el del proveedor sin aviso.
