@@ -15,6 +15,7 @@ import {
 } from '@trotamundos/comun';
 import { crearApp, SERVICIO } from './app.ts';
 import { esquemaConfig } from './config.ts';
+import { consumirAccesosRechazados } from './registro-accesos.ts';
 
 const config = cargarConfig(esquemaConfig);
 const logger = crearLogger({ servicio: SERVICIO, region: config.REGION, nivel: config.NIVEL_LOG });
@@ -53,6 +54,8 @@ const validador = crearValidador({
   reglas: {},
 });
 const outbox = iniciarPublicadorOutbox({ pool, broker, logger });
+// Los rechazos de los microservicios llegan por el broker (Iteración 5, QA-8).
+await consumirAccesosRechazados({ broker, pool, logger });
 
 const servidor = crearApp({
   region: config.REGION,
