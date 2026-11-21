@@ -334,3 +334,94 @@ Mediciones contra el sistema levantado con `npm run infra:levantar` (global, `r1
 * **Diferencias con la wiki:**
   * La wiki estima 1 s para abrir la app y dibujar el panel guardado. Medido: 293 ms de FCP y 427 ms de LCP con el teléfono lento aplicado. La cache local (service worker y panel en IndexedDB) hace lo que dice la Iteración 4.
   * La wiki no habla de la primera vez que se abre la app, sin nada guardado. Ahí todo depende de bajar la web: un solo archivo de JavaScript de 449 KB (137 KB comprimido, con el CSS). Con la simulación de Lighthouse da 904 ms, pero con la 4G lenta aplicada da 2,1 s, más de 1,4 s. No contradice el Paso 7 (que habla del panel guardado), pero conviene que el grupo lo sepa: si se quiere cumplir también la primera vez, habría que dividir el JavaScript en partes.
+
+## 8. Pico de un evento disruptivo y consultas Map-Reduce (`QA-5`, P4.1)
+
+Mediciones contra el sistema levantado con `npm run infra:levantar` (global, `r1` y `r2`), el 21/11/2026.
+
+* **Medida pedida (Análisis inicial, SEI 5):** un evento disruptivo genera un pico masivo de cambios. El sistema agrega instancias solo y sigue atendiendo: el panel sigue cumpliendo QA-2 durante el pico. La prueba pide una tormenta de cancelaciones a escala y la consulta Map-Reduce con distintos números de procesadores.
+* **Qué dice la wiki:**
+  * **Iteración 2, Paso 7:** 50.000 vuelos cancelados generan 500.000 actualizaciones. 50 consumidores a 100 eventos por segundo cada uno (5.000 por segundo) las procesan en 100 s (ADR-009). Sin consumidores en paralelo serían 83 min (ADR-002).
+  * **Iteración 3, Paso 7 (QA-1):** en un pico, a los 2 min de la consulta se suman 100 s de cola: unos 3 min 50 s.
+  * **Iteración 6, Paso 7:** 180 millones de reservas anonimizadas (15 millones de cuentas, 4 reservas por año, 3 años). Un procesador recorre 1 millón por minuto: con 50 procesadores, la consulta completa tarda unos 4 min. Los procesadores se encienden solo para la consulta.
+* **Máquina:** la misma de la sección 2 (Docker Desktop con 16 procesadores lógicos). Todo el sistema, el mock de la aerolínea y el script de medición comparten la misma computadora.
+
+### 8.1 Tormenta de cancelaciones
+
+* **Escala de la carga:** el prototipo tiene una instancia del Servicio de Viajes por región, con 4 consumidores (`CANTIDAD_CONSUMIDORES=4`). La carga proporcional es la de 4 consumidores de 50: **4/50 de 500.000 = 40.000 actualizaciones**. Si cada consumidor hiciera 100 por segundo como estima la wiki, 4 consumidores tardarían 100 s.
+* **Cómo se midió ([`tests/carga/tormenta.ts`](../tests/carga/tormenta.ts)):**
+  * **Reservas:** 4.000 usuarios de la región 1, con 10 reservas de vuelo de la aerolínea cada uno (40.000 en total), con los mismos números que va a cancelar el mock.
+  * **Tormenta:** el mock de la aerolínea cancela 500 vuelos por segundo (`POST /admin/tormenta`) durante 80 s. Cada cancelación sale por webhook firmado a Integraciones de las dos regiones. Con tandas de 2.000 seguidas, el mock no aguantó: quedó sin responder y cortó la conexión. Por eso se manda a ritmo fijo.
+  * **Etapas:** cada segundo se cuenta, en la región 1, cuántas cancelaciones tradujo Integraciones (`cambios_procesados`), cuántos eventos esperan en su outbox (`eventos_salientes` sin enviar) y cuántas reservas quedaron canceladas en Viajes. Cada 5 s se mira la cola `viajes.ReservaActualizada` de RabbitMQ.
+  * **Panel durante el pico:** 200 de esos usuarios piden su panel a 50 por segundo: 15 s antes, durante toda la tormenta y 15 s después.
+  * Al final se borran las 40.000 reservas por la API.
+* **Dos corridas:** con la instalación de siempre (1 instancia de Integraciones por región) y con Integraciones escalado a 4 instancias en la región 1 (`npm run infra:levantar -- --solo r1 --scale integraciones=4`). Esto último es lo que haría el autoescalado con más carga.
+* **Comandos reproducibles:**
+  ```bash
+  npm run infra:levantar
+  npm run carga:tormenta                       # QA-5: 40.000 cancelaciones de la aerolínea a 500 por segundo
+  npm run infra:levantar -- --solo r1 --scale integraciones=4
+  npm run carga:tormenta                       # la misma tormenta con 4 instancias de Integraciones en r1
+  ```
+
+| | 1 instancia de Integraciones | 4 instancias de Integraciones |
+|---|---|---|
+| Cancelaciones que tradujo Integraciones (región 1) | 40.000 de 40.000, en 1 min 21 s | 39.644 de 40.000, en 3 min 16 s |
+| Máximo de eventos esperando en el outbox de Integraciones | 37.493 | 23.171 |
+| Máximo en la cola de RabbitMQ (`viajes.ReservaActualizada`) | 3 | 16 |
+| **Todas las reservas canceladas en Viajes** | **15 min 40 s** | **5 min 35 s** (las 39.644 que llegaron) |
+| Ritmo de Viajes (promedio; mejor tramo de 10 s) | 43 por s; 105 por s | 119 por s; 189 por s |
+| Panel antes de la tormenta (p95) | 11 ms | 9 ms |
+| **Panel durante la tormenta (p95; errores)** | **356 ms; 0** de 24.463 | **1,3 s; 5** de 10.281 |
+| Panel después de la tormenta (p95) | 10 ms | 12 ms |
+
+* **Dónde está el cuello de botella:** en las dos corridas, la cola de RabbitMQ casi no creció (3 y 16 mensajes como máximo): los 4 consumidores de Viajes procesan apenas les llega un evento. Lo que se acumula es el outbox de Integraciones. Integraciones guarda cada cambio traducido en su outbox, y el publicador del outbox (`packages/comun/src/outbox.ts`) manda a RabbitMQ 100 eventos cada 500 ms, uno por uno y esperando la confirmación de cada uno. Con 1 instancia salen unos 43 por segundo. Con 4 instancias, cada una publica su parte a la vez (`FOR UPDATE SKIP LOCKED`) y salen unos 119 por segundo.
+* **Cancelaciones perdidas con 4 instancias:** con las 4 instancias de Integraciones y todo lo demás en la misma computadora, 2.411 webhooks (de las dos regiones) no tuvieron respuesta en 10 s en ninguno de sus 6 intentos. El mock los descartó (`aviso descartado`); 356 eran de la región 1, y esas reservas no quedaron canceladas. Ninguno quedó en `no_traducidos`: no llegaron a Integraciones. Con 1 instancia no se perdió ninguno.
+
+| Medida pedida | Cómo se midió | Resultado medido | ¿Cumple? |
+|---|---|---|---|
+| El pico se procesa en el tiempo estimado (proporcional: 40.000 en 100 s) | Tormenta de 40.000, 1 instancia de Integraciones | 15 min 40 s (unas 9 veces más) | No |
+| | La misma tormenta con 4 instancias de Integraciones | 5 min 35 s, con 356 cancelaciones perdidas | No |
+| QA-2 se sigue cumpliendo durante el pico (p95 menor a 800 ms) | Panel a 50 por s durante la tormenta, 1 instancia | p95 356 ms, 0 errores | Sí |
+| | Lo mismo con 4 instancias de Integraciones | p95 1,3 s, 5 errores | No |
+
+### 8.2 Consulta Map-Reduce con distintos procesadores
+
+* **Escala de la carga:** en una sola computadora no entran los 180 millones de la wiki. Se generaron **5 millones de reservas anonimizadas de 3 años** (2019 a 2021, años vacíos en la base de analítica) con el generador del servicio (`services/analitica/scripts/generar-historico.ts`). En el prototipo los procesadores son hilos del Servicio de Analítica (`worker_threads`) y todos leen la misma base de analítica.
+* **Cómo se midió ([`tests/carga/mapreduce.ts`](../tests/carga/mapreduce.ts)):** como analista, la misma consulta pesada (`POST /api/analitica/consultas/cancelaciones/ejecutar`, cancelaciones por proveedor de los 3 años) con 1, 2, 4, 8 y 16 procesadores, 3 veces cada una, más una corrida de calentamiento que no se cuenta. Se toma la duración que informa el servicio (`duracionMs` de `GET /consultas/ejecuciones/{consultaId}`) y se comprueba que el resultado es el mismo con cualquier cantidad de procesadores. Al final se borra el histórico generado.
+* **Comandos reproducibles:**
+  ```bash
+  npm run infra:levantar
+  npm run carga:mapreduce                      # QA-5: 5 millones de filas, 1, 2, 4, 8 y 16 procesadores
+  ```
+
+| Procesadores | Duración (mediana de 3) | Filas por minuto por procesador | Mejora contra 1 procesador |
+|---|---|---|---|
+| 1 | 538 ms | 558 millones | 1,0 veces |
+| 2 | 313 ms | 479 millones | 1,7 veces |
+| **4** | **271 ms** | 277 millones | **2,0 veces** |
+| 8 | 315 ms | 119 millones | 1,7 veces |
+| 16 | 460 ms | 41 millones | 1,2 veces |
+
+Las 15 corridas dieron el mismo resultado: 5.000.000 de reservas y 316.666 canceladas. Generar las 5 millones de filas tardó 6 min 53 s.
+
+* **Por qué tan rápido y por qué deja de mejorar:** cada procesador le pide a PostgreSQL el conteo agrupado de su bloque de meses, y PostgreSQL lo resuelve con el índice `(inicio, proveedor, estado)` sin pasar las filas una por una al servicio. Hasta 4 procesadores, los pedidos en paralelo ayudan. Con más procesadores todos compiten por la misma base, en la misma computadora, y se pierde más en repartir bloques que lo que se gana.
+
+| Medida pedida | Cómo se midió | Resultado medido | ¿Cumple? |
+|---|---|---|---|
+| La consulta Map-Reduce funciona con distintos números de procesadores | 1, 2, 4, 8 y 16 procesadores sobre 5 millones de filas | Mismo resultado en las 15 corridas; de 271 ms a 538 ms | Sí |
+| Un procesador recorre 1 millón de filas por minuto | 1 procesador sobre 5 millones | 5 millones en 538 ms (unos 558 millones por minuto) | Sí (mucho más rápido) |
+| Más procesadores, menos tiempo | De 1 a 16 procesadores | Mejora hasta 4 (2,0 veces); con 8 y 16 empeora | Solo hasta 4 en una computadora |
+
+### 8.3 Resumen de QA-5
+
+* **¿Cumple QA-5?** En parte.
+  * El sistema sigue atendiendo durante la tormenta: con la instalación de siempre, el panel tiene p95 356 ms y ningún error mientras llegan las 40.000 cancelaciones.
+  * La consulta Map-Reduce da el mismo resultado con cualquier cantidad de procesadores y es mucho más rápida que lo estimado.
+  * **No se cumple el tiempo del pico:** las 40.000 actualizaciones tardan 15 min 40 s, contra los 100 s proporcionales de la wiki. Escalando Integraciones a 4 instancias baja a 5 min 35 s, pero en una sola computadora se pierden cancelaciones y el panel pasa de 800 ms.
+* **Efecto sobre QA-1 (sección 5):** en el pico, un cambio de un proveedor sin aviso pasa por el mismo outbox de Integraciones, detrás de las cancelaciones de la tormenta. Sumando lo medido (no es una medición aparte): 2 min de espera a la consulta, más hasta 15 min 40 s de outbox con 1 instancia, da unos **17 min 40 s**. Con 4 instancias, hasta 5 min 35 s de outbox, unos **7 min 35 s**. Las dos cuentas pasan los 5 min de QA-1; la wiki estima 3 min 50 s.
+* **Diferencias con la wiki:**
+  * La wiki pone el límite en los consumidores de Viajes (100 eventos por segundo cada uno). En el prototipo el límite está antes, en el publicador del outbox de Integraciones (unos 43 eventos por segundo por instancia). Los consumidores de Viajes nunca tuvieron cola. Esto lo tiene que saber el grupo: el publicador del outbox es código compartido (`packages/comun`) y no se cambió en esta medición.
+  * La wiki supone 500.000 actualizaciones con 50 consumidores; acá se midió la proporción de 4 consumidores en una sola computadora. Agregar instancias de Integraciones ayudó (de 43 a 119 por segundo), pero en la misma computadora compiten por el procesador con el resto del sistema. Con esta máquina no se puede saber cuánto mejora con computadoras separadas.
+  * El mock de la aerolínea manda todos los webhooks de una tanda a la vez y deja de reintentar a los 6 intentos. Una aerolínea real puede reintentar por más tiempo; con este mock, 356 cancelaciones de la región 1 se perdieron.
+  * Map-Reduce: la wiki estima 1 millón de filas por minuto por procesador. Medido: 558 millones por minuto con 1 procesador, porque PostgreSQL agrupa con el índice. En una computadora mejora hasta 4 procesadores, no hasta 50.
