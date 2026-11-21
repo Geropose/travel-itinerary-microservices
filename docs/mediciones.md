@@ -253,3 +253,44 @@ Las consultas se vieron cada 2 min 00 s (120,0 s las dos veces).
   * La wiki estima "segundos" para traducir y pasar por el broker. Medido: 0,3 s de la consulta al panel (Integraciones, outbox, broker, Viajes y el panel).
   * La espera a la consulta es justo el intervalo configurado (120 s). El peor caso sin pico es 2 min 00 s, contra los 2 min y segundos que estima la wiki. Los 100 s de cola del pico se comparan en QA-5.
   * La aerolínea avisa por webhook y no espera ninguna consulta: en QA-6 (sección 2.1) Integraciones procesó 1.000 cambios por webhook en 5,3 s. Por eso el peor caso es el del proveedor sin aviso.
+
+## 6. Tiempo de respuesta del panel bajo carga (`QA-2`, P4.1)
+
+Mediciones contra el sistema levantado con `npm run infra:levantar` (global, `r1` y `r2`), el 21/11/2026.
+
+* **Medida pedida (Análisis inicial, SEI 2):** un usuario pide su panel de viajes desde la web en operación normal y el sistema responde en menos de 800 ms. La prueba pide el p95 bajo carga.
+* **Qué dice la wiki (Iteración 4, Paso 7):** cumplido. El panel se responde desde la cache: red 100 ms + gateway 20 ms + cache 10 ms, alrededor de 150 ms. Desde la read replica, alrededor de 300 ms. En el pico, el 90 % sale de la cache (ADR-004, ADR-011).
+* **Máquina:** la misma de la sección 2, con 45 contenedores (3 nodos de RabbitMQ por región). k6 corre en Docker en la misma computadora y le pide al enrutador global por `host.docker.internal:8000`. No hay red entre el usuario y la región: la wiki suma 100 ms de red, acá no están.
+* **Escala de la carga (Análisis inicial, sección 7):** en el pico llegan 20.000 solicitudes por segundo y una instancia de un microservicio atiende 500 por segundo. El prototipo tiene una instancia del Servicio de Viajes por región, así que la carga proporcional es **500 paneles por segundo a la región 1**. Se subió en escalones de 60 s (100, 250, 500 y 1.000 por segundo) para ver también el límite. 500 usuarios de prueba, cada uno con un viaje.
+* **Cómo se midió ([`tests/carga/panel.k6.js`](../tests/carga/panel.k6.js)):** k6 pide `GET /api/viajes/panel` de un usuario al azar a la tasa de cada escalón. Camino: enrutador global, nginx de la región 1, gateway (2 instancias, con el Validador de Intercepción) y Servicio de Viajes (cache Redis o read replica).
+  * **El 10 % sin cache:** a la vez corren cambios manuales de reservas (`PATCH /reservas/{reservaId}`) al 10 % de la tasa del panel. Cada cambio invalida la cache de ese usuario y su próximo panel se lee de la read replica.
+  * **Aciertos de la cache:** contadores `keyspace_hits` y `keyspace_misses` de Redis de la región 1 (`redis-cli INFO stats`), antes y después.
+  * **Uso de procesador:** `docker stats` durante toda la prueba.
+* **Comandos reproducibles:**
+  ```bash
+  npm run infra:levantar
+  npm run carga:panel                          # QA-2: escalones de 100, 250, 500 y 1.000 paneles/s, con cambios al 10 %
+  docker exec r1-redis-1 redis-cli INFO stats  # aciertos (keyspace_hits) y fallos (keyspace_misses) de la cache
+  ```
+
+| Paneles por segundo | Paneles pedidos | Mediana | p95 | p99 | Máximo | Errores | Procesador de Viajes |
+|---|---|---|---|---|---|---|---|
+| 100 | 6.001 | 3,7 ms | 5,6 ms | 7,8 ms | 71 ms | 0 | ~14 % |
+| 250 | 15.001 | 3,4 ms | 5,0 ms | 7,9 ms | 44 ms | 0 | ~28 % |
+| **500 (proporcional)** | 30.001 | 3,7 ms | **6,6 ms** | 12 ms | 48 ms | 2 (0,007 %) | ~54 % |
+| 1.000 (el doble) | 60.000 | 12 ms | 89 ms | 128 ms | 264 ms | 2 (0,003 %) | ~97 % (saturado) |
+
+El procesador es el de un núcleo: Viajes es un proceso de Node, así que 100 % es un núcleo lleno. Las 2 instancias del gateway usan unos 36 % cada una a 500/s y 71 % a 1.000/s.
+
+| Medida pedida | Cómo se midió | Resultado medido | ¿Cumple? |
+|---|---|---|---|
+| p95 del panel menor a 800 ms bajo carga | 500 paneles/s (la carga de una instancia), con el 10 % de cambios | p95 6,6 ms y p99 12 ms (sin la red del usuario: con 100 ms de red, unos 107 ms) | Sí |
+| | 1.000 paneles/s (el doble de una instancia) | p95 89 ms; Viajes al 97 % de un núcleo | Sí |
+| El 90 % sale de la cache | Contadores de Redis durante toda la prueba | 100.416 aciertos y 10.583 fallos: **90,5 %** desde la cache | Sí |
+
+* **¿Cumple QA-2?** Sí. Con la carga proporcional, el p95 es 6,6 ms. Sumando los 100 ms de red que supone la wiki, queda en unos 107 ms, lejos de los 800 ms.
+* **Errores:** los 4 paneles y 20 cambios fallidos de toda la prueba (24 de 123.607 solicitudes) son `dial: i/o timeout`: la conexión de k6 al puerto 8000 de la computadora no llegó a abrirse. Es el reenvío de puertos de Docker Desktop con muchas conexiones nuevas, antes de llegar al enrutador. Ninguna solicitud recibió un error del sistema (ningún 5xx).
+* **Diferencias con la wiki:**
+  * La wiki estima unos 150 ms desde la cache y unos 300 ms desde la read replica, con 100 ms de red. Sin la red, el prototipo responde en milisegundos, también cuando el panel sale de la read replica: a 500/s ninguna solicitud tardó más de 48 ms.
+  * La proporción de la cache coincide: 90,5 % medido contra el 90 % estimado.
+  * La wiki supone 500 solicitudes por segundo por instancia. Viajes las atiende usando un poco más de medio núcleo, y se satura cerca de 1.000 por segundo: ahí el p95 sube a 89 ms, todavía muy debajo de 800 ms. Pasado ese punto hay que agregar instancias, que es lo que mide QA-5.
