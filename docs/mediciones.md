@@ -176,3 +176,40 @@ Mediciones contra el sistema levantado con `npm run infra:levantar` (global, `r1
   * Verificar el JWT tarda 0,16 ms y no 1 ms, y consultar el permiso tarda 1,4 ms y no 20 ms. La wiki estima tiempos con la red entre servidores; acá todo está en una máquina. Aun sumando la red de producción, queda muy lejos de los 200 ms.
   * El registro de los rechazos de los servicios tarda más que el del gateway (p95 15 ms contra 5 ms) porque pasa por el broker. Coincide con la wiki: es asíncrono y tarda milisegundos.
   * En la primera medición de QA-8 (sección 2.4) los `403` de los servicios no se registraban. Con el consumidor de `AccesoRechazado` del gateway (PR #41) ahora sí: 100 de 100.
+
+## 4. Idioma y formatos (`QA-11`, P4.1)
+
+Mediciones contra el sistema levantado con `npm run infra:levantar` (global, `r1` y `r2`) y la web de `npm run web`, el 21/11/2026.
+
+* **Medida pedida (Análisis inicial, escenario de QA-11):** un usuario quiere hacer una tarea habitual con la interfaz en su idioma y con sus formatos; la interfaz se presenta así y el usuario completa la tarea sin ayuda, en menos de 2 minutos y con menos de 5 % de errores.
+* **Qué dice la wiki (Iteración 4, Paso 7):** cumplido en diseño. Los textos y formatos están en archivos de idioma separados del código y el sistema corre en dos regiones. La medida se toma en el prototipo con pruebas de usuarios. La Iteración 7 agrega las reglas del asistente por idioma (`reglas.<idioma>.yaml`).
+* **Máquina:** la misma de la sección 2. La web corre con Vite en la misma computadora y el navegador es Chromium (Playwright), sin demora de red.
+* **Escala de la carga:** la medida es de una persona haciendo una tarea, no de volumen: un usuario, dos idiomas (español `es-AR` e inglés `en-US`, los de `web/src/idiomas/`), 7 pantallas por idioma y 3 corridas.
+* **Qué no se pudo medir:** el tiempo y los errores de personas reales. Eso lo tiene que hacer el grupo con usuarios (protocolo al final de la sección). Lo de acá mide lo que no depende de las personas: cuántos pasos lleva la tarea, si la interfaz cambia entera y si los formatos son los del idioma.
+* **Cómo se midió ([`tests/carga/idioma.ts`](../tests/carga/idioma.ts)):** el script registra un usuario en español con un viaje de dos reservas (un vuelo en pesos y un hotel en dólares) y entra por la web con un navegador en español.
+  * **Textos:** recorre las 7 pantallas (panel, detalle del viaje, archivados, correo, whitelist, preferencias y asistente) en cada idioma y busca líneas con textos del otro idioma (sacados de `es.json` y `en.json`) o con letras del español (á, é, í, ó, ú, ñ, ¿, ¡) en la interfaz en inglés. No cuentan el selector de idioma (cada idioma aparece con su propio nombre) ni el email del usuario.
+  * **La tarea:** desde el panel, cambiar el idioma a inglés y guardarlo: Preferencias, elegir English y Guardar preferencias. Mide cuánto tarda la interfaz en cambiar y la tarea entera hecha por el navegador automático.
+  * **Formatos:** fechas cortas, fechas con hora y montos del panel y del detalle del viaje, comparados con lo que da `Intl` para `es-AR` y `en-US`.
+  * **Otro dispositivo:** después de guardar el idioma, entra con un navegador nuevo en español (sin nada guardado) y mira en qué idioma sale la web.
+* **Comandos reproducibles:**
+  ```bash
+  npm run infra:levantar
+  npm run carga:idioma                         # QA-11: textos, formatos y cambio de idioma (levanta la web si no está)
+  ```
+
+| Medida pedida | Cómo se midió | Resultado medido | ¿Cumple? |
+|---|---|---|---|
+| La interfaz en el idioma del usuario | Líneas con textos del otro idioma, 7 pantallas en cada idioma (378 líneas) | Español: 0 de 189. Inglés: 1 de 189, el saludo del asistente ("Hola, soy el asistente…"), porque la conversación se había empezado en español | En parte |
+| Los formatos del usuario | Fechas, horas y montos del panel y del detalle, contra `Intl` | `es-AR`: 5 de 5 (`20/12/26`, `20/12/26, 5:30 a. m.`, `$ 125.000,50`, `US$ 480,00`). `en-US`: 5 de 5 (`12/20/26`, `12/20/26, 5:30 AM`, `ARS 125,000.50`, `$480.00`) | Sí |
+| Completar la tarea en menos de 2 minutos | Cambiar el idioma a inglés y guardarlo, con el navegador automático (3 corridas) | 3 pasos. La interfaz cambia en 16 a 42 ms sin recargar; la tarea entera tarda 229 a 391 ms. No es el tiempo de una persona | Pendiente (pruebas con usuarios) |
+| Menos de 5 % de errores | Errores de personas haciendo la tarea | No se midió: necesita personas | Pendiente (pruebas con usuarios) |
+| El idioma elegido queda en la cuenta | Entrar desde otro navegador después de guardar el idioma | Sale en **español**. Usuarios guarda `idioma = en` en el perfil, pero Autenticación sigue con `es` (el del registro) y la web toma el idioma del claim `idioma` del JWT al iniciar sesión | No |
+
+* **¿Cumple QA-11?** En parte. Los textos y los formatos cambian enteros con el idioma, y la tarea lleva 3 pasos, sin recargar. Falta la prueba con usuarios para el tiempo y los errores. Además hay un error: el idioma guardado en Preferencias no llega a Autenticación, así que al volver a iniciar sesión (en otro dispositivo, o en el mismo después de cerrar sesión) la interfaz vuelve al idioma del registro.
+* **Diferencias con la wiki:**
+  * La wiki da QA-11 por cumplido en diseño con los archivos de idioma. En el prototipo eso se confirma para los textos y los formatos (0 textos sin traducir en las pantallas de la web, 10 de 10 formatos), pero el idioma de la cuenta queda guardado en dos lugares (el perfil de Usuarios y las credenciales de Autenticación) y solo se actualiza uno.
+  * Una conversación del asistente sigue en el idioma en que empezó: la web la retoma y Asistente responde con las reglas de ese idioma. Una conversación nueva sale en el idioma nuevo.
+* **Errores encontrados (no se cambió código, ver el aviso al grupo):**
+  1. **El idioma del perfil no llega al JWT.** `PATCH /perfil` de Usuarios cambia `cuentas.idioma`, pero `credenciales.idioma` de Autenticación (de donde sale el claim `idioma`) queda con el valor del registro, y la web (`web/src/acciones.ts`, `iniciarSesion`) pasa la interfaz a ese idioma al entrar.
+  2. **La conversación del asistente no cambia de idioma** al cambiar el de la interfaz (menor).
+* **Protocolo para la prueba con usuarios (pendiente del grupo):** al menos 5 personas que no conozcan la aplicación, con una cuenta de prueba en español y un viaje cargado. Tarea: "Poné la aplicación en inglés y decime la fecha y el precio de tu vuelo". Se mide con cronómetro desde que ven el panel hasta que responden, y se anota como error cada paso equivocado (entrar a una pantalla que no era, elegir otra opción) y cada dato mal leído. Cumple si todas terminan en menos de 2 minutos y los errores son menos del 5 % de los pasos.
