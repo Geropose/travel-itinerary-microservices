@@ -65,7 +65,11 @@ export function crearAvisos({
   esperaMs,
   tiempoMaximoMs,
 }: OpcionesAvisos): Avisos {
-  let numero = 2_070_443_601_311_540;
+  // Pub/Sub nunca repite un messageId. El Servicio de Correo guarda los que ya vio (en su base, que
+  // sigue entre arranques) y descarta los repetidos: si el mock empezara siempre desde el mismo
+  // número, después de reiniciarlo los primeros avisos se descartarían y sus correos no se leerían.
+  // Por eso se empieza desde la hora de arranque (en ms, por 1000): 16 dígitos, como los de Pub/Sub.
+  let numero = reloj() * 1000;
   const ultimoEnvio = new Map<string, number>();
   const pendientes = new Map<string, { historyId: number; topicName: string }>();
   const enviador = crearEnviador({
