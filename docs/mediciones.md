@@ -6,35 +6,43 @@ Este documento registra los resultados medidos sobre el prototipo ejecutable de 
 
 ---
 
-## 1. Pruebas de caídas y disponibilidad (`QA-4`, P3.5)
+## 1. Pruebas de caídas y disponibilidad (`QA-4`, P3.5 y P4.1)
 
-* **Objetivo de la wiki (Iteraciones 1, 4 y 6 — Paso 7):**
-  * Indisponibilidad total tolerada: **máximo 5 min por mes**.
-  * Caída de una instancia de aplicación: detección por ping-echo cada 5 s en **<= 15 s** (3 pings fallidos, `ADR-006`, `ADR-007`, `ADR-008`), reinicio automático y ~0 errores percibidos.
-  * Caída de un nodo del cluster RabbitMQ (`--ha`, colas *quorum*): **0 eventos perdidos** (`ADR-002`).
-  * Caída prolongada de un consumidor (`Viajes` detenido 2 min): los eventos esperan en el broker y se procesan al volver (`ADR-002`).
-  * Caída de la base principal de `Viajes`: promoción de la *read replica* en la misma región en **alrededor de 1 min** (`ADR-012`, `ADR-017`).
-  * Caída de Redis (`cache` del panel): degradación transparente hacia la *read replica* sin errores y cumpliendo `QA-2` (`< 800 ms`, `ADR-004`, `ADR-011`).
+Mediciones contra el sistema levantado con `npm run infra:levantar -- --ha` (global, `r1` y `r2`, con 3 nodos de RabbitMQ por región), el 21/11/2026.
 
+* **Medida pedida (Análisis inicial):** el sistema no puede estar sin servicio más de 5 min por mes.
+* **Qué dice la wiki (Paso 7 de las Iteraciones 1, 4 y 6):**
+  * Caída de una instancia: el monitor hace ping cada 5 s y la saca después de 3 pings sin respuesta (15 s). Como hay al menos 3 instancias, el usuario no lo nota (`ADR-006`, `ADR-007`, `ADR-008`).
+  * Caída de la base principal (o de un centro de datos): la read replica del otro centro de datos de la misma región pasa a principal en 1 min (`ADR-012`, `ADR-017`).
+  * Los eventos esperan en el broker si un consumidor está caído (`ADR-002`), y el panel se lee de la read replica si falla la cache (`ADR-004`, `ADR-011`).
+  * Caída de una región entera: sus usuarios quedan sin servicio hasta que se recupere (riesgo aceptado por `CONST-6`). No se mide.
+* **Máquina:** la misma de la sección 2 (16 CPU y 32 GB para Docker), con 45 contenedores por el perfil `ha`. Hay una instancia de cada servicio por región (el gateway tiene 2), y la wiki supone al menos 3. Por eso, en el prototipo, detener `r1-viajes-1` deja sin Servicio de Viajes a la región 1: en producción equivale a perder las 3 instancias a la vez.
 * **Comandos reproducibles:**
   ```bash
   npm run infra:levantar -- --ha
-  npm run caos
-  npm run infra:failover-viajes -- --solo r1
+  npm run caos                                  # escenarios 1 a 5 (tests/caos)
+  npm run carga:failover-viajes                 # escenario 4, sin cortar en el primer error
+  npm run carga:caida-servicio                  # escenario 6
   ```
+* **Pruebas:** [`tests/caos/gateway.test.ts`](../tests/caos/gateway.test.ts) y [`tests/caos/disponibilidad.test.ts`](../tests/caos/disponibilidad.test.ts) (P3.5), y [`tests/carga/failover-viajes.ts`](../tests/carga/failover-viajes.ts) y [`tests/carga/caida-servicio.ts`](../tests/carga/caida-servicio.ts) (P4.1). Los dos scripts piden cada 200 ms el panel (depende de Viajes) y una ruta de Autenticación (`/api/autenticacion/.well-known/jwks.json`, no depende de Viajes), para ver si la falla queda en un solo servicio.
 
-* **Suites involucradas:**
-  * [`tests/caos/gateway.test.ts`](../tests/caos/gateway.test.ts)
-  * [`tests/caos/disponibilidad.test.ts`](../tests/caos/disponibilidad.test.ts)
-  * [`infra/scripts/failover-viajes.ts`](../infra/scripts/failover-viajes.ts)
-
-| Escenario (`QA-4`) | Criterio de la wiki (Paso 7) | Cómo se mide en el prototipo | Resultado medido (errores / tiempos) | Estado |
+| Escenario (`QA-4`) | Qué pide la wiki | Cómo se midió | Resultado medido | ¿Cumple? |
 |---|---|---|---|---|
-| **1. Matar instancia de servicio (`r1-gateway-1`)** | Detección `<= 15 s`, reinicio automático, ~0 errores (`nginx` reintenta en réplica sana) | Generador continuo a `GET /api/viajes/panel` cada `100 ms` + `docker kill r1-gateway-1` + lectura de `r1-monitor-1 /estado` | *Pendiente corrida en vivo con stack Docker completo (`npm run caos`)* | Implementado |
-| **2. Matar nodo de RabbitMQ (`--ha`, `r1-rabbitmq-2-1`)** | `0` eventos perdidos con colas *quorum* 2/3 (`ADR-002`) | Generador continuo al panel (`150 ms`) + `docker kill r1-rabbitmq-2-1` + inyección de 4 correos en `mock-gmail` verificados en panel | *Pendiente corrida en vivo con `--ha` (`npm run caos`)* | Implementado |
-| **3. Detener `Viajes` 2 minutos (`r1-viajes-1`)** | Eventos pendientes en RabbitMQ se drenan al volver (`ADR-002`) | Pausar monitor + `docker stop r1-viajes-1` durante `120 s` mientras ingresan 1 reserva nueva por correo y 1 cambio por webhook HMAC de aerolínea; medir tiempo de drenado al volver | *Pendiente corrida en vivo con stack Docker completo (`npm run caos`)* | Implementado |
-| **4. Detener principal `r1-postgres-viajes-1` + failover** | Promoción de la *read replica* en `<= 1 min` (`ADR-012`) y escritura/lectura operativa | Generador continuo al panel + `docker stop r1-postgres-viajes-1` + `npm run infra:failover-viajes -- --solo r1` + `POST /api/viajes/reservas` + `GET /api/viajes/panel` | *Pendiente corrida en vivo con stack Docker completo (`npm run caos`)* | Implementado |
-| **5. Detener Redis (`r1-redis-1`)** | Degradación transparente a *read replica* (`X-Origen-Dato: replica`, `0` errores, `< 800 ms`) y recuperación de caché al volver | Generador continuo al panel (`100 ms`) tras calentar caché + `docker stop r1-redis-1` + verificación de retorno a `X-Origen-Dato: cache` tras `docker start` | *Pendiente corrida en vivo con stack Docker completo (`npm run caos`)* | Implementado |
+| **1. Matar una instancia del gateway (`r1-gateway-1`)** | Detección en 15 s o menos, reinicio automático y el usuario no lo nota | `docker kill` mientras se pide el panel cada 100 ms; el estado del monitor se lee de `r1-monitor-1 /estado` | Detectada en 10,7 s (en otra corrida, 11,0 s) y reiniciada sola. 138 solicitudes al panel, 1 error (0,7 %), p95 7 ms. En `gateway.test.ts` (Autenticación cada 100 ms) hubo 1 error `504` en cada una de las 2 corridas | Sí |
+| **2. Matar un nodo de RabbitMQ (`r1-rabbitmq-2-1`)** | 0 eventos perdidos (colas quorum con 2 de 3 nodos) | `docker kill` e inyección de 4 correos de reserva en el mock de Gmail mientras falta el nodo | 4 de 4 reservas llegaron al panel. 12 solicitudes al panel, 0 errores, p95 13 ms | Sí |
+| **3. Detener Viajes 2 min (`r1-viajes-1`)** | Los eventos esperan en el broker y se procesan al volver | Monitor en pausa y `docker stop` 120 s, mientras llegan 1 reserva nueva por correo y 1 cambio por webhook de la aerolínea | Los 2 eventos se aplicaron 2,5 s después de que Viajes volvió. Mientras estuvo detenido, el panel falló en 126 de 128 solicitudes (hay una sola instancia) | Sí (ningún evento perdido) |
+| **4. Detener la base principal de Viajes (`r1-postgres-viajes-1`)** | La read replica pasa a principal en 1 min | `docker stop` y `npm run infra:failover-viajes`; después, una reserva nueva cada 500 ms hasta que se acepta | Réplica promovida en 5,6 s. Primera escritura aceptada a los 6,0 s de la caída. Panel: 4 errores `503` de 117 (en 0,6 s). Autenticación: 0 errores de 118 | Sí |
+| **5. Detener Redis (`r1-redis-1`)** | El panel se lee de la read replica, sin errores y en menos de 800 ms (QA-2) | `docker stop` con la cache llena, pidiendo el panel cada 100 ms; después `docker start` | 42 solicitudes, 0 errores, 41 desde la read replica, p50 6 ms, p95 8 ms. Al volver Redis, el panel se volvió a leer de la cache | Sí |
+| **6. Detener un servicio entero 30 s (`r1-viajes-1`)** | La falla queda en ese servicio: los demás siguen atendiendo (microservicios, `ADR-001`) | `npm run carga:caida-servicio`: monitor en pausa y `docker stop` 30 s | Panel: 80 errores de 169. Autenticación: **71 errores `502` de 203, durante 15 s**, que siguieron 10 s después de que Viajes volvió | **No** (ver hallazgo) |
+
+* **Corridas completas de `npm run caos`:** la primera, con el sistema recién levantado, pasó 1 de 6 pruebas. La segunda pasó la 1, la 2 y la 3, y fallaron la 4, la 5 y la de `gateway.test.ts`, las tres con `502`. Esas tres pasan (o dan los números de la tabla) cuando se corren solas: fallan por el hallazgo de abajo, porque empiezan antes de que pasen los 15 s que deja la prueba 3. Los resultados de la tabla son de las pruebas que pasaron y de los dos scripts de `tests/carga`.
+* **¿Cumple QA-4?** En parte. Las tácticas de la wiki funcionan (ping-echo, reinicio, colas quorum, promoción de la réplica y lectura de la réplica sin cache), y cada falla medida dura segundos: la más larga son 6 s sin poder guardar reservas (escenario 4), lejos de los 5 min por mes. Pero cuando un servicio deja de responder, toda la región responde `502` durante 15 s.
+* **Hallazgo (no se tocó, es configuración de `infra/`):** en [`infra/nginx/region.conf.template`](../infra/nginx/region.conf.template), nginx reintenta en el otro gateway con `proxy_next_upstream error timeout http_502 http_503` y saca un gateway después de 3 fallas (`max_fails=3 fail_timeout=15s`). Cuando Viajes no responde, el gateway contesta `502` (que es lo correcto), pero nginx lo cuenta como falla del gateway. Así saca a los dos gateways sanos y durante 15 s contesta `502` a todas las rutas de la región (en su log: `no live upstreams`). La wiki pide que nginx saque solo al gateway caído. Para eso alcanzaría con que nginx no cuente los `502` y `503` que manda el gateway (dejar `proxy_next_upstream error timeout`), pero eso queda para el grupo.
+* **Diferencias con la wiki:**
+  * La promoción tarda 6 s y no 1 min, pero en el prototipo la decide una persona con `npm run infra:failover-viajes`: el tiempo hasta darse cuenta de la caída no está incluido.
+  * Con una sola instancia por servicio, la caída de Viajes deja sin panel a la región (escenario 3). Con las 3 instancias de `ADR-006` (`npm run infra:escalador` con el perfil `ha`), la caída de una instancia sería como el escenario 1.
+  * El escenario 1 da 1 error y no 0: la solicitud que estaba yendo al gateway justo cuando se mató termina con `504`. La wiki dice que el usuario no lo nota; `gateway.test.ts` pide 0 errores y por eso falla.
+  * En la primera corrida, con el sistema recién levantado, las pruebas 2 y 3 no vieron los correos en el panel (esperan 35 s y 25 s): el mock de Gmail mandó los avisos y el Servicio de Correo respondió `202`, pero no leyó los correos. No se repitió en las 3 corridas siguientes, y no encontramos la causa.
 
 ---
 
