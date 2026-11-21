@@ -1,7 +1,8 @@
 // Autenticación contra una PostgreSQL de verdad (contenedor), con Usuarios y la otra región falsos:
 // registro, login correcto e incorrecto, renovación, logout, token vencido, login en la región
-// equivocada, límite de intentos, contraseña guardada con hash y rutas internas.
-import { generateKeyPairSync } from 'node:crypto';
+// equivocada, límite de intentos, contraseña guardada con hash, rutas internas y el idioma que
+// llega de Usuarios por el evento IdiomaActualizado.
+import { generateKeyPairSync, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import {
   crearPool,
@@ -10,7 +11,10 @@ import {
   migrar,
   MIGRACIONES_EVENTOS,
   type AccesoRechazado,
+  type Broker,
+  type OpcionesConsumidor,
   type Pool,
+  type Sobre,
 } from '@trotamundos/comun';
 import {
   dockerDisponible,
@@ -24,6 +28,8 @@ import { sembrarAnalista } from '../src/analista.ts';
 import { crearApp, reglasDeRutas } from '../src/app.ts';
 import { leerClaves, type ClavesJwt } from '../src/claves.ts';
 import type { NuevaCuenta } from '../src/clientes.ts';
+import { consumirIdiomasActualizados, type IdiomaActualizado } from '../src/idioma.ts';
+import { actualizarIdioma } from '../src/repositorio.ts';
 import { firmarTokenDeServicio } from '../src/tokens.ts';
 
 const hayDocker = await dockerDisponible();
@@ -306,6 +312,53 @@ describe.skipIf(!hayDocker)('Servicio de Autenticación', { timeout: 60_000 }, (
       expect((await login('mora@correo.example')).status).toBe(200);
       for (let i = 0; i < 4; i++) await login('mora@correo.example', 'mal-mal-mal');
       expect((await login('mora@correo.example')).status).toBe(200);
+    });
+  });
+
+  describe('idioma del perfil (IdiomaActualizado, QA-11)', () => {
+    it('guarda el idioma nuevo en la credencial: la renovación y el próximo login lo llevan en el JWT', async () => {
+      let suscripcion: OpcionesConsumidor<IdiomaActualizado> | undefined;
+      const broker: Pick<Broker, 'consumir'> = {
+        consumir: async <D>(opciones: OpcionesConsumidor<D>) => {
+          suscripcion = opciones as unknown as OpcionesConsumidor<IdiomaActualizado>;
+        },
+      };
+      await consumirIdiomasActualizados({ broker, pool, logger });
+      // Cola por defecto autenticacion.IdiomaActualizado (x-cola del contrato).
+      expect(suscripcion?.tipo).toBe('IdiomaActualizado');
+      expect(suscripcion?.pool).toBe(pool);
+      expect(suscripcion?.cola).toBeUndefined();
+
+      const { jwt, tokenRenovacion } = await sesion('sara@correo.example');
+      const { sub } = await validador.verificarToken(jwt);
+      const evento: Sobre<IdiomaActualizado> = {
+        eventId: randomUUID(),
+        tipo: 'IdiomaActualizado',
+        version: 1,
+        ocurridoEn: new Date().toISOString(),
+        region: 'region-1',
+        datos: { usuarioId: sub, idioma: 'en' },
+      };
+      const cliente = await pool.connect();
+      try {
+        await suscripcion?.manejar(evento, cliente);
+      } finally {
+        cliente.release();
+      }
+
+      const renovado = await pedir('/renovar', { tokenRenovacion });
+      const { jwt: jwtRenovado } = (await renovado.json()) as { jwt: string };
+      expect(await validador.verificarToken(jwtRenovado)).toMatchObject({ sub, idioma: 'en' });
+      const nuevoLogin = (await (await login('sara@correo.example')).json()) as { jwt: string };
+      expect(await validador.verificarToken(nuevoLogin.jwt)).toMatchObject({ sub, idioma: 'en' });
+    });
+
+    it('si la credencial no es de esta región, el evento no cambia nada', async () => {
+      const enIngles = () =>
+        cantidad("SELECT count(*) AS n FROM credenciales WHERE idioma = 'en'", []);
+      const antes = await enIngles();
+      await actualizarIdioma(pool, randomUUID(), 'en');
+      expect(await enIngles()).toBe(antes);
     });
   });
 

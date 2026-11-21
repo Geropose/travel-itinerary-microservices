@@ -1,0 +1,20 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "IdiomaActualizado",
+  "description": "Campo 'datos' del evento IdiomaActualizado, versión 1. Lo publica el componente de cuentas y preferencias del Servicio de Usuarios cada vez que el usuario cambia su idioma (PATCH /perfil); lo consume el Servicio de Autenticación, que guarda el idioma en la credencial para ponerlo en el claim 'idioma' de los próximos JWT (login y renovación). Lleva el idioma nuevo, no la diferencia.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["usuarioId", "idioma"],
+  "properties": {
+    "usuarioId": {
+      "description": "Usuario que cambió el idioma (el mismo usuarioId de la credencial y del claim sub).",
+      "type": "string",
+      "format": "uuid"
+    },
+    "idioma": {
+      "description": "Idioma nuevo de la cuenta, el mismo enum de specs/openapi/comun.yaml (Idioma).",
+      "type": "string",
+      "enum": ["es", "en"]
+    }
+  }
+}

@@ -1,5 +1,6 @@
 // Pruebas de integración de Usuarios contra PostgreSQL 17 y RabbitMQ 4 reales (testcontainers):
-// - Cuentas y preferencias: creación interna desde Autenticación, perfil, validación de agencia.
+// - Cuentas y preferencias: creación interna desde Autenticación, perfil, validación de agencia y
+//   evento IdiomaActualizado (outbox) cuando cambia el idioma.
 // - Filtros y whitelist: guardar en la misma transacción que el evento FiltrosActualizados (outbox)
 //   y verificar que llega por RabbitMQ validado contra specs/schemas/FiltrosActualizados.json.
 // - Permisos de itinerarios: designar y quitar designados, vinculación tardía cuando el designado
@@ -55,11 +56,13 @@ describe.skipIf(!hayDocker)(
     let pool: Pool;
     let brokerUsuarios: Broker;
     let brokerCorreo: Broker;
+    let brokerAutenticacion: Broker;
     let outbox: PublicadorOutbox;
     let url: string;
     let detener: (() => Promise<void>) | undefined;
 
     const rechazos: AccesoRechazado[] = [];
+    const idiomasRecibidos: { usuarioId: string; idioma: string }[] = [];
     const filtrosRecibidos: {
       eventId: string;
       datos: { usuarioId: string; remitentesPermitidos: string[]; filtrosActivos: boolean };
@@ -86,10 +89,18 @@ describe.skipIf(!hayDocker)(
         fileURLToPath(new URL('../migrations/', import.meta.url)),
       ]);
 
-      [brokerUsuarios, brokerCorreo] = await Promise.all([
+      [brokerUsuarios, brokerCorreo, brokerAutenticacion] = await Promise.all([
         conectarBroker({ url: rabbit.url, servicio: SERVICIO, region: 'region-1', logger }),
         conectarBroker({ url: rabbit.url, servicio: 'correo', region: 'region-1', logger }),
+        conectarBroker({ url: rabbit.url, servicio: 'autenticacion', region: 'region-1', logger }),
       ]);
+      await brokerAutenticacion.consumir<{ usuarioId: string; idioma: string }>({
+        tipo: 'IdiomaActualizado',
+        pool,
+        manejar: async (evento) => {
+          idiomasRecibidos.push(evento.datos);
+        },
+      });
       await brokerCorreo.consumir<{
         usuarioId: string;
         remitentesPermitidos: string[];
@@ -132,7 +143,11 @@ describe.skipIf(!hayDocker)(
     afterAll(async () => {
       await outbox?.detener();
       await detener?.();
-      await Promise.all([brokerUsuarios?.cerrar(), brokerCorreo?.cerrar()]);
+      await Promise.all([
+        brokerUsuarios?.cerrar(),
+        brokerCorreo?.cerrar(),
+        brokerAutenticacion?.cerrar(),
+      ]);
       await pool?.end();
       await Promise.all([postgres?.detener(), rabbit?.detener()]);
     }, 60_000);
@@ -142,6 +157,7 @@ describe.skipIf(!hayDocker)(
       duenosDeViajes.clear();
       rechazos.length = 0;
       filtrosRecibidos.length = 0;
+      idiomasRecibidos.length = 0;
       await pool.query(
         'TRUNCATE designados_itinerario, whitelists, cuentas, eventos_salientes, eventos_procesados RESTART IDENTITY CASCADE',
       );
@@ -218,6 +234,9 @@ describe.skipIf(!hayDocker)(
           moneda: 'ARS',
           agenciaPreferida: 'viajes-del-plata',
         });
+        // El idioma nuevo sale por el outbox para Autenticación (claim idioma del JWT).
+        await esperarQue(() => idiomasRecibidos.length === 1);
+        expect(idiomasRecibidos).toEqual([{ usuarioId, idioma: 'en' }]);
 
         // Ruta interna de agencia: propio usuario 200, otro usuario 403.
         const agenciaPropia = await fetch(`${url}/interna/usuarios/${usuarioId}/agencia`, {
@@ -245,6 +264,10 @@ describe.skipIf(!hayDocker)(
         expect((await sinAgencia.json()) as { agenciaPreferida: unknown }).toMatchObject({
           agenciaPreferida: null,
         });
+
+        // Un cambio sin idioma no publica IdiomaActualizado.
+        await new Promise((r) => setTimeout(r, 500));
+        expect(idiomasRecibidos).toHaveLength(1);
       });
 
       it('rechaza región incorrecta (400) y cuenta duplicada (409) en POST /interna/cuentas', async () => {

@@ -15,6 +15,7 @@ import {
 import { crearApp, reglasDeRutas, SERVICIO } from './app.ts';
 import { leerClaves } from './claves.ts';
 import { crearOtraRegion, crearUsuarios } from './clientes.ts';
+import { consumirIdiomasActualizados } from './idioma.ts';
 import { esquemaConfig, secretosDeServicios } from './config.ts';
 import { tokenDeServicioPropio } from './tokens.ts';
 
@@ -50,6 +51,8 @@ const validador = crearValidador({
   reglas: reglasDeRutas(config.REGION),
 });
 const outbox = iniciarPublicadorOutbox({ pool, broker, logger });
+// El idioma del perfil (Usuarios) llega a la credencial para el claim idioma del JWT (QA-11).
+await consumirIdiomasActualizados({ broker, pool, logger });
 
 const token = tokenDeServicioPropio(claves, config.REGION);
 const clientes = {
