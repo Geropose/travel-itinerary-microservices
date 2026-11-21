@@ -140,3 +140,39 @@ Mediciones contra el sistema levantado con `npm run infra:levantar` (global, `r1
 | QA-7 | Lote de 1.000 correos, ≥ 99 % detectados | Outlook: 100 % en 26,3 s. Gmail: 100 % en 44 min 07 s (por la cuota de la API) | Sí el 99 %; Gmail tarda más de 5 min en el lote entero |
 | QA-7 | Publicación en la red social en < 3 s | p95 de 1,01 s con la red social a 1 s, hasta 20 por segundo | Sí |
 | QA-8 | 100 % de los accesos no autorizados bloqueados y registrados, ninguna contraseña | Todos bloqueados y ninguna contraseña; los `403` de los servicios no se registran | En parte |
+
+---
+
+## 3. Seguridad de los itinerarios (`QA-9`, P4.1)
+
+Mediciones contra el sistema levantado con `npm run infra:levantar` (global, `r1` y `r2`), el 21/11/2026, con el registro de accesos del gateway ya consumiendo `AccesoRechazado` (PR #41).
+
+* **Medida pedida (Análisis inicial):** solo el dueño y las personas designadas ven un itinerario; cada intento rechazado queda registrado en menos de 1 s, y la seguridad agrega menos de 200 ms a cada solicitud.
+* **Qué dice la wiki (Iteración 5, Paso 7):** validar el JWT no usa la red (1 ms por validador) y consultar el permiso tarda 20 ms: suma unos 25 ms. El registro del intento es asíncrono y tarda milisegundos. La Iteración 7 agrega que el asistente usa el JWT del usuario y no ve viajes de otros.
+* **Máquina:** la misma de la sección 2. Todo corre en una sola computadora, así que entre contenedores no hay la demora de red que habría entre servidores de un centro de datos. Por eso los tiempos de acá son los del trabajo de cada componente, sin la red.
+* **Escala de la carga:** la medida es por solicitud, no por volumen: se tomaron 5.000 verificaciones del JWT, 300 pedidos del itinerario por el dueño y 300 por la persona designada, y 100 rechazos de cada tipo, de a uno.
+* **Cómo se midió ([`tests/carga/seguridad.ts`](../tests/carga/seguridad.ts)):** el script corre dentro de un contenedor de la red de la región 1 (con la imagen del gateway), para pedir directo al nginx de la región y leer `accesos_rechazados` cada 2 ms con el mismo reloj que la base. Crea una dueña con un viaje, una persona designada y un tercer usuario.
+  * **Verificar el JWT:** el Validador de Intercepción de `packages/comun`, con las claves reales de Autenticación, verifica 5.000 veces el JWT de la dueña (es lo que hace cada validador en cada solicitud).
+  * **Consultar el permiso:** `GET /api/viajes/viajes/{viajeId}` de la dueña (Viajes no consulta a nadie) contra el mismo pedido de la persona designada (Viajes le pregunta a Usuarios si está designada). La diferencia es lo que cuesta consultar el permiso.
+  * **Registro:** se manda una solicitud con un `X-Request-Id` conocido y se mide cuánto tarda en aparecer esa fila en `accesos_rechazados` después de recibir la respuesta. Se probaron los dos caminos: `401` del gateway sin token (lo guarda directo) y `403` de Viajes cuando el tercer usuario pide el viaje de la dueña (llega por el evento `AccesoRechazado`).
+* **Comandos reproducibles:**
+  ```bash
+  npm run infra:levantar
+  npm run carga:seguridad                      # QA-9: costo del validador, del permiso y del registro
+  npm run e2e -- seguridad                     # QA-8 y QA-9: aislamiento e itinerario compartido (P3.3)
+  ```
+
+| Medida pedida | Cómo se midió | Resultado medido | ¿Cumple? |
+|---|---|---|---|
+| La seguridad agrega menos de 200 ms | Verificar el JWT (5.000 veces) | p50 0,16 ms, p95 0,25 ms por validador. Cada solicitud pasa por 2 (gateway y servicio): 0,3 a 0,5 ms | Sí |
+| | Consultar el permiso (designada − dueña, 300 de cada una) | Dueña: p50 2,9 ms, p95 3,8 ms. Designada: p50 4,3 ms, p95 5,5 ms. Diferencia: p50 1,4 ms, p95 1,7 ms | Sí |
+| | Total por solicitud | Unos 2 ms (2 validadores y la consulta del permiso) | Sí |
+| Registro en menos de 1 s | `401` del gateway, sin token (100) | p50 5,0 ms, p95 5,4 ms, máximo 10 ms después de la respuesta | Sí |
+| | `403` de Viajes, viaje de otro usuario (100) | p50 9,9 ms, p95 15 ms, máximo 25 ms después de la respuesta. 0 rechazos sin registrar | Sí |
+| Solo el dueño y las personas designadas ven el itinerario (también por el asistente) | `npm run e2e -- seguridad` (P3.3) y la prueba de QA-9 de [`services/asistente/test/asistente.integration.test.ts`](../services/asistente/test/asistente.integration.test.ts) | 7 de 7 pruebas e2e pasan: la persona designada ve el itinerario, los demás reciben `403` y cada rechazo queda en `accesos_rechazados`. El asistente no puede consultar reservas de otro usuario | Sí |
+
+* **¿Cumple QA-9?** Sí: la seguridad agrega unos 2 ms (lo pedido: menos de 200 ms) y el registro tarda como máximo 25 ms (lo pedido: menos de 1 s).
+* **Diferencias con la wiki:**
+  * Verificar el JWT tarda 0,16 ms y no 1 ms, y consultar el permiso tarda 1,4 ms y no 20 ms. La wiki estima tiempos con la red entre servidores; acá todo está en una máquina. Aun sumando la red de producción, queda muy lejos de los 200 ms.
+  * El registro de los rechazos de los servicios tarda más que el del gateway (p95 15 ms contra 5 ms) porque pasa por el broker. Coincide con la wiki: es asíncrono y tarda milisegundos.
+  * En la primera medición de QA-8 (sección 2.4) los `403` de los servicios no se registraban. Con el consumidor de `AccesoRechazado` del gateway (PR #41) ahora sí: 100 de 100.
