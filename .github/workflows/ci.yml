@@ -69,6 +69,8 @@ jobs:
 
       - name: Levantar el prototipo
         id: arranque
+        env:
+          INTERVALO_CONSULTA_PROVEEDORES_SEG: '5'
         run: |
           GID_DOCKER="$(stat -Lc '%g' /var/run/docker.sock)"
           export GID_DOCKER
