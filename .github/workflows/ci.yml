@@ -68,7 +68,21 @@ jobs:
         run: npm ci
 
       - name: Levantar el prototipo
-        run: npm run infra:levantar
+        id: arranque
+        run: |
+          GID_DOCKER="$(stat -Lc '%g' /var/run/docker.sock)"
+          export GID_DOCKER
+          npm run infra:levantar
+
+      - name: Diagnóstico del monitor si falla el arranque
+        if: failure() && steps.arranque.outcome == 'failure'
+        run: |
+          for monitor in r1-monitor-1 r2-monitor-1; do
+            if docker container inspect "$monitor" >/dev/null 2>&1; then
+              docker inspect --format '{{json .State.Health}}' "$monitor"
+              docker logs --tail 60 "$monitor"
+            fi
+          done
 
       - name: Contratos con el sistema levantado
         run: npm run test:contratos -- --en-vivo
