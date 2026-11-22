@@ -44,6 +44,7 @@
     "carga:primer-contenido": "npm run build -w web && node tests/carga/primer-contenido.ts",
     "carga:tormenta": "node tests/carga/tormenta.ts",
     "carga:mapreduce": "node tests/carga/mapreduce.ts",
+    "carga:asistente": "node tests/carga/asistente.ts",
     "carga:publicacion:demora": "docker run --rm -i -e URL_API=http://host.docker.internal:8000 -e URL_MOCK_RED=http://host.docker.internal:4007 -e DEMORA_RED_MS=1000 grafana/k6:1.0.0 run - < tests/carga/publicacion.k6.js",
     "web": "npm run dev -w web",
     "web:api": "npm run api -w web"

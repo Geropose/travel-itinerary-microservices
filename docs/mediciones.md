@@ -473,3 +473,51 @@ Medición sobre el código, el 21/11/2026. No necesita el sistema levantado.
 * **Diferencias con la wiki:**
   * La wiki dice 0 módulos modificados. Medido: 1 módulo de código y 1 prueba existentes modificados.
   * Para llegar a 0 habría que cambiar código de Integraciones (por ejemplo, que el registro encuentre la fábrica del adaptador sin una lista escrita a mano) y la prueba de la lista fija. No se cambió en esta medición: queda para que lo decida el grupo.
+
+## 10. Tiempo de respuesta del asistente virtual (`QA-12`, P4.1)
+
+Mediciones contra el sistema levantado con `npm run infra:levantar` (global, `r1` y `r2`), el 21/11/2026.
+
+* **Medida pedida (Análisis inicial, SEI 12):** el asistente responde cada mensaje en menos de 3 s en operación normal. La prueba pide el p95 en tres tipos de mensaje: consulta de estado, problema menor y derivación a la agencia.
+* **Qué dice la wiki (Iteración 7, Paso 7):** cumplido. Detectar la intención con reglas tarda unos 10 ms. Consultar el estado, 150 a 300 ms (como el panel de la Iteración 4). Problemas menores, unos 50 ms. La reprogramación depende del proveedor: si pasa de 3 s, el asistente responde que está consultando. La derivación no tiene un tiempo estimado.
+* **Máquina:** la misma de la sección 2. El script corre en la misma computadora y le pide al enrutador global en `localhost:8000`. No hay red entre el usuario y la región: la wiki cuenta 100 ms de red para el panel, acá no están.
+* **Escala de la carga:** la wiki no da una cantidad de mensajes por segundo para el asistente, así que no hay una carga proporcional que calcular. Se midió sin carga (una conversación por vez) y después con 10, 50, 100 y 200 usuarios conversando a la vez, para ver cómo sube el tiempo. Cada usuario manda un mensaje apenas recibe la respuesta del anterior (sin pausas), así que estos escalones son más exigentes que el mismo número de personas reales escribiendo.
+* **Cómo se midió ([`tests/carga/asistente.ts`](../tests/carga/asistente.ts)):**
+  * **Usuarios:** 200 usuarios de la región 1, cada uno con agencia preferida (`viajes-del-plata`) y una reserva de vuelo cargada a mano.
+  * **Conversación:** cada conversación nueva manda los tres mensajes de UC-8: "¿Cuál es el estado de mi vuelo …?" con el número de su reserva, "¿Cuánto equipaje puedo llevar en mi vuelo?" y "Quiero hablar con una persona de mi agencia". El estado consulta el Servicio de Viajes. La derivación pide el perfil a Usuarios y crea el caso en el mock de la agencia a través de Integraciones.
+  * **Tiempo:** de punta a punta desde el cliente, por el enrutador global, nginx, el gateway y el Servicio de Asistente.
+  * **Respuesta correcta:** HTTP 200, la intención esperada (`estado`, `problemaMenor` o `derivar`) y el resultado esperado (`respondido`, `respondido` o `derivado`).
+  * **Muestras:** sin carga, 200 conversaciones (600 mensajes). En cada escalón, 400 conversaciones (1.200 mensajes). Antes, 3 conversaciones de calentamiento que no se cuentan.
+  * **Limpieza:** al final borra las reservas y reinicia el mock de la agencia.
+* **Comandos reproducibles:**
+  ```bash
+  npm run infra:levantar
+  npm run carga:asistente -- --usuarios 200 --vueltas 1 --concurrencia 10,50,100,200 --conversaciones-por-nivel 400
+  ```
+
+p95 y máximo en ms, de punta a punta:
+
+| Usuarios a la vez | Mensajes por segundo | Estado (p95 / máx) | Problema menor (p95 / máx) | Derivación (p95 / máx) | Más de 3 s | Respuestas incorrectas |
+|---|---|---|---|---|---|---|
+| 1 (sin carga) | 25 | **47** / 92 | **42** / 89 | **54** / 70 | 0 | 0 |
+| 10 | 158 | 82 / 158 | 77 / 118 | 94 / 159 | 0 | 0 |
+| 50 | 184 | 340 / 401 | 296 / 371 | 369 / 413 | 0 | 0 |
+| 100 | 205 | 594 / 775 | 472 / 546 | 498 / 516 | 0 | 0 |
+| 200 | 190 | **1.285** / 1.549 | **980** / 1.003 | **1.137** / 1.189 | 0 | 0 |
+
+Las medianas sin carga son 35 ms (estado), 29 ms (problema menor) y 38 ms (derivación).
+
+| Medida pedida | Cómo se midió | Resultado medido | ¿Cumple? |
+|---|---|---|---|
+| p95 menor a 3 s en estado | 200 mensajes sin carga y 1.600 con carga | p95 47 ms sin carga; 1.285 ms con 200 usuarios a la vez | Sí |
+| p95 menor a 3 s en problemas menores | Lo mismo | p95 42 ms sin carga; 980 ms con 200 usuarios a la vez | Sí |
+| p95 menor a 3 s en derivación | Lo mismo | p95 54 ms sin carga; 1.137 ms con 200 usuarios a la vez | Sí |
+| Respuestas correctas | Intención y resultado de cada respuesta | 5.400 de 5.400 correctas; 1.800 casos creados en el mock de la agencia | Sí |
+
+* **¿Cumple QA-12?** Sí. Sin carga, el p95 queda debajo de 60 ms en los tres tipos de mensaje. Ningún mensaje tardó más de 3 s, ni siquiera con 200 usuarios escribiendo sin pausa a la vez.
+* **Hasta dónde llega:** pasados los 10 usuarios a la vez, el sistema atiende entre 184 y 205 mensajes por segundo y no sube más. Con más usuarios solo crece la espera: el p95 pasa de unos 80 ms a unos 1.300 ms. Los problemas menores (que no consultan otros servicios) suben igual que el estado y la derivación, así que el límite está en el camino que comparten todos los mensajes (enrutador, nginx, gateway y la única instancia del asistente), no en Viajes ni en la agencia. En esta prueba no se midió el procesador de cada contenedor, así que no se sabe cuál de ellos es.
+* **Diferencias con la wiki:**
+  * La wiki estima 150 a 300 ms para el estado. Medido: 47 ms de p95 sin carga, sin los 100 ms de red. Con esa red quedaría en unos 150 ms, en el borde bajo de la estimación.
+  * La wiki estima unos 50 ms para los problemas menores. Medido: 29 ms de mediana y 42 ms de p95 sin carga. Coincide.
+  * La derivación no tiene un tiempo estimado en la wiki. Medido: 54 ms de p95 sin carga, con el mock de la agencia respondiendo sin demora. Con una agencia real el tiempo depende de ella, como la reprogramación depende del proveedor.
+  * La reprogramación (con el aviso de "consultando" a los 3 s) no entra en esta medición: la prueba pide estado, problemas menores y derivación.
