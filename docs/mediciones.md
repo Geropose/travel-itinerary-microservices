@@ -6,6 +6,27 @@ Este documento registra los resultados medidos sobre el prototipo ejecutable de 
 
 ---
 
+## Resumen: una fila por atributo de calidad
+
+Resultado real de cada QA, medido el 21/11/2026 en una sola computadora. El detalle, los comandos y las diferencias con la wiki están en la sección de cada uno.
+
+| QA | Medida pedida | Resultado medido | ¿Cumple? | Diferencia con el Paso 7 de la wiki | Sección |
+|---|---|---|---|---|---|
+| QA-1 | Un cambio de un proveedor sin aviso se ve en menos de 5 min | Peor caso 2 min 00 s en operación normal. En el pico, sumando la cola de QA-5: unos 17 min 40 s (1 instancia de Integraciones) o 7 min 35 s (4) | Sí en operación normal; no en el pico | La wiki estima 3 min 50 s con pico | [5](#5-cambios-de-un-proveedor-sin-aviso-qa-1-p41) y [8.3](#83-resumen-de-qa-5) |
+| QA-2 | Panel con p95 menor a 800 ms | p95 6,6 ms a 500 paneles/s (sin la red del usuario); 90,5 % desde la cache | Sí | Coincide (la wiki estima unos 150 ms con 100 ms de red) | [6](#6-tiempo-de-respuesta-del-panel-bajo-carga-qa-2-p41) |
+| QA-3 | Primer contenido en el móvil en menos de 1,4 s | 293 ms de FCP al abrir la app ya usada, con el teléfono lento. La primera vez, sin nada guardado: 2,1 s | Sí | La wiki no habla de la primera vez | [7](#7-primer-contenido-en-el-móvil-qa-3-p41) |
+| QA-4 | Menos de 5 min sin servicio por mes | Cada falla medida dura segundos (la más larga, 6 s sin guardar reservas). Un servicio caído dejaba toda la región en `502` 15 s: arreglado con el PR #42 | En parte | Con 1 instancia por servicio, caer Viajes deja sin panel a la región; matar un gateway da 1 error, no 0 | [1](#1-pruebas-de-caídas-y-disponibilidad-qa-4-p35-y-p41) |
+| QA-5 | Pico masivo: agregar instancias y seguir atendiendo | Panel con p95 356 ms durante la tormenta, pero 40.000 cancelaciones tardan 15 min 40 s (proporcional de la wiki: 100 s). Map-Reduce: mismo resultado con 1 a 16 procesadores | En parte | El límite es el outbox de Integraciones, no los consumidores de Viajes (PR #45, abierto) | [8](#8-pico-de-un-evento-disruptivo-y-consultas-map-reduce-qa-5-p41) |
+| QA-6 | Al menos 99 % de los mensajes de proveedores sin intervención | 3.000 de 3.000 (100 %) | Sí | Coincide | [2.1](#21-qa-6-mensajes-de-proveedores-sin-intervención-manual) |
+| QA-7 | Primeros correos en menos de 5 min; publicación en menos de 3 s | Primera reserva en 22,3 s (Outlook) y 1,1 s (Gmail). Lote de 1.000: 100 %, con Gmail en 44 min por la cuota de la API. Publicación con p95 1,01 s | Sí | El lote entero de Gmail tarda más de lo estimado | [2.2](#22-qa-7-primeros-correos-de-una-cuenta-nueva-y-lote-de-1000-correos) y [2.3](#23-qa-7-publicación-del-itinerario-en-la-red-social) |
+| QA-8 | 100 % de los accesos no autorizados bloqueados y registrados, ninguna contraseña | Todos bloqueados y ninguna contraseña. Los `403` de los servicios no se registraban; con el PR #41, 100 de 100 | Sí, después del PR #41 | Ninguna después del arreglo | [2.4](#24-qa-8-acceso-seguro-y-autorizado-a-los-correos-resultados-de-p33) y [3](#3-seguridad-de-los-itinerarios-qa-9-p41) |
+| QA-9 | La seguridad agrega menos de 200 ms; cada rechazo registrado en menos de 1 s | 2 ms de seguridad; registro en 25 ms como máximo | Sí | Coincide | [3](#3-seguridad-de-los-itinerarios-qa-9-p41) |
+| QA-10 | Medio de transporte nuevo con 0 archivos modificados fuera del adaptador | 6 archivos: 4 de configuración, `registro.ts` y `adaptadores.test.ts` | No (ningún otro servicio ni contrato tocado) | La wiki dice 0 módulos modificados | [9](#9-agregar-un-medio-de-transporte-nuevo-qa-10-p41) |
+| QA-11 | Tarea en su idioma, sin ayuda, en menos de 2 min y con menos de 5 % de errores | Textos y formatos completos en los dos idiomas, 3 pasos. El idioma no quedaba en la cuenta: arreglado con el PR #44. Falta la prueba con usuarios | En parte | El idioma estaba guardado en dos servicios y se actualizaba uno | [4](#4-idioma-y-formatos-qa-11-p41) |
+| QA-12 | Asistente con p95 menor a 3 s en estado, problemas menores y derivación | p95 de 47, 42 y 54 ms sin carga; 1,3 s como máximo con 200 usuarios a la vez | Sí | Coincide (la wiki estima 150 a 300 ms para el estado, con red) | [10](#10-tiempo-de-respuesta-del-asistente-virtual-qa-12-p41) |
+
+---
+
 ## 1. Pruebas de caídas y disponibilidad (`QA-4`, P3.5 y P4.1)
 
 Mediciones contra el sistema levantado con `npm run infra:levantar -- --ha` (global, `r1` y `r2`, con 3 nodos de RabbitMQ por región), el 21/11/2026.
@@ -43,6 +64,10 @@ Mediciones contra el sistema levantado con `npm run infra:levantar -- --ha` (glo
   * Con una sola instancia por servicio, la caída de Viajes deja sin panel a la región (escenario 3). Con las 3 instancias de `ADR-006` (`npm run infra:escalador` con el perfil `ha`), la caída de una instancia sería como el escenario 1.
   * El escenario 1 da 1 error y no 0: la solicitud que estaba yendo al gateway justo cuando se mató termina con `504`. La wiki dice que el usuario no lo nota; `gateway.test.ts` pide 0 errores y por eso falla.
   * En la primera corrida, con el sistema recién levantado, las pruebas 2 y 3 no vieron los correos en el panel (esperan 35 s y 25 s): el mock de Gmail mandó los avisos y el Servicio de Correo respondió `202`, pero no leyó los correos. No se repitió en las 3 corridas siguientes, y no encontramos la causa.
+* **Arreglos después de esta medición (mergeados en `main`):**
+  * **PR #42:** nginx reintenta en el otro gateway solo con `proxy_next_upstream error timeout`. Con Viajes detenido 30 s, la ruta de Autenticación dio 0 errores de 285 (antes 71 de 203), y la prueba 4 de `npm run caos` pasa.
+  * **PR #43:** el mock de Gmail numera los avisos push desde la hora de arranque. Con los volúmenes de antes, las pruebas 2 y 3 de `npm run caos` pasan en la primera corrida.
+  * Siguen igual el error de la prueba de `gateway.test.ts` (1 `504`, pide 0) y la prueba 5, que arranca antes de que termine de restaurarse la réplica de la prueba 4.
 
 ---
 
@@ -212,6 +237,7 @@ Mediciones contra el sistema levantado con `npm run infra:levantar` (global, `r1
 * **Errores encontrados (no se cambió código, ver el aviso al grupo):**
   1. **El idioma del perfil no llega al JWT.** `PATCH /perfil` de Usuarios cambia `cuentas.idioma`, pero `credenciales.idioma` de Autenticación (de donde sale el claim `idioma`) queda con el valor del registro, y la web (`web/src/acciones.ts`, `iniciarSesion`) pasa la interfaz a ese idioma al entrar.
   2. **La conversación del asistente no cambia de idioma** al cambiar el de la interfaz (menor).
+* **Arreglo después de esta medición (PR #44, mergeado en `main`):** Usuarios publica `IdiomaActualizado` al cambiar el idioma del perfil y Autenticación actualiza la credencial. Con el arreglo, la medición da que el otro navegador sale en inglés. El evento no está en la lista de eventos de la wiki: si el grupo lo aprueba, hay que agregarlo. El error 2 sigue igual.
 * **Protocolo para la prueba con usuarios (pendiente del grupo):** al menos 5 personas que no conozcan la aplicación, con una cuenta de prueba en español y un viaje cargado. Tarea: "Poné la aplicación en inglés y decime la fecha y el precio de tu vuelo". Se mide con cronómetro desde que ven el panel hasta que responden, y se anota como error cada paso equivocado (entrar a una pantalla que no era, elegir otra opción) y cada dato mal leído. Cumple si todas terminan en menos de 2 minutos y los errores son menos del 5 % de los pasos.
 
 ## 5. Cambios de un proveedor sin aviso (`QA-1`, P4.1)
@@ -425,6 +451,7 @@ Las 15 corridas dieron el mismo resultado: 5.000.000 de reservas y 316.666 cance
   * La wiki supone 500.000 actualizaciones con 50 consumidores; acá se midió la proporción de 4 consumidores en una sola computadora. Agregar instancias de Integraciones ayudó (de 43 a 119 por segundo), pero en la misma computadora compiten por el procesador con el resto del sistema. Con esta máquina no se puede saber cuánto mejora con computadoras separadas.
   * El mock de la aerolínea manda todos los webhooks de una tanda a la vez y deja de reintentar a los 6 intentos. Una aerolínea real puede reintentar por más tiempo; con este mock, 356 cancelaciones de la región 1 se perdieron.
   * Map-Reduce: la wiki estima 1 millón de filas por minuto por procesador. Medido: 558 millones por minuto con 1 procesador, porque PostgreSQL agrupa con el índice. En una computadora mejora hasta 4 procesadores, no hasta 50.
+* **Cambio propuesto después de esta medición (PR #45, abierto, sin mergear):** el outbox manda cada vuelta de hasta 100 eventos junta y, si vino llena, sigue sin esperar. Con la misma tormenta y 1 instancia, Viajes llegó a 241 cancelaciones por segundo (antes 105) y la cola pasó a RabbitMQ. Pero en una sola computadora el panel tuvo p95 de 3,6 s durante la tormenta (antes 356 ms) y el mock de la aerolínea descartó webhooks: llegaron 30.746 de las 40.000 cancelaciones. El grupo tiene que decidir si lo mergea.
 
 ## 9. Agregar un medio de transporte nuevo (`QA-10`, P4.1)
 
