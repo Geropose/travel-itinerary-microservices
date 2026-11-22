@@ -55,10 +55,19 @@ export function subDeJwt(jwt: string): string {
   return claims.sub;
 }
 
+/** Las pruebas ejecutan comandos síncronos de Docker entre peticiones al enrutador. */
+export function pedirHttpE2E(url: string, init: RequestInit = {}): Promise<Response> {
+  if (new URL(url).origin !== CONFIG_E2E.urlEnrutador) return fetch(url, init);
+  const headers = new Headers(init.headers);
+  // Evita reutilizar una conexión que el enrutador cerró durante esos comandos.
+  headers.set('Connection', 'close');
+  return fetch(url, { ...init, headers });
+}
+
 /** Comprueba si el enrutador global y los servicios están respondiendo. */
 export async function sistemaDisponible(): Promise<boolean> {
   try {
-    const res = await fetch(`${CONFIG_E2E.urlEnrutador}/health`, {
+    const res = await pedirHttpE2E(`${CONFIG_E2E.urlEnrutador}/health`, {
       signal: AbortSignal.timeout(2000),
     });
     return res.status === 200;
@@ -74,7 +83,7 @@ export async function pedirJson<T>(
   reintentos503 = 2,
 ): Promise<{ status: number; datos: T | undefined; texto: string; headers: Headers }> {
   for (let intento = 0; intento <= reintentos503; intento += 1) {
-    const resp = await fetch(url, init);
+    const resp = await pedirHttpE2E(url, init);
     const texto = await resp.text();
     let datos: T | undefined;
     if (texto) {
@@ -301,37 +310,58 @@ export async function reiniciarMock(urlMock: string): Promise<void> {
   }
 }
 
-/**
- * Dispara en el acto la tarea de archivado en la región indicada (`POST /interna/archivado/ejecutar`,
- * specs/openapi/viajes.yaml) usando el token de servicio `pruebas` desde la red interna.
- */
-export function ejecutarArchivadoEnRegion(region: Region = 'region-1'): void {
+/** Ejecuta una operación de prueba dentro de la red privada de la región. */
+export function ejecutarNodeEnRegion(region: Region, codigo: string, entrada: string): string {
   const proyecto = region === 'region-1' ? 'r1' : 'r2';
-  const codigo = `
-    const rTok = await fetch('http://autenticacion:3001/interna/tokens-servicio', {
+  return execFileSync(
+    'docker',
+    ['exec', '-i', `${proyecto}-viajes-1`, 'node', '--input-type=module', '-e', codigo],
+    { input: entrada, encoding: 'utf8', timeout: 25_000 },
+  ).trim();
+}
+
+/** Emite el JWT del servicio pruebas según el contrato de Autenticación. */
+export function tokenServicioDePruebas(region: Region = 'region-1'): string {
+  return ejecutarNodeEnRegion(
+    region,
+    `
+    let secreto = '';
+    for await (const parte of process.stdin) secreto += parte;
+    const respuesta = await fetch('http://autenticacion:3001/interna/tokens-servicio', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ servicio: 'pruebas', secreto: process.argv[1] }),
+      body: JSON.stringify({ servicio: 'pruebas', secreto }),
+      signal: AbortSignal.timeout(10_000),
     });
-    const { token } = await rTok.json();
-    const rArc = await fetch('http://127.0.0.1:3004/interna/archivado/ejecutar', {
+    if (!respuesta.ok) throw new Error('Emisión del token de pruebas: HTTP ' + respuesta.status);
+    const { tokenServicio } = await respuesta.json();
+    if (typeof tokenServicio !== 'string' || !tokenServicio) {
+      throw new Error('Autenticación no devolvió tokenServicio');
+    }
+    console.log(tokenServicio);
+  `,
+    CONFIG_E2E.secretoServicioPruebas,
+  );
+}
+
+/** Dispara en el acto la tarea de archivado de Viajes desde la red privada. */
+export function ejecutarArchivadoEnRegion(region: Region = 'region-1'): void {
+  const token = tokenServicioDePruebas(region);
+  ejecutarNodeEnRegion(
+    region,
+    `
+    let token = '';
+    for await (const parte of process.stdin) token += parte;
+    const respuesta = await fetch('http://127.0.0.1:3004/interna/archivado/ejecutar', {
       method: 'POST',
       headers: { authorization: 'Bearer ' + token },
+      signal: AbortSignal.timeout(15_000),
     });
-    if (!rArc.ok && rArc.status !== 409) process.exit(1);
-  `;
-  execFileSync(
-    'docker',
-    [
-      'exec',
-      `${proyecto}-viajes-1`,
-      'node',
-      '--input-type=module',
-      '-e',
-      codigo,
-      CONFIG_E2E.secretoServicioPruebas,
-    ],
-    { encoding: 'utf8' },
+    if (!respuesta.ok && respuesta.status !== 409) {
+      throw new Error('Archivado de Viajes: HTTP ' + respuesta.status);
+    }
+  `,
+    token,
   );
 }
 
