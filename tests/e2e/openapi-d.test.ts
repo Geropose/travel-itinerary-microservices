@@ -1,4 +1,3 @@
-import { spawnSync } from 'node:child_process';
 import { createHmac, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -9,6 +8,7 @@ import {
   pedirJson,
   registrarYLogin,
   reiniciarMock,
+  tokenServicioDePruebas,
   type SesionE2E,
 } from './comun.ts';
 import { prepararContrato } from './openapi-contratos.ts';
@@ -167,24 +167,7 @@ describe.skipIf(process.env.CONTRATOS_EN_VIVO !== '1')(
           return { 'X-Webhook-Signature': `t=${t},v1=${firma}` };
         },
       });
-      const codigo = `
-        let secreto = '';
-        for await (const parte of process.stdin) secreto += parte;
-        const r = await fetch('http://autenticacion:3001/interna/tokens-servicio', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ servicio: 'pruebas', secreto }),
-          signal: AbortSignal.timeout(10000),
-        });
-        if (!r.ok) throw new Error('Emisión de token de pruebas: HTTP ' + r.status);
-        console.log((await r.json()).token);
-      `;
-      const resultado = spawnSync(
-        'docker',
-        ['exec', '-i', 'r1-viajes-1', 'node', '--input-type=module', '-e', codigo],
-        { input: CONFIG_E2E.secretoServicioPruebas, encoding: 'utf8', timeout: 15000 },
-      );
-      if (resultado.status !== 0) throw new Error('No se pudo emitir el token de servicio pruebas');
-      const tokenServicio = resultado.stdout.trim();
+      const tokenServicio = tokenServicioDePruebas(sesion.region);
       await integraciones.probar('listarNoTraducidos', {
         status: 200,
         headers: { Authorization: `Bearer ${tokenServicio}` },

@@ -105,10 +105,12 @@ describe.skipIf(!haySistema)('UC-4: Gestión manual de reservas (alta, edición 
       },
       body: JSON.stringify({
         origen: 'Buenos Aires (AEP)',
+        estado: 'modificada',
         detalle: { asiento: '18C' },
       }),
     });
     expect(edicion.status).toBe(200);
+    expect(edicion.datos?.estado).toBe('modificada');
 
     // Verificar cambio reflejado en el panel.
     const panelDespuesEdicion = await esperarCondicion<PanelRespuesta>(

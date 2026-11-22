@@ -1,10 +1,8 @@
-import { execFile } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { promisify } from 'node:util';
 import { Ajv2020 } from 'ajv/dist/2020.js';
 import formatos from 'ajv-formats';
 import { parse } from 'yaml';
-import { CONFIG_E2E } from './comun.ts';
+import { CONFIG_E2E, ejecutarNodeEnRegion } from './comun.ts';
 
 type Json = string | number | boolean | null | Json[] | { [clave: string]: Json };
 type Objeto = { [clave: string]: Json };
@@ -67,7 +65,6 @@ interface OpcionesCaso {
   estadoValido?: string;
 }
 
-const exec = promisify(execFile);
 const urlContratos = new URL('../../specs/openapi/', import.meta.url);
 const uri = (nombre: string) => `https://trotamundos.example/specs/openapi/${nombre}.yaml`;
 const leer = (nombre: string): Contrato =>
@@ -78,25 +75,25 @@ async function pedir(servicio: string, pedido: Pedido): Promise<Respuesta> {
   if (pedido.ruta.startsWith('/interna/')) {
     // El gateway bloquea /interna. Ejecutar HTTP dentro de la red de pruebas de la región.
     const codigo = `
-      const { ruta, ...init } = JSON.parse(process.argv[1]);
+      let entrada = '';
+      for await (const parte of process.stdin) entrada += parte;
+      const { ruta, metodo, ...init } = JSON.parse(entrada);
       const respuesta = await fetch('http://${servicio}:3005' + ruta, {
-        ...init, redirect: 'manual', signal: AbortSignal.timeout(20000),
+        ...init, method: metodo, redirect: 'manual', signal: AbortSignal.timeout(20000),
       });
       console.log(JSON.stringify({
         status: respuesta.status, tipo: respuesta.headers.get('content-type') ?? '',
         body: await respuesta.text(),
       }));
     `;
-    const { stdout } = await exec(
-      'docker',
-      ['exec', 'r1-viajes-1', 'node', '-e', codigo, JSON.stringify(pedido)],
-      { timeout: 25_000 },
-    );
-    return JSON.parse(stdout) as Respuesta;
+    return JSON.parse(
+      ejecutarNodeEnRegion('region-1', codigo, JSON.stringify(pedido)),
+    ) as Respuesta;
   }
-  const { ruta, ...init } = pedido;
+  const { ruta, metodo, ...init } = pedido;
   const respuesta = await fetch(`${CONFIG_E2E.urlEnrutador}/api/${servicio}${ruta}`, {
     ...init,
+    method: metodo,
     redirect: 'manual',
     signal: AbortSignal.timeout(20_000),
   });
