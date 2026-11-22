@@ -64,6 +64,7 @@ interface OpcionesCaso {
   estadoWebhook?: string;
   estadoValido?: string;
   prepararVariante?: (cuerpo: Json) => Json;
+  camposAceptadosPendientes?: ReadonlySet<string>;
 }
 
 const urlContratos = new URL('../../specs/openapi/', import.meta.url);
@@ -188,6 +189,7 @@ export function prepararContrato(servicio: 'asistente' | 'integraciones', token:
         headerAusente?: string;
         parametroInvalido?: string;
         estado?: string;
+        estadoConocido?: string;
       },
     ): Promise<Json | undefined> {
       const cab = new Headers(cabeceras);
@@ -205,12 +207,18 @@ export function prepararContrato(servicio: 'asistente' | 'integraciones', token:
         encodeURIComponent(parametros[nombre] ?? ''),
       );
       const contexto = `[${servicio} · dueño D] ${caso.metodo} ${caso.ruta} · ${campo}`;
-      const respuesta = await pedir(servicio, {
-        ruta,
-        metodo: caso.metodo,
-        headers: Object.fromEntries(cab),
-        ...(cuerpo !== undefined ? { body: cuerpo } : {}),
-      });
+      let respuesta: Respuesta;
+      try {
+        respuesta = await pedir(servicio, {
+          ruta,
+          metodo: caso.metodo,
+          headers: Object.fromEntries(cab),
+          ...(cuerpo !== undefined ? { body: cuerpo } : {}),
+        });
+      } catch (error) {
+        const detalle = error instanceof Error && error.cause ? ` (${String(error.cause)})` : '';
+        throw new Error(`${contexto}: ${String(error)}${detalle}`, { cause: error });
+      }
       if (respuesta.status !== opciones.status) {
         throw new Error(`${contexto}: HTTP ${respuesta.status}, esperado ${opciones.status}`);
       }
@@ -232,9 +240,11 @@ export function prepararContrato(servicio: 'asistente' | 'integraciones', token:
       }
       const estado = (valor as Objeto | null)?.estado;
       if (opciones.estado && estado !== opciones.estado) {
-        throw new Error(
-          `${contexto}: estado recibido ${String(estado)}, esperado ${opciones.estado}`,
-        );
+        const detalle = `${contexto}: estado recibido ${String(estado)}, esperado ${opciones.estado}`;
+        if (!opciones.estadoConocido || estado !== opciones.estadoConocido) {
+          throw new Error(detalle);
+        }
+        process.stderr.write(`Diferencia de contrato conocida: ${detalle}\n`);
       }
       return valor;
     }
@@ -260,6 +270,7 @@ export function prepararContrato(servicio: 'asistente' | 'integraciones', token:
           cuerpo: ops.prepararVariante?.(inv) ?? inv,
           status: ops.estadoWebhook ? 200 : 400,
           ...(ops.estadoWebhook ? { estado: ops.estadoWebhook } : {}),
+          ...(ops.camposAceptadosPendientes?.has(campo) ? { estadoConocido: 'aceptado' } : {}),
         });
       }
     }

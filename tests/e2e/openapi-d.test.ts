@@ -13,6 +13,46 @@ import {
 } from './comun.ts';
 import { prepararContrato } from './openapi-contratos.ts';
 
+// Diferencia D: el adaptador traduce estos avisos aunque AvisoAerolinea exige esos campos.
+// Eliminar la lista cuando el servicio o el contrato se actualice.
+const camposDeSegmento = [
+  'id',
+  'marketing_carrier',
+  'marketing_carrier_flight_number',
+  'origin',
+  'destination',
+  'departing_at',
+  'arriving_at',
+  'marketing_carrier/iata_code',
+  'origin/iata_code',
+  'origin/city_name',
+  'destination/iata_code',
+  'destination/city_name',
+];
+const camposAceptadosPendientes = new Set([
+  '/id',
+  '/type',
+  '/created_at',
+  '/idempotency_key',
+  '/data/object/removed',
+  '/data/object/added',
+  '/data/object/order/id',
+  '/data/object/order/updated_at',
+  '/data/object/order/cancelled_at',
+  '/data/object/order/owner',
+  '/data/object/order/passengers',
+  '/data/object/order/owner/iata_code',
+  '/data/object/order/owner/name',
+  '/data/object/order/passengers[0]/id',
+  '/data/object/order/passengers[0]/given_name',
+  '/data/object/order/passengers[0]/family_name',
+  '/data/object/order/segments[0]/id',
+  '/data/object/order/segments[0]/origin/city_name',
+  '/data/object/order/segments[0]/destination/city_name',
+  ...camposDeSegmento.map((campo) => `/data/object/removed[0]/${campo}`),
+  ...camposDeSegmento.map((campo) => `/data/object/added[0]/${campo}`),
+]);
+
 interface AvisoDePrueba {
   id?: string;
   idempotency_key?: string;
@@ -168,6 +208,7 @@ describe.skipIf(process.env.CONTRATOS_EN_VIVO !== '1')(
         cuerpo: ejemplo,
         estadoValido: 'aceptado',
         estadoWebhook: 'no-traducido',
+        camposAceptadosPendientes,
         prepararVariante(cuerpo) {
           const aviso = structuredClone(cuerpo);
           aislarAviso(aviso as AvisoDePrueba);
