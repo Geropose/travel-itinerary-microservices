@@ -28,6 +28,10 @@ Son advertencias del lint sobre los contratos existentes. Su confirmación como 
 | C | Analítica y Viajes | Los dos `GET /health` no declaran respuestas 4xx. El lint señala rutas potencialmente ambiguas en Analítica y marca el `required` condicional de `origen` en `Reserva` y `NuevaReserva` de Viajes. |
 | D | Asistente e Integraciones | Los dos `GET /health` no declaran respuestas 4xx. |
 
+### Diferencia HTTP del webhook de Aerolínea Andina
+
+**Dueño D · Integraciones.** El [contrato de `AvisoAerolinea`](../specs/openapi/integraciones.yaml#L1128) dice que un aviso firmado que incumple el esquema debe terminar como `no-traducido`. La [corrida #125](https://github.com/facubelmonte/Trabajo-especial-trotamundos/actions/runs/45051210844) mostró respuestas con otro estado al omitir campos obligatorios como `id`, `type`, `created_at` o `idempotency_key`. El [adaptador](../services/integraciones/src/adaptadores/aerolinea.ts#L172) puede traducir el aviso sin esos campos. Cada variante genera una referencia de reserva propia para que la deduplicación no afecte el resultado. La prueba exige `no-traducido` y muestra el estado que devuelve el servicio. El dueño debe decidir si valida el esquema completo antes de traducir o actualiza el contrato para reflejar lo que acepta el adaptador.
+
 ## Cómo ejecutar
 
 ```bash
@@ -48,4 +52,4 @@ La CI tiene un job que levanta el prototipo, ejecuta el modo en vivo y baja los 
 | B | Correo y Usuarios | 19 |
 | C | Analítica y Viajes | 19 |
 
-La revisión estática y los esquemas se verificaron localmente. La prueba de punta a punta de HTTP y RabbitMQ requiere una corrida con Docker. Esa ejecución queda pendiente.
+La corrida #125 ejecutó las pruebas HTTP y encontró la diferencia del webhook. La verificación en vivo de esta revisión requiere una nueva corrida en GitHub Actions.
