@@ -313,5 +313,71 @@ describe.skipIf(!hayDocker)('con PostgreSQL y RabbitMQ', { timeout: 30_000 }, ()
           .rowCount,
       ).toBe(0);
     });
+
+    /** Evento sin consumidores en estas pruebas (nadie lo escucha: solo importa la confirmación). */
+    const idioma = () =>
+      crearEvento('IdiomaActualizado', { usuarioId: randomUUID(), idioma: 'es' }, 'region-1');
+    const sinEnviar = async (ids: string[]) =>
+      (
+        await pool.query<{ n: number }>(
+          'SELECT count(*)::int AS n FROM eventos_salientes WHERE event_id = ANY($1::uuid[]) AND enviado_en IS NULL',
+          [ids],
+        )
+      ).rows[0]?.n;
+
+    it('si la vuelta viene llena sigue enseguida, sin esperar el intervalo (QA-5)', async () => {
+      // 250 pendientes con lotes de 100 y 2 s entre vueltas: antes eran 3 vueltas con 2 s antes de
+      // cada una (6 s). Ahora la primera vuelta arranca a los 2 s y las otras dos siguen enseguida.
+      const eventos = Array.from({ length: 250 }, idioma);
+      await enTransaccion(pool, async (cliente) => {
+        for (const evento of eventos) await guardarEnOutbox(cliente, evento);
+      });
+      const ids = eventos.map((e) => e.eventId);
+      const publicador = iniciarPublicadorOutbox({
+        pool,
+        broker: await nuevoBroker('integraciones'),
+        logger,
+        intervaloMs: 2_000,
+        lote: 100,
+      });
+      try {
+        await esperarQue(async () => (await sinEnviar(ids)) === 0, 3_500);
+      } finally {
+        await publicador.detener();
+      }
+    });
+
+    it('marca como enviados solo los que el broker confirmó; el resto queda para después', async () => {
+      const eventos = Array.from({ length: 5 }, idioma);
+      await enTransaccion(pool, async (cliente) => {
+        for (const evento of eventos) await guardarEnOutbox(cliente, evento);
+      });
+      const falla = eventos[2]?.eventId;
+      const publicados: string[] = [];
+      // Broker de mentira: rechaza un evento del medio y confirma los demás.
+      const broker = {
+        conectado: () => true,
+        publicar: async (sobre: Sobre<unknown>) => {
+          if (sobre.eventId === falla) throw new Error('el broker no confirmó');
+          publicados.push(sobre.eventId);
+        },
+      };
+      const publicador = iniciarPublicadorOutbox({ pool, broker, logger, intervaloMs: 60_000 });
+      try {
+        const ids = eventos.map((e) => e.eventId);
+        await publicador.publicarPendientes();
+        expect(await sinEnviar(ids)).toBe(1);
+        expect(await sinEnviar(ids.filter((id) => id !== falla))).toBe(0);
+        // Los posteriores al que falló también salieron (antes se cortaba la vuelta).
+        expect(publicados).toContain(eventos[4]?.eventId);
+        expect(
+          lineas.some(
+            (l) => l.mensaje === 'No se pudo publicar desde el outbox' && l.eventId === falla,
+          ),
+        ).toBe(true);
+      } finally {
+        await publicador.detener();
+      }
+    });
   });
 });

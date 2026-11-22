@@ -205,3 +205,69 @@ test('tras 3 errores seguidos del asistente, oculta el chat y muestra "Contactar
   await expect(page.getByTestId('ventana-chat')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Contactar a mi agencia' })).toBeVisible();
 });
+
+test('una respuesta pendiente pertenece al chat desde el que se hizo la consulta', async ({
+  page,
+}) => {
+  test.skip(process.env.AUDITORIA === undefined, 'Prueba de regresión de la auditoría');
+  await apiFalsa(page, { asistente: { reprogramacionLenta: true } });
+
+  const sondeoIniciado = Promise.withResolvers<undefined>();
+  const permitirRespuesta = Promise.withResolvers<undefined>();
+  const rutaSondeo = /\/api\/asistente\/conversaciones\/[^/]+\/mensajes\?desde=/;
+  const textoAnterior = 'Respuesta del proveedor para la conversación anterior';
+  await page.route(rutaSondeo, async (route) => {
+    if (route.request().method() !== 'GET') return route.fallback();
+    sondeoIniciado.resolve(undefined);
+    await permitirRespuesta.promise;
+    await route.fulfill({
+      headers: { 'Access-Control-Allow-Origin': 'http://localhost:4173' },
+      json: {
+        consultando: false,
+        ultimaSecuencia: 4,
+        mensajes: [
+          {
+            mensajeId: '3fa85f64-5717-4562-b3fc-2c963f66afa6',
+            secuencia: 4,
+            autor: 'asistente',
+            texto: textoAnterior,
+            enviadoEn: '2026-11-21T12:00:00.000Z',
+            resultado: 'respondido',
+          },
+        ],
+      },
+    });
+  });
+
+  await iniciarSesion(page, usuaria);
+  await page.getByTestId('chat-burbuja').click();
+  await expect(page.getByTestId('chat-mensaje-asistente').first()).toBeVisible();
+  await page.getByLabel('Mensaje para el asistente').fill('Necesito reprogramar mi vuelo');
+  await page.getByRole('button', { name: 'Enviar' }).click();
+  await expect(page.getByTestId('chat-consultando')).toBeVisible();
+
+  try {
+    await sondeoIniciado.promise;
+    const nuevaConversacion = page.waitForResponse(
+      (respuesta) =>
+        respuesta.url().endsWith('/api/asistente/conversaciones') &&
+        respuesta.request().method() === 'POST',
+    );
+    await page.getByRole('button', { name: 'Nueva conversación' }).click();
+    expect((await nuevaConversacion).status()).toBe(201);
+    await expect(page.getByTestId('chat-mensaje-asistente')).toHaveCount(1);
+    const respuestaAnterior = page.waitForResponse(rutaSondeo);
+    permitirRespuesta.resolve(undefined);
+    await (await respuestaAnterior).finished();
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        ),
+    );
+
+    await expect(page.getByText(textoAnterior)).toHaveCount(0);
+  } finally {
+    permitirRespuesta.resolve(undefined);
+  }
+});
