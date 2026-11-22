@@ -30,7 +30,7 @@ Son advertencias del lint sobre los contratos existentes. Su confirmación como 
 
 ### Diferencia HTTP del webhook de Aerolínea Andina
 
-**Dueño D · Integraciones.** El [contrato de `AvisoAerolinea`](../specs/openapi/integraciones.yaml#L1128) dice que un aviso firmado que incumple el esquema debe terminar como `no-traducido`. La [corrida #125](https://github.com/facubelmonte/Trabajo-especial-trotamundos/actions/runs/45051210844) mostró respuestas con otro estado al omitir campos obligatorios como `id`, `type`, `created_at` o `idempotency_key`. El [adaptador](../services/integraciones/src/adaptadores/aerolinea.ts#L172) puede traducir el aviso sin esos campos. Cada variante genera una referencia de reserva propia para que la deduplicación no afecte el resultado. La prueba exige `no-traducido` y muestra el estado que devuelve el servicio. El dueño debe decidir si valida el esquema completo antes de traducir o actualiza el contrato para reflejar lo que acepta el adaptador.
+**Dueño D · Integraciones.** El contrato de `AvisoAerolinea` indica que un aviso firmado con campos obligatorios faltantes debe terminar como `no-traducido`. En la corrida #127, el servicio respondió `aceptado` para avisos incompletos con referencias de reserva distintas. La prueba verifica el HTTP y el esquema de todas las respuestas. Cuando recibe exactamente `aceptado` para una de las omisiones registradas, deja una advertencia con el campo, el estado esperado y el dueño. Cualquier otro incumplimiento sigue haciendo fallar la prueba. El dueño debe decidir si valida el esquema completo antes de traducir o actualiza el contrato para reflejar lo que acepta el adaptador. [Contrato](../specs/openapi/integraciones.yaml#L1128) · [Casos registrados](../tests/e2e/openapi-d.test.ts) · [Corrida #127](https://github.com/facubelmonte/Trabajo-especial-trotamundos/actions/runs/45052388875)
 
 ## Cómo ejecutar
 
@@ -42,7 +42,9 @@ npm run test:contratos -- --en-vivo
 npm run infra:bajar
 ```
 
-La CI tiene un job que levanta el prototipo, ejecuta el modo en vivo y baja los contenedores. Las diferencias HTTP de Asistente e Integraciones se muestran con operación y dueño. Las de eventos se muestran con región, tipo y publicador según AsyncAPI. El diagnóstico evita imprimir el mensaje capturado.
+La CI tiene un job que levanta el prototipo, ejecuta el modo en vivo y baja los contenedores. En ese job, Integraciones consulta a los proveedores cada 5 segundos para que el hotel pueda actualizarse dentro de los 30 segundos de la prueba UC-3. Compose conserva los 120 segundos como valor por defecto. Para reproducir el intervalo de CI en Bash, ejecutar `INTERVALO_CONSULTA_PROVEEDORES_SEG=5 npm run infra:levantar` antes de probar en vivo.
+
+Las diferencias HTTP de Asistente e Integraciones se muestran con operación y dueño. Las de eventos se muestran con región, tipo y publicador según AsyncAPI. El diagnóstico evita imprimir el mensaje capturado.
 
 ## Cobertura HTTP pendiente del equipo
 
@@ -52,4 +54,4 @@ La CI tiene un job que levanta el prototipo, ejecuta el modo en vivo y baja los 
 | B | Correo y Usuarios | 19 |
 | C | Analítica y Viajes | 19 |
 
-La corrida #125 ejecutó las pruebas HTTP y encontró la diferencia del webhook. La verificación en vivo de esta revisión requiere una nueva corrida en GitHub Actions.
+La corrida #127 capturó los seis tipos de mensajes de RabbitMQ. La verificación en vivo de esta revisión requiere una nueva corrida en GitHub Actions.
