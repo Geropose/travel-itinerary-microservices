@@ -243,6 +243,7 @@ describe.skipIf(!haySistema)(
         1_500,
       );
       expect(hotelCancelado.estado).toBe('cancelada');
-    });
+      // Las cuatro esperas consecutivas admiten hasta 95 segundos en total.
+    }, 120_000);
   },
 );

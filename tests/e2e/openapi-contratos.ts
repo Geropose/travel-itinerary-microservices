@@ -63,6 +63,7 @@ interface OpcionesCaso {
   signo?: (cuerpo: string) => Record<string, string>;
   estadoWebhook?: string;
   estadoValido?: string;
+  prepararVariante?: (cuerpo: Json) => Json;
 }
 
 const urlContratos = new URL('../../specs/openapi/', import.meta.url);
@@ -191,7 +192,9 @@ export function prepararContrato(servicio: 'asistente' | 'integraciones', token:
     ): Promise<Json | undefined> {
       const cab = new Headers(cabeceras);
       const cuerpo = opciones.cuerpo === undefined ? undefined : JSON.stringify(opciones.cuerpo);
-      if (cuerpo !== undefined || ops.signo) cab.set('content-type', 'application/json');
+      if (caso.operacion.requestBody?.content['application/json']) {
+        cab.set('content-type', 'application/json');
+      }
       for (const [k, v] of Object.entries(ops.signo?.(cuerpo ?? '') ?? {})) cab.set(k, v);
       if (opciones.headerAusente) cab.delete(opciones.headerAusente);
       const parametros = { ...ops.parametros };
@@ -227,8 +230,11 @@ export function prepararContrato(servicio: 'asistente' | 'integraciones', token:
       if (!validarRespuesta(valor)) {
         throw new Error(`${contexto}: ${ajv.errorsText(validarRespuesta.errors)}`);
       }
-      if (opciones.estado && (valor as Objeto).estado !== opciones.estado) {
-        throw new Error(`${contexto}: estado esperado ${opciones.estado}`);
+      const estado = (valor as Objeto | null)?.estado;
+      if (opciones.estado && estado !== opciones.estado) {
+        throw new Error(
+          `${contexto}: estado recibido ${String(estado)}, esperado ${opciones.estado}`,
+        );
       }
       return valor;
     }
@@ -251,7 +257,7 @@ export function prepararContrato(servicio: 'asistente' | 'integraciones', token:
     if (cuerpo !== undefined) {
       for (const [campo, inv] of omitirCampos(schema, cuerpo)) {
         await ejecutar(`falta ${campo}`, {
-          cuerpo: inv,
+          cuerpo: ops.prepararVariante?.(inv) ?? inv,
           status: ops.estadoWebhook ? 200 : 400,
           ...(ops.estadoWebhook ? { estado: ops.estadoWebhook } : {}),
         });

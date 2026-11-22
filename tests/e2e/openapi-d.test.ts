@@ -13,6 +13,22 @@ import {
 } from './comun.ts';
 import { prepararContrato } from './openapi-contratos.ts';
 
+interface AvisoDePrueba {
+  id?: string;
+  idempotency_key?: string;
+  data?: { object?: { order?: { booking_reference?: string } } };
+}
+
+function aislarAviso(aviso: AvisoDePrueba): void {
+  const sufijo = randomUUID();
+  const referencia = `CT${sufijo.replaceAll('-', '').slice(0, 12).toUpperCase()}`;
+  const orden = aviso.data?.object?.order;
+  // Cada variante usa un PNR propio y conserva el campo que la prueba omitió.
+  if (orden?.booking_reference !== undefined) orden.booking_reference = referencia;
+  if (aviso.id !== undefined) aviso.id = `wev_${sufijo}`;
+  if (aviso.idempotency_key !== undefined) aviso.idempotency_key = `${referencia}-v2`;
+}
+
 describe.skipIf(process.env.CONTRATOS_EN_VIVO !== '1')(
   'Contratos HTTP de Asistente e Integraciones (dueño D)',
   () => {
@@ -142,18 +158,9 @@ describe.skipIf(process.env.CONTRATOS_EN_VIVO !== '1')(
     }, 90_000);
 
     it('comprueba el webhook firmado y la consulta de avisos no traducidos', async () => {
-      const ejemplo = integraciones.ejemplo('recibirAvisoProveedor') as
-        | {
-            id: string;
-            idempotency_key: string;
-            data: { object: { order: { booking_reference: string } } };
-          }
-        | undefined;
+      const ejemplo = integraciones.ejemplo('recibirAvisoProveedor');
       if (!ejemplo) throw new Error('Falta el ejemplo de webhook de Aerolínea Andina');
-      const referencia = `CT${randomUUID().slice(0, 4).toUpperCase()}`;
-      ejemplo.id = `wev_${randomUUID()}`;
-      ejemplo.idempotency_key = `${referencia}-v2`;
-      ejemplo.data.object.order.booking_reference = referencia;
+      aislarAviso(ejemplo as AvisoDePrueba);
       await integraciones.probar('recibirAvisoProveedor', {
         status: 200,
         parametros: { proveedor: 'aerolinea-andina' },
@@ -161,6 +168,11 @@ describe.skipIf(process.env.CONTRATOS_EN_VIVO !== '1')(
         cuerpo: ejemplo,
         estadoValido: 'aceptado',
         estadoWebhook: 'no-traducido',
+        prepararVariante(cuerpo) {
+          const aviso = structuredClone(cuerpo);
+          aislarAviso(aviso as AvisoDePrueba);
+          return aviso;
+        },
         signo(cuerpo) {
           const t = Math.floor(Date.now() / 1000);
           const firma = createHmac('sha256', secretoWebhook).update(`${t}.${cuerpo}`).digest('hex');
