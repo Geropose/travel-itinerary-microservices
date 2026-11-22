@@ -55,10 +55,19 @@ export function subDeJwt(jwt: string): string {
   return claims.sub;
 }
 
+/** Las pruebas ejecutan comandos síncronos de Docker entre peticiones al enrutador. */
+export function pedirHttpE2E(url: string, init: RequestInit = {}): Promise<Response> {
+  if (new URL(url).origin !== CONFIG_E2E.urlEnrutador) return fetch(url, init);
+  const headers = new Headers(init.headers);
+  // Evita reutilizar una conexión que el enrutador cerró durante esos comandos.
+  headers.set('Connection', 'close');
+  return fetch(url, { ...init, headers });
+}
+
 /** Comprueba si el enrutador global y los servicios están respondiendo. */
 export async function sistemaDisponible(): Promise<boolean> {
   try {
-    const res = await fetch(`${CONFIG_E2E.urlEnrutador}/health`, {
+    const res = await pedirHttpE2E(`${CONFIG_E2E.urlEnrutador}/health`, {
       signal: AbortSignal.timeout(2000),
     });
     return res.status === 200;
@@ -74,7 +83,7 @@ export async function pedirJson<T>(
   reintentos503 = 2,
 ): Promise<{ status: number; datos: T | undefined; texto: string; headers: Headers }> {
   for (let intento = 0; intento <= reintentos503; intento += 1) {
-    const resp = await fetch(url, init);
+    const resp = await pedirHttpE2E(url, init);
     const texto = await resp.text();
     let datos: T | undefined;
     if (texto) {

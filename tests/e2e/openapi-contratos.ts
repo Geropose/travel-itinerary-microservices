@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { Ajv2020 } from 'ajv/dist/2020.js';
 import formatos from 'ajv-formats';
 import { parse } from 'yaml';
-import { CONFIG_E2E, ejecutarNodeEnRegion } from './comun.ts';
+import { CONFIG_E2E, ejecutarNodeEnRegion, pedirHttpE2E } from './comun.ts';
 
 type Json = string | number | boolean | null | Json[] | { [clave: string]: Json };
 type Objeto = { [clave: string]: Json };
@@ -93,7 +93,7 @@ async function pedir(servicio: string, pedido: Pedido): Promise<Respuesta> {
     ) as Respuesta;
   }
   const { ruta, metodo, ...init } = pedido;
-  const respuesta = await fetch(`${CONFIG_E2E.urlEnrutador}/api/${servicio}${ruta}`, {
+  const respuesta = await pedirHttpE2E(`${CONFIG_E2E.urlEnrutador}/api/${servicio}${ruta}`, {
     ...init,
     method: metodo,
     redirect: 'manual',
