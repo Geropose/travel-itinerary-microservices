@@ -38,10 +38,14 @@ export interface PublicadorOutbox {
 }
 
 /**
- * Publicador del outbox: cada 500 ms envía al broker los eventos pendientes, en orden, y los marca
- * como enviados. Si el broker falla a mitad de camino, marca los que llegó a enviar y el resto
- * queda para la vuelta siguiente. Con varias instancias, FOR UPDATE SKIP LOCKED evita que dos
- * envíen el mismo evento a la vez; si igual se repite, los consumidores lo ignoran.
+ * Publicador del outbox: cada 500 ms envía al broker los eventos pendientes y los marca como
+ * enviados. Los de una vuelta salen todos juntos, en el orden de la tabla, y después se espera la
+ * confirmación de cada uno (esperarlas de a una limitaba el outbox a unos 43 eventos por segundo,
+ * docs/mediciones.md, QA-5). Solo se marcan los confirmados: si el broker falla con alguno, ese
+ * queda para la vuelta siguiente (y puede llegar después de otros más nuevos). Si la vuelta vino
+ * llena, la siguiente empieza enseguida, sin esperar los 500 ms. Con varias instancias, FOR UPDATE
+ * SKIP LOCKED evita que dos envíen el mismo evento a la vez; si igual se repite, los consumidores
+ * lo ignoran.
  */
 export function iniciarPublicadorOutbox(opciones: OpcionesPublicadorOutbox): PublicadorOutbox {
   const { pool, broker, logger, intervaloMs = 500, lote = 100 } = opciones;
@@ -60,18 +64,20 @@ export function iniciarPublicadorOutbox(opciones: OpcionesPublicadorOutbox): Pub
           FOR UPDATE SKIP LOCKED`,
         [lote],
       );
+      const resultados = await Promise.allSettled(rows.map((fila) => broker.publicar(fila.sobre)));
       const enviados: string[] = [];
-      for (const fila of rows) {
-        try {
-          await broker.publicar(fila.sobre);
-          enviados.push(fila.id);
-        } catch (error) {
-          logger.warn(
-            { err: error, eventId: fila.sobre.eventId },
-            'No se pudo publicar desde el outbox',
-          );
-          break;
-        }
+      const fallidos: { eventId: string; error: unknown }[] = [];
+      resultados.forEach((resultado, i) => {
+        const fila = rows[i];
+        if (!fila) return;
+        if (resultado.status === 'fulfilled') enviados.push(fila.id);
+        else fallidos.push({ eventId: fila.sobre.eventId, error: resultado.reason });
+      });
+      if (fallidos[0]) {
+        logger.warn(
+          { err: fallidos[0].error, eventId: fallidos[0].eventId, cantidad: fallidos.length },
+          'No se pudo publicar desde el outbox',
+        );
       }
       if (enviados.length > 0) {
         await cliente.query(
@@ -83,15 +89,20 @@ export function iniciarPublicadorOutbox(opciones: OpcionesPublicadorOutbox): Pub
     });
   }
 
-  function programar() {
+  function programar(esperaMs: number) {
     if (detenido) return;
     temporizador = setTimeout(() => {
       vueltaActual = publicarPendientes()
-        .catch((error: unknown) => logger.warn({ err: error }, 'Falló la vuelta del outbox'))
-        .finally(programar);
-    }, intervaloMs);
+        // Vuelta llena: puede haber más pendientes, se sigue sin esperar.
+        .then((enviados) => (enviados >= lote ? 0 : intervaloMs))
+        .catch((error: unknown) => {
+          logger.warn({ err: error }, 'Falló la vuelta del outbox');
+          return intervaloMs;
+        })
+        .then(programar);
+    }, esperaMs);
   }
-  programar();
+  programar(intervaloMs);
 
   return {
     publicarPendientes,

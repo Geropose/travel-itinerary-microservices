@@ -93,7 +93,7 @@ Todas las rutas públicas pasan por el gateway con el prefijo del servicio: `/ap
 | `AccesoRechazado` | Cada microservicio (Validador de Intercepción) | Gateway (registro de accesos) | `servicio, metodo, ruta, status (401/403), motivo (sin-token/token-invalido/otra-region/sin-permiso), usuarioId?, ip?, requestId` |
 
 - **Idempotencia:** cada consumidor guarda el `eventId` en una tabla `eventos_procesados` dentro de la misma transacción que aplica el cambio; si ya está, ignora el evento (Iteración 2: "ignoran los repetidos").
-- **Publicación segura (outbox):** quien publica guarda el evento en una tabla `eventos_salientes` en la misma transacción que su cambio, y un publicador lo envía al broker cada 500 ms. Así un cambio guardado nunca se queda sin su evento.
+- **Publicación segura (outbox):** quien publica guarda el evento en una tabla `eventos_salientes` en la misma transacción que su cambio, y un publicador lo envía al broker cada 500 ms (de a 100 por vuelta, sin esperar los 500 ms mientras haya más pendientes). Así un cambio guardado nunca se queda sin su evento.
 - `ReservaDetectada`: Viajes hace un *upsert* por `proveedor + numeroReserva`. Si la reserva no existe la crea y la agrupa en un viaje; si existe le aplica el `estado` y las fechas nuevas.
 - `ReservaActualizada` no trae `usuarioId` (el proveedor no lo conoce): Viajes busca la reserva por `proveedor + numeroReserva`. Si no la encuentra, ignora el evento, lo registra en el log y lo confirma sin reintentar.
 - `FiltrosActualizados`: mientras Correo no recibió ninguno de un usuario, toma sus filtros como inactivos y su lista como vacía.

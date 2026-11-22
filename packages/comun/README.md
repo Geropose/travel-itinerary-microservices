@@ -231,8 +231,10 @@ Así un cambio guardado nunca se queda sin su evento (CONVENCIONES 4.5).
 
 - `guardarEnOutbox(cliente, sobre)`: guarda el evento en `eventos_salientes` dentro de la
   transacción del servicio.
-- `iniciarPublicadorOutbox({ pool, broker, logger })`: cada 500 ms envía los pendientes en orden
-  y los marca como enviados. Con varias instancias, `FOR UPDATE SKIP LOCKED` reparte el trabajo.
+- `iniciarPublicadorOutbox({ pool, broker, logger })`: cada 500 ms envía los pendientes (hasta 100
+  por vuelta, todos juntos, en el orden de la tabla) y marca como enviados los que el broker
+  confirmó. Si la vuelta vino llena, sigue enseguida. Con varias instancias, `FOR UPDATE SKIP
+  LOCKED` reparte el trabajo.
 
 ```ts
 await enTransaccion(pool, async (cliente) => {
