@@ -254,10 +254,14 @@ function VentanaChat({ modo }: PropsVentanaChat) {
 
   const erroresSeguidosRef = useRef(0);
   const ultimaSecuenciaRef = useRef(0);
-  const enVueloPollRef = useRef(false);
+  const conversacionActivaRef = useRef<string | null>(conversacionId);
   const finListaRef = useRef<HTMLDivElement | null>(null);
 
   const chatActivo = modo === 'pantalla' || abierto;
+
+  useEffect(() => {
+    conversacionActivaRef.current = conversacionId;
+  }, [conversacionId]);
 
   useEffect(() => {
     ultimaSecuenciaRef.current = ultimaSecuenciaDe(mensajes);
@@ -378,26 +382,33 @@ function VentanaChat({ modo }: PropsVentanaChat) {
   }, [chatActivo, asistenteCaido, enLinea, mensajes.length, iniciando, abrirONuevaConversacion]);
 
   // Polling cada 2 s mientras `consultando` sea true y la ventana esté abierta.
-  // Al cerrar el chat (`chatActivo = false`), al llegar la respuesta (`consultando = false`) o
-  // al desmontar, se limpia el intervalo inmediatamente.
+  // Al cerrar el chat (`chatActivo = false`), cambiar de conversación o llegar la respuesta,
+  // ignora respuestas tardías de conversaciones anteriores y limpia el intervalo.
   useEffect(() => {
     if (!chatActivo || !consultando || !conversacionId || asistenteCaido || !enLinea) {
       return undefined;
     }
 
+    let cancelado = false;
+    let enVuelo = false;
+    const conversacionSondeada = conversacionId;
+
     const consultarNuevos = async () => {
-      if (enVueloPollRef.current) return;
-      enVueloPollRef.current = true;
+      if (enVuelo || cancelado) return;
+      enVuelo = true;
       try {
         const { data, response } = await api.asistente.GET(
           '/conversaciones/{conversacionId}/mensajes',
           {
             params: {
-              path: { conversacionId },
+              path: { conversacionId: conversacionSondeada },
               query: { desde: ultimaSecuenciaRef.current },
             },
           },
         );
+        if (cancelado || conversacionActivaRef.current !== conversacionSondeada) {
+          return;
+        }
         if (data) {
           registrarExito();
           if (data.mensajes.length > 0) {
@@ -413,9 +424,11 @@ function VentanaChat({ modo }: PropsVentanaChat) {
           registrarFallaServicio();
         }
       } catch {
-        registrarFallaServicio();
+        if (!cancelado && conversacionActivaRef.current === conversacionSondeada) {
+          registrarFallaServicio();
+        }
       } finally {
-        enVueloPollRef.current = false;
+        enVuelo = false;
       }
     };
 
@@ -424,6 +437,7 @@ function VentanaChat({ modo }: PropsVentanaChat) {
     }, INTERVALO_POLLING_MS);
 
     return () => {
+      cancelado = true;
       window.clearInterval(temporizador);
     };
   }, [
@@ -561,6 +575,8 @@ function VentanaChat({ modo }: PropsVentanaChat) {
             type="button"
             className="secundario chat-boton-chico"
             onClick={() => {
+              conversacionActivaRef.current = null;
+              ultimaSecuenciaRef.current = 0;
               setMensajes([]);
               setConsultando(false);
               guardarConversacionId(usuarioId, null);

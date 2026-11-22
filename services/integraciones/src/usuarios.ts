@@ -1,4 +1,4 @@
-import { crearClienteHttp, ErrorHttp } from '@trotamundos/comun';
+import { crearClienteHttp, errores, ErrorHttp, ErrorRespuestaHttp } from '@trotamundos/comun';
 
 export interface PerfilUsuario {
   usuarioId: string;
@@ -34,8 +34,16 @@ export function crearClienteUsuarios(opciones: OpcionesClienteUsuarios): Cliente
         const { datos } = await http.get<PerfilUsuario>('/perfil', { token });
         return datos;
       } catch (error) {
-        if (error instanceof ErrorHttp && error.status < 500) {
-          throw error;
+        if (error instanceof ErrorRespuestaHttp && error.status < 500) {
+          if (error.status === 401) throw errores.noAutenticado();
+          if (error.status === 403) throw errores.prohibido();
+          if (error.status === 404) throw errores.noEncontrado('El usuario no existe.');
+          throw new ErrorHttp({
+            status: error.status,
+            tipo: 'solicitud-invalida',
+            titulo: 'Solicitud inválida',
+            detalle: 'El Servicio de Usuarios rechazó la consulta del perfil.',
+          });
         }
         throw new ErrorHttp({
           status: 503,

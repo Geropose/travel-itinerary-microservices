@@ -9,35 +9,47 @@ import type { ResultadoAplicarReprogramacion } from '../src/adaptadores/tipos.ts
 const { logger } = loggerDePrueba(SERVICIO);
 const region = 'region-1';
 
-describe.skipIf(process.env.AUDITORIA === undefined)('Auditoría de Integraciones', () => {
+describe('Auditoría de Integraciones', () => {
   it('envía una sola orden al proveedor si dos réplicas reciben la misma confirmación', async () => {
     const ahora = '2026-11-21T12:00:00.000Z';
     const opcion = { proveedor: 'aerolinea-andina', numeroReserva: 'TEST01', opcionId: 'opt-1' };
     let aplicadaEn: string | null = null;
-    let lecturas = 0;
+    let enCursoDesde: string | null = null;
+    let consultasSegundaReplica = 0;
     const segundaLectura = Promise.withResolvers<undefined>();
     const primeraLlamada = Promise.withResolvers<undefined>();
     const respuestaProveedor = Promise.withResolvers<ResultadoAplicarReprogramacion>();
 
+    const filaActual = () => ({
+      proveedor: opcion.proveedor,
+      numero_reserva: opcion.numeroReserva,
+      opcion_id: opcion.opcionId,
+      vence_en: '2026-11-22T12:00:00.000Z',
+      aplicada_en: aplicadaEn,
+      en_curso_desde: enCursoDesde,
+    });
+
     const pool = {
       query: vi.fn(async (sql: string) => {
-        if (sql.includes('SELECT proveedor, numero_reserva, opcion_id')) {
-          lecturas += 1;
-          if (lecturas === 2) segundaLectura.resolve(undefined);
-          return {
-            rows: [
-              {
-                proveedor: opcion.proveedor,
-                numero_reserva: opcion.numeroReserva,
-                opcion_id: opcion.opcionId,
-                vence_en: '2026-11-22T12:00:00.000Z',
-                aplicada_en: aplicadaEn,
-              },
-            ],
-          };
+        if (sql.includes('SET en_curso_desde = $4')) {
+          if (aplicadaEn === null && enCursoDesde === null) {
+            enCursoDesde = ahora;
+            return { rows: [filaActual()] };
+          }
+          return { rows: [] };
         }
-        if (sql.includes('UPDATE opciones_reprogramacion_ofrecidas')) {
+        if (sql.includes('SELECT proveedor, numero_reserva, opcion_id')) {
+          consultasSegundaReplica += 1;
+          if (consultasSegundaReplica >= 1) segundaLectura.resolve(undefined);
+          return { rows: [filaActual()] };
+        }
+        if (sql.includes('SET en_curso_desde = NULL') && !sql.includes('aplicada_en')) {
+          enCursoDesde = null;
+          return { rows: [] };
+        }
+        if (sql.includes('SET aplicada_en')) {
           aplicadaEn = ahora;
+          enCursoDesde = null;
           return { rows: [] };
         }
         throw new Error(`Consulta no contemplada en la prueba: ${sql}`);

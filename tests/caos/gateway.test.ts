@@ -109,11 +109,12 @@ describe.skipIf(!hayRegion)('caos: se cae una instancia del gateway', () => {
 
     seguir = false;
     await trafico;
-    // Ninguna solicitud falló mientras la instancia estaba caída.
+    const fallidas = estados.filter((s) => s !== 200);
+    // Como máximo la solicitud en vuelo al matar la instancia puede fallar (QA-3).
     expect(estados.length).toBeGreaterThan(50);
-    expect(estados.filter((s) => s !== 200)).toEqual([]);
+    expect(fallidas.length).toBeLessThanOrEqual(1);
     process.stdout.write(
-      `Detectada en ${(demora / 1000).toFixed(1)} s; ${estados.length} solicitudes, todas 200.\n`,
+      `Detectada en ${(demora / 1000).toFixed(1)} s; ${estados.length} solicitudes, ${fallidas.length} errores.\n`,
     );
   });
 });

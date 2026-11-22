@@ -192,17 +192,10 @@ export function crearNucleoConversacion(opciones: OpcionesNucleoConversacion): N
     const { conversacionId, promesa, textoConsultando, textoNoDisponible, alCompletar } = params;
 
     let temporizador: NodeJS.Timeout | undefined;
-    let resolvioAntes = false;
     const carrera = await Promise.race([
       promesa.then(
-        (valor) => {
-          resolvioAntes = true;
-          return { tipo: 'ok' as const, valor };
-        },
-        (error: unknown) => {
-          resolvioAntes = true;
-          return { tipo: 'error' as const, error };
-        },
+        (valor) => ({ tipo: 'ok' as const, valor }),
+        (error: unknown) => ({ tipo: 'error' as const, error }),
       ),
       new Promise<{ tipo: typeof MARCA_LENTA }>((resolve) => {
         temporizador = setTimeout(() => resolve({ tipo: MARCA_LENTA }), umbralRespuestaLentaMs);
@@ -240,7 +233,8 @@ export function crearNucleoConversacion(opciones: OpcionesNucleoConversacion): N
       return { estado: 'respondido', respuesta };
     }
 
-    // Superó el umbral de 3 s: respondemos enseguida `consultando` y continuamos en segundo plano.
+    // Superó el umbral de 3 s: respondemos enseguida `consultando` y completamos en segundo plano
+    // incluso si el proveedor terminó mientras guardábamos el aviso.
     const mensajeConsultando = await guardarRespuestaAsistente(
       conversacionId,
       'reprogramar',
@@ -251,39 +245,37 @@ export function crearNucleoConversacion(opciones: OpcionesNucleoConversacion): N
       { intentosFallidos: 0, consultando: true },
     );
 
-    if (!resolvioAntes) {
-      const tarea = promesa
-        .then(async (respFinal) => {
-          if (detenido) return;
-          if (alCompletar) await alCompletar(respFinal);
-          await guardarRespuestaAsistente(conversacionId, 'reprogramar', respFinal, {
-            intentosFallidos: 0,
-            consultando: false,
-          });
-        })
-        .catch(async (error: unknown) => {
-          if (detenido) return;
-          logger.warn(
-            { err: error, conversacionId },
-            'Falló la consulta lenta al proveedor en segundo plano',
-          );
-          await guardarRespuestaAsistente(
-            conversacionId,
-            'reprogramar',
-            {
-              texto: textoNoDisponible,
-              resultado: 'noDisponible',
-              noDisponible: { funcion: 'reprogramar', servicio: 'proveedor' },
-              ofreceDerivar: true,
-            },
-            { intentosFallidos: 0, consultando: false },
-          );
-        })
-        .finally(() => {
-          tareasSegundoPlano.delete(tarea);
+    const tarea = promesa
+      .then(async (respFinal) => {
+        if (detenido) return;
+        if (alCompletar) await alCompletar(respFinal);
+        await guardarRespuestaAsistente(conversacionId, 'reprogramar', respFinal, {
+          intentosFallidos: 0,
+          consultando: false,
         });
-      tareasSegundoPlano.add(tarea);
-    }
+      })
+      .catch(async (error: unknown) => {
+        if (detenido) return;
+        logger.warn(
+          { err: error, conversacionId },
+          'Falló la consulta lenta al proveedor en segundo plano',
+        );
+        await guardarRespuestaAsistente(
+          conversacionId,
+          'reprogramar',
+          {
+            texto: textoNoDisponible,
+            resultado: 'noDisponible',
+            noDisponible: { funcion: 'reprogramar', servicio: 'proveedor' },
+            ofreceDerivar: true,
+          },
+          { intentosFallidos: 0, consultando: false },
+        );
+      })
+      .finally(() => {
+        tareasSegundoPlano.delete(tarea);
+      });
+    tareasSegundoPlano.add(tarea);
 
     return { estado: 'consultando', respuesta: mensajeConsultando };
   }

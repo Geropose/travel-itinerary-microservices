@@ -51,19 +51,26 @@ interface SegmentoValidado {
   seat?: string;
 }
 
-function parsearSegmento(valor: unknown): SegmentoValidado | undefined {
+function parsearSegmento(valor: unknown, exigirCamposAviso = false): SegmentoValidado | undefined {
   if (!esObjeto(valor)) return undefined;
   const carrier = valor.marketing_carrier;
   const origin = valor.origin;
   const destination = valor.destination;
   if (!esObjeto(carrier) || !esObjeto(origin) || !esObjeto(destination)) return undefined;
+  const id = valor.id;
   const carrierIata = carrier.iata_code;
   const flightNumber = valor.marketing_carrier_flight_number;
   const originIata = origin.iata_code;
+  const originCity = origin.city_name;
   const destinationIata = destination.iata_code;
+  const destinationCity = destination.city_name;
   const departingAt = valor.departing_at;
   const arrivingAt = valor.arriving_at;
   if (
+    (exigirCamposAviso &&
+      (!esCadenaNoVacia(id) ||
+        !esCadenaNoVacia(originCity) ||
+        !esCadenaNoVacia(destinationCity))) ||
     !esCadenaNoVacia(carrierIata) ||
     !esCadenaNoVacia(flightNumber) ||
     !esCadenaNoVacia(originIata) ||
@@ -179,17 +186,34 @@ export function crearAdaptadorAerolinea(
     });
 
     if (!esObjeto(mensaje)) return fallar('El aviso no es un objeto JSON.');
+    if (!esCadenaNoVacia(mensaje.id)) return fallar('Falta id en el aviso.');
+    if (
+      mensaje.type !== 'order.airline_initiated_change_detected' &&
+      mensaje.type !== 'order.updated'
+    ) {
+      return fallar('type inválido en el aviso.');
+    }
+    if (!esFechaIsoValida(mensaje.created_at))
+      return fallar('Falta created_at válido en el aviso.');
+    if (!esCadenaNoVacia(mensaje.idempotency_key))
+      return fallar('Falta idempotency_key en el aviso.');
+
     const data = mensaje.data;
     const objeto = esObjeto(data) ? data.object : undefined;
-    if (!esObjeto(objeto)) return fallar('Falta data.object.order.');
+    if (!esObjeto(objeto)) return fallar('Falta data.object.');
     const order = objeto.order;
     if (!esObjeto(order)) return fallar('Falta data.object.order.');
+
+    if (!esCadenaNoVacia(order.id)) return fallar('Falta id en la orden.');
 
     const bookingReference = order.booking_reference;
     if (!esCadenaNoVacia(bookingReference)) return fallar('Falta booking_reference.');
 
     const statusCrudo = order.status;
-    const estado = typeof statusCrudo === 'string' ? ESTADOS_AEROLINEA[statusCrudo] : undefined;
+    const estado =
+      typeof statusCrudo === 'string' && Object.hasOwn(ESTADOS_AEROLINEA, statusCrudo)
+        ? ESTADOS_AEROLINEA[statusCrudo]
+        : undefined;
     if (!estado) {
       return fallar(`status desconocido: ${String(statusCrudo)}.`);
     }
@@ -197,10 +221,60 @@ export function crearAdaptadorAerolinea(
     const version = order.version;
     if (!esEnteroPositivo(version)) return fallar('Falta version válida en la orden.');
 
+    const marcaTemporal = order.updated_at;
+    if (!esFechaIsoValida(marcaTemporal)) return fallar('Falta updated_at válido en la orden.');
+    if (order.cancelled_at !== null && !esFechaIsoValida(order.cancelled_at)) {
+      return fallar('Falta cancelled_at válido en la orden.');
+    }
+
+    const owner = order.owner;
+    if (!esObjeto(owner) || !esCadenaNoVacia(owner.iata_code) || !esCadenaNoVacia(owner.name)) {
+      return fallar('Falta owner válido en la orden.');
+    }
+
+    const passengers = order.passengers;
+    if (!Array.isArray(passengers)) return fallar('Falta passengers en la orden.');
+    for (const p of passengers) {
+      if (
+        !esObjeto(p) ||
+        !esCadenaNoVacia(p.id) ||
+        !esCadenaNoVacia(p.given_name) ||
+        !esCadenaNoVacia(p.family_name)
+      ) {
+        return fallar('Un pasajero de la orden tiene datos faltantes.');
+      }
+    }
+
     const segmentsCrudos = order.segments;
     if (!Array.isArray(segmentsCrudos)) return fallar('Falta segments en la orden.');
+    const segmentos: SegmentoValidado[] = [];
+    for (const seg of segmentsCrudos) {
+      const parsed = parsearSegmento(seg, true);
+      if (!parsed) {
+        return fallar('Un segmento de la orden tiene datos faltantes o fechas inválidas.');
+      }
+      segmentos.push(parsed);
+    }
 
-    const marcaTemporal = esFechaIsoValida(order.updated_at) ? order.updated_at : undefined;
+    const removedCrudos = objeto.removed;
+    if (!Array.isArray(removedCrudos)) return fallar('Falta data.object.removed.');
+    const removed: SegmentoValidado[] = [];
+    for (const seg of removedCrudos) {
+      const parsed = parsearSegmento(seg, true);
+      if (!parsed) {
+        return fallar('Un segmento en removed tiene datos faltantes o fechas inválidas.');
+      }
+      removed.push(parsed);
+    }
+
+    const addedCrudos = objeto.added;
+    if (!Array.isArray(addedCrudos)) return fallar('Falta data.object.added.');
+    for (const seg of addedCrudos) {
+      if (!parsearSegmento(seg, true)) {
+        return fallar('Un segmento en added tiene datos faltantes o fechas inválidas.');
+      }
+    }
+
     const numeroReserva = bookingReference.trim();
 
     if (estado === 'cancelada') {
@@ -224,20 +298,8 @@ export function crearAdaptadorAerolinea(
           origenCambio: 'proveedor',
         },
         estadoActual,
-        ...(marcaTemporal ? { marcaTemporal } : {}),
+        marcaTemporal,
       };
-    }
-
-    if (segmentsCrudos.length === 0) {
-      return fallar('La orden no tiene segmentos y no está cancelada.');
-    }
-
-    const segmentos: SegmentoValidado[] = [];
-    for (const seg of segmentsCrudos) {
-      const parsed = parsearSegmento(seg);
-      if (!parsed)
-        return fallar('Un segmento de la orden tiene datos faltantes o fechas inválidas.');
-      segmentos.push(parsed);
     }
 
     const primer = segmentos[0];
@@ -246,11 +308,6 @@ export function crearAdaptadorAerolinea(
       return fallar('La orden no tiene segmentos y no está cancelada.');
     }
     const vueloActual = numeroVueloDe(primer);
-
-    const removedCrudos = Array.isArray(objeto.removed) ? objeto.removed : [];
-    const removed = removedCrudos
-      .map(parsearSegmento)
-      .filter((s): s is SegmentoValidado => s !== undefined);
 
     const cambios: CambiosReserva = {};
     const detalleCambios: Record<string, unknown> = {};
@@ -395,7 +452,7 @@ export function crearAdaptadorAerolinea(
       const moneda = oferta.change_total_currency;
       const nuevos = Array.isArray(oferta.new_segments)
         ? oferta.new_segments
-            .map(parsearSegmento)
+            .map((seg) => parsearSegmento(seg))
             .filter((s): s is SegmentoValidado => s !== undefined)
         : [];
       const primero = nuevos[0];
