@@ -425,3 +425,51 @@ Las 15 corridas dieron el mismo resultado: 5.000.000 de reservas y 316.666 cance
   * La wiki supone 500.000 actualizaciones con 50 consumidores; acá se midió la proporción de 4 consumidores en una sola computadora. Agregar instancias de Integraciones ayudó (de 43 a 119 por segundo), pero en la misma computadora compiten por el procesador con el resto del sistema. Con esta máquina no se puede saber cuánto mejora con computadoras separadas.
   * El mock de la aerolínea manda todos los webhooks de una tanda a la vez y deja de reintentar a los 6 intentos. Una aerolínea real puede reintentar por más tiempo; con este mock, 356 cancelaciones de la región 1 se perdieron.
   * Map-Reduce: la wiki estima 1 millón de filas por minuto por procesador. Medido: 558 millones por minuto con 1 procesador, porque PostgreSQL agrupa con el índice. En una computadora mejora hasta 4 procesadores, no hasta 50.
+
+## 9. Agregar un medio de transporte nuevo (`QA-10`, P4.1)
+
+Medición sobre el código, el 21/11/2026. No necesita el sistema levantado.
+
+* **Medida pedida (Análisis inicial, SEI 10):** el negocio pide agregar un medio de transporte nuevo (por ejemplo, trenes). Se agrega un conector nuevo sin modificar los módulos existentes, en menos de 2 semanas, y la decisión queda en un ADR. La prueba pide seguir `docs/agregar-proveedor.md` con un adaptador de trenes de prueba y contar los archivos modificados fuera del adaptador: tiene que dar 0.
+* **Qué dice la wiki (Iteración 3, Paso 7, y ADR-003):** cumplido. Sumar trenes es un adaptador nuevo, su configuración y su ADR: se estima 1 semana de desarrollo y 0 módulos modificados.
+* **Escala:** no aplica. Es una medida de cambios en el código, igual en una o en varias computadoras.
+* **Cómo se midió:** en una rama aparte, `b/qa10-adaptador-trenes` (desde `main`, commit `83b3b85`). No se mergea y no está en esta rama. Se siguieron los pasos 1 a 5 de la guía:
+  * **Adaptador:** un proveedor ficticio "Trenes del Sur" en modo consulta (`GET /v1/tickets?updatedSince=...&page=N`), que traduce boletos a `ReservaActualizada`.
+  * **Configuración:** su registro y su entrada en `proveedores.yaml`, con sus variables de entorno.
+  * **Pruebas:** confirmación, cambio con diff mínimo, cancelación, paginación, error 503, mensaje roto sin datos del pasajero, lote de 1.000 boletos y registro desde el YAML.
+  * **Resultado de las pruebas:** las 32 pruebas de Integraciones pasan, y también `lint` y `typecheck`. La prueba de integración con PostgreSQL y RabbitMQ no se corrió: Docker estaba apagado y el CI solo corre en pull requests.
+  * **Conteo:** con `git diff --name-status origin/main..b/qa10-adaptador-trenes`.
+* **Comandos reproducibles:**
+  ```bash
+  git fetch origin
+  git diff --name-status origin/main..origin/b/qa10-adaptador-trenes
+  git checkout b/qa10-adaptador-trenes && npx vitest run services/integraciones
+  ```
+
+| Archivo | Cambio | ¿Es el adaptador? |
+|---|---|---|
+| `services/integraciones/src/adaptadores/tren.ts` | Nuevo (212 líneas) | Sí |
+| `services/integraciones/test/tren.test.ts` | Nuevo (172 líneas) | Sí (sus pruebas) |
+| `services/integraciones/config/proveedores.yaml` | +9 líneas: la entrada `trenes-del-sur` | No: configuración |
+| `services/integraciones/.env.example` | +3 líneas: URL, clave e intervalo | No: configuración |
+| `.env.example` | +1 línea: `CLAVE_API_TRENES_DEL_SUR` | No: configuración |
+| `infra/region.compose.yaml` | +1 línea: la variable al contenedor de Integraciones | No: configuración |
+| `services/integraciones/src/adaptadores/registro.ts` | +9 líneas: el import y la fábrica `tren` | **No: código existente** |
+| `services/integraciones/test/adaptadores.test.ts` | 3 líneas: la lista fija de proveedores pasa de 3 a 4 | **No: prueba existente** |
+
+| Medida pedida | Cómo se midió | Resultado medido | ¿Cumple? |
+|---|---|---|---|
+| 0 archivos modificados fuera del adaptador | Diff de la rama contra `main` | **6 archivos**: 4 de configuración, 1 de código (`registro.ts`) y 1 de pruebas (`adaptadores.test.ts`) | **No** |
+| Ningún módulo existente modificado (wiki: "un adaptador nuevo, su configuración y su ADR") | Lo mismo, sin contar la configuración | 2: `registro.ts` y `adaptadores.test.ts` | No |
+| Ningún otro servicio ni contrato modificado | Lo mismo | 0: no se tocó otro servicio, `packages/comun`, `web/` ni `specs/` | Sí |
+| Menos de 2 semanas | El cambio completo de la rama | 8 archivos y unas 410 líneas, la mitad son pruebas. El tiempo de una persona no se puede medir con esta prueba | Sin medir |
+| El 100 % de las decisiones tiene ADR | Paso 6 de la guía | No se escribió: esta medición no toca la wiki | Pendiente |
+
+* **¿Cumple QA-10?** En parte. El cambio queda dentro del Servicio de Integraciones y de la configuración: no se tocó ningún otro servicio ni ningún contrato, que es lo que busca ADR-003. Pero no da 0 archivos fuera del adaptador: hay que modificar 2 archivos existentes de Integraciones.
+* **Por qué no da 0:**
+  * **`registro.ts`:** la fábrica de cada tipo de proveedor está escrita a mano en `FABRICAS_PROVEEDORES_DEFECTO`. La guía lo dice ("Registrar su fábrica en `registro.ts`", 1 línea de registro), pero la tabla de la wiki pide 0 módulos modificados.
+  * **`adaptadores.test.ts`:** una prueba existente compara la lista exacta de proveedores del YAML, así que se rompe con cualquier proveedor nuevo.
+  * **Variables de entorno:** cada clave nueva hay que agregarla en los dos `.env.example` y en `infra/region.compose.yaml`. La wiki cuenta esto como "su configuración".
+* **Diferencias con la wiki:**
+  * La wiki dice 0 módulos modificados. Medido: 1 módulo de código y 1 prueba existentes modificados.
+  * Para llegar a 0 habría que cambiar código de Integraciones (por ejemplo, que el registro encuentre la fábrica del adaptador sin una lista escrita a mano) y la prueba de la lista fija. No se cambió en esta medición: queda para que lo decida el grupo.
