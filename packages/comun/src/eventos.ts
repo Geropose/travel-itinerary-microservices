@@ -11,6 +11,7 @@ export const TIPOS_EVENTO = [
   'ReservaDetectada',
   'ReservaActualizada',
   'FiltrosActualizados',
+  'IdiomaActualizado',
   'ViajeActualizado',
   'AccesoRechazado',
 ] as const;

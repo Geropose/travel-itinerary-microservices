@@ -88,6 +88,7 @@ Todas las rutas públicas pasan por el gateway con el prefijo del servicio: `/ap
 | `ReservaDetectada` | Correo (procesadores) | Viajes (consumidores) | `usuarioId, proveedor, tipoReserva (vuelo/hotel/auto), numeroReserva, inicio, fin, origen, destino, estado (confirmada/modificada/cancelada), detalle{}, correoId` |
 | `ReservaActualizada` | Integraciones (adaptadores) | Viajes (consumidores) | `proveedor, numeroReserva, estado (confirmada/modificada/cancelada), cambios{inicio?, fin?, origen?, destino?, detalle?}, origenCambio ("proveedor")` |
 | `FiltrosActualizados` | Usuarios (filtros y whitelist) | Correo (filtro de remitentes) | `usuarioId, remitentesPermitidos[], filtrosActivos (bool)` |
+| `IdiomaActualizado` | Usuarios (cuentas y preferencias) | Autenticación (credenciales, claim `idioma` del JWT) | `usuarioId, idioma (es/en)` |
 | `ViajeActualizado` | Viajes (gestor de viajes) | Analítica (anonimizador) | `numeroReserva, proveedor, tipoReserva, origen, destino, inicio, fin, estado, origenCambio (correo/proveedor/manual/archivado)` |
 | `AccesoRechazado` | Cada microservicio (Validador de Intercepción) | Gateway (registro de accesos) | `servicio, metodo, ruta, status (401/403), motivo (sin-token/token-invalido/otra-region/sin-permiso), usuarioId?, ip?, requestId` |
 

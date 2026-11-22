@@ -1,0 +1,11 @@
+{
+  "eventId": "a1c3e5f7-9b2d-4f6a-8c0e-2a4c6e8f0b1d",
+  "tipo": "IdiomaActualizado",
+  "version": 1,
+  "ocurridoEn": "2026-11-21T15:10:00Z",
+  "region": "region-1",
+  "datos": {
+    "usuarioId": "0f9e8d7c-6b5a-4f3e-8d2c-1b0a9f8e7d6c",
+    "idioma": "en"
+  }
+}
