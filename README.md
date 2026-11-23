@@ -21,6 +21,8 @@ npm run web
 
 `infra:levantar` genera `.env` si hace falta, construye las imágenes y espera los chequeos de salud. Abrí [la web en localhost:5173](http://localhost:5173). El enrutador de la API escucha en [localhost:8000](http://localhost:8000/health). Para detener el entorno y conservar sus datos, ejecutá `npm run infra:bajar`.
 
+También podés iniciar todo en un solo paso ejecutando [`iniciar.bat`](iniciar.bat) (Windows, con doble clic o desde la terminal) o `./iniciar.sh` ([`iniciar.sh`](iniciar.sh) en macOS/Linux/Git Bash): verifica Node.js 24 y Docker (abre Docker Desktop si está cerrado e intenta instalar los requisitos con `winget` en Windows si faltan), corre `npm ci` si faltan dependencias o cambió `package-lock.json`, levanta los contenedores, carga las semillas (`--sin-semillas` para omitirlas), inicia la web y abre `http://localhost:5173`.
+
 ## Usuarios de prueba
 
 Con la infraestructura levantada, ejecutá `npm run semillas` en otra terminal si querés probar con cuentas ya configuradas. Carga 10 viajeros por región, conecta sus buzones de prueba y prepara reservas, filtros y permisos de itinerarios. También podés registrar un usuario desde la web.
