@@ -112,15 +112,22 @@ export interface components {
         NuevaConversacion: {
             idioma?: components["schemas"]["Idioma"];
         };
+        /**
+         * @description Zona horaria IANA del dispositivo del usuario. Es opcional: el asistente la usa para mostrar las horas en el texto de sus respuestas como las ve el usuario en el panel. Si falta o no es válida, usa UTC.
+         * @example America/Argentina/Buenos_Aires
+         */
+        ZonaHoraria: string;
         NuevoMensaje: {
             /**
              * @description Lo que escribió el usuario.
              * @example ¿Cuál es el estado de mi vuelo XKQ7PL?
              */
             texto: string;
+            zonaHoraria?: components["schemas"]["ZonaHoraria"];
         };
         Confirmacion: {
             opcionId: components["schemas"]["OpcionId"];
+            zonaHoraria?: components["schemas"]["ZonaHoraria"];
         };
         Conversacion: {
             /** Format: uuid */

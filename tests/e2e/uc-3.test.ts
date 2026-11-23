@@ -19,6 +19,11 @@ import {
   type SesionE2E,
 } from './comun.ts';
 
+// El hotel no avisa: Integraciones lo consulta cada INTERVALO_CONSULTA_PROVEEDORES_SEG (120 s por
+// defecto; CI usa 5 s). La prueba espera ese intervalo más 30 s, así pasa con cualquiera de los dos.
+const ESPERA_HOTEL_MS =
+  (Number(process.env.INTERVALO_CONSULTA_PROVEEDORES_SEG) || 120) * 1000 + 30_000;
+
 const haySistema = await sistemaDisponible();
 
 describe.skipIf(!haySistema)(
@@ -239,11 +244,11 @@ describe.skipIf(!haySistema)(
           const r = resList.find((x) => x.numeroReserva === codigoHotel);
           return r?.estado === 'cancelada' ? r : undefined;
         },
-        30_000,
+        ESPERA_HOTEL_MS,
         1_500,
       );
       expect(hotelCancelado.estado).toBe('cancelada');
-      // Las cuatro esperas consecutivas admiten hasta 95 segundos en total.
-    }, 120_000);
+      // Las esperas consecutivas admiten hasta 65 s, más el intervalo de consulta del hotel (120 s).
+    }, 240_000);
   },
 );

@@ -80,7 +80,7 @@ export function crearPluginEstado(viajes: ClienteViajes): PluginConsulta {
             tipo: etiquetaTipoReserva(encontrada.tipoReserva, contexto.idioma),
             numeroReserva: encontrada.numeroReserva,
             ruta,
-            inicio: formatearFechaHora(encontrada.inicio, contexto.idioma),
+            inicio: formatearFechaHora(encontrada.inicio, contexto.idioma, contexto.zonaHoraria),
             estado: etiquetaEstadoReserva(encontrada.estado, contexto.idioma),
           }),
           resultado: 'respondido',
@@ -109,7 +109,7 @@ export function crearPluginEstado(viajes: ClienteViajes): PluginConsulta {
               tipo: etiquetaTipoReserva(unica.tipoReserva, contexto.idioma),
               numeroReserva: unica.numeroReserva,
               ruta,
-              inicio: formatearFechaHora(unica.inicio, contexto.idioma),
+              inicio: formatearFechaHora(unica.inicio, contexto.idioma, contexto.zonaHoraria),
               estado: etiquetaEstadoReserva(unica.estado, contexto.idioma),
             }),
             resultado: 'respondido',
@@ -120,7 +120,7 @@ export function crearPluginEstado(viajes: ClienteViajes): PluginConsulta {
 
       const lineas = seleccionadas.map((r) => {
         const ruta = r.origen ? `${r.origen} → ${r.destino}` : r.destino;
-        return `- ${etiquetaTipoReserva(r.tipoReserva, contexto.idioma)} ${r.numeroReserva} (${ruta}, ${formatearFechaHora(r.inicio, contexto.idioma)}): ${etiquetaEstadoReserva(r.estado, contexto.idioma)}`;
+        return `- ${etiquetaTipoReserva(r.tipoReserva, contexto.idioma)} ${r.numeroReserva} (${ruta}, ${formatearFechaHora(r.inicio, contexto.idioma, contexto.zonaHoraria)}): ${etiquetaEstadoReserva(r.estado, contexto.idioma)}`;
       });
 
       return {

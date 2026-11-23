@@ -36,12 +36,13 @@ export function registrarRutas(servidor: Servidor, nucleo: NucleoConversacion): 
 
   servidor.app.post('/conversaciones/:conversacionId/mensajes', async (req, res) => {
     const auth = autenticacion(req);
-    const { texto } = req.body as { texto: string };
+    const { texto, zonaHoraria } = req.body as { texto: string; zonaHoraria?: string };
     const resultado = await nucleo.enviarMensaje(
       req.params.conversacionId ?? '',
       auth,
       texto,
       metadatosDe(req),
+      zonaHoraria,
     );
     if (resultado.estado === 'consultando') {
       res.status(202).setHeader('Retry-After', '2').json(resultado);
@@ -71,12 +72,13 @@ export function registrarRutas(servidor: Servidor, nucleo: NucleoConversacion): 
 
   servidor.app.post('/conversaciones/:conversacionId/confirmaciones', async (req, res) => {
     const auth = autenticacion(req);
-    const { opcionId } = req.body as { opcionId: string };
+    const { opcionId, zonaHoraria } = req.body as { opcionId: string; zonaHoraria?: string };
     const resultado = await nucleo.confirmarReprogramacion(
       req.params.conversacionId ?? '',
       auth,
       opcionId,
       metadatosDe(req),
+      zonaHoraria,
     );
     if (resultado.estado === 'consultando') {
       res.status(202).setHeader('Retry-After', '2').json(resultado);

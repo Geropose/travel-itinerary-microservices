@@ -17,7 +17,9 @@ npm run infra:levantar
 npm run semillas
 ```
 
-> Todos los comandos `curl` de abajo usan `jq` y variables de shell (`bash` / Git Bash / WSL). Si corrés desde PowerShell, podés usar `curl.exe` con los mismos endpoints y cuerpos JSON.
+**Requisitos para seguir los pasos de abajo.** Todos los comandos usan `curl`, `jq` y variables de shell (`export`), así que hay que correrlos en Bash (Git Bash, WSL, macOS o Linux), no en PowerShell. Git Bash trae `curl` pero no `jq`. En Windows, instalalo una vez con `winget install jqlang.jq` y abrí una terminal nueva. Comprobá que funciona con `jq --version`.
+
+Si preferís no instalar nada, la misma recorrida está automatizada en `npm run e2e` (casos UC-1 a UC-8).
 
 Definí las URLs base:
 

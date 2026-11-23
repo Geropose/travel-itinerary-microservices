@@ -78,7 +78,10 @@ test('reprogramación con botones de confirmación explícita (POST /confirmacio
   );
   const confirmaciones = api.pedidos.filter((p) => p.ruta.endsWith('/confirmaciones'));
   expect(confirmaciones).toHaveLength(1);
-  expect(confirmaciones[0]?.cuerpo).toEqual({ opcionId: 'ocr_XKQ7PL_2' });
+  expect(confirmaciones[0]?.cuerpo).toEqual({
+    opcionId: 'ocr_XKQ7PL_2',
+    zonaHoraria: expect.any(String),
+  });
   // Una vez confirmada, los botones de la oferta anterior quedan deshabilitados.
   await expect(page.getByTestId('confirmar-opcion-ocr_XKQ7PL_1')).toBeDisabled();
   await expect(page.getByTestId('confirmar-opcion-ocr_XKQ7PL_2')).toBeDisabled();

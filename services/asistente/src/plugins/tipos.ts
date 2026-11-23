@@ -70,6 +70,8 @@ export interface ContextoPlugin {
   token: string;
   reglas: ReglasIdioma;
   historial: MensajeHistorial[];
+  /** Zona horaria IANA del dispositivo del usuario, para mostrar las horas como en el panel. */
+  zonaHoraria?: string;
   /** Motivo explícito cuando el núcleo deriva automáticamente (ej. 2 intentos fallidos). */
   motivoDerivacion?: string;
 }
@@ -107,8 +109,27 @@ export function extraerCodigoReserva(mensaje: string): string | undefined {
   return conDigito;
 }
 
-/** Formatea una fecha ISO de manera legible según el idioma de la conversación. */
-export function formatearFechaHora(iso: string, idioma: IdiomaAsistente): string {
+/** Indica si el texto es una zona horaria IANA válida (por ejemplo, `America/Argentina/Buenos_Aires`). */
+export function esZonaHorariaValida(zona: string | undefined): zona is string {
+  if (!zona) return false;
+  try {
+    new Intl.DateTimeFormat('es-AR', { timeZone: zona });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Formatea una fecha ISO de manera legible según el idioma de la conversación. Las reservas se
+ * guardan en UTC: la hora se muestra en la zona horaria del usuario (la misma que ve en el panel)
+ * y, si el cliente no la informó o no es válida, en UTC.
+ */
+export function formatearFechaHora(
+  iso: string,
+  idioma: IdiomaAsistente,
+  zonaHoraria?: string,
+): string {
   const fecha = new Date(iso);
   if (Number.isNaN(fecha.getTime())) return iso;
   return new Intl.DateTimeFormat(idioma === 'en' ? 'en-US' : 'es-AR', {
@@ -117,7 +138,7 @@ export function formatearFechaHora(iso: string, idioma: IdiomaAsistente): string
     hour: '2-digit',
     minute: '2-digit',
     hour12: false,
-    timeZone: 'UTC',
+    timeZone: esZonaHorariaValida(zonaHoraria) ? zonaHoraria : 'UTC',
   }).format(fecha);
 }
 

@@ -652,6 +652,15 @@ components:
         idioma:
           $ref: './comun.yaml#/components/schemas/Idioma'
 
+    ZonaHoraria:
+      type: string
+      maxLength: 64
+      description: >
+        Zona horaria IANA del dispositivo del usuario. Es opcional: el asistente la usa para mostrar
+        las horas en el texto de sus respuestas como las ve el usuario en el panel. Si falta o no es
+        válida, usa UTC.
+      example: America/Argentina/Buenos_Aires
+
     NuevoMensaje:
       type: object
       additionalProperties: false
@@ -663,6 +672,8 @@ components:
           maxLength: 2000
           description: Lo que escribió el usuario.
           example: ¿Cuál es el estado de mi vuelo XKQ7PL?
+        zonaHoraria:
+          $ref: '#/components/schemas/ZonaHoraria'
 
     Confirmacion:
       type: object
@@ -671,6 +682,8 @@ components:
       properties:
         opcionId:
           $ref: '#/components/schemas/OpcionId'
+        zonaHoraria:
+          $ref: '#/components/schemas/ZonaHoraria'
 
     Conversacion:
       type: object

@@ -1,6 +1,14 @@
 // Pruebas unitarias de P2.D4: reglas YAML es/en con recarga sin reiniciar, detección rápida
 // (< 10 ms), extensibilidad ADR-018 (sumar plug-in sin tocar el núcleo) y cada plug-in aislado.
-import { cpSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import {
+  copyFileSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loggerDePrueba, USUARIO_PRUEBA } from '@trotamundos/comun/pruebas';
@@ -11,7 +19,11 @@ import { crearPluginEstado } from '../src/plugins/estado.ts';
 import { crearPluginProblemasMenores } from '../src/plugins/problemas-menores.ts';
 import { crearRegistroPlugins } from '../src/plugins/registro.ts';
 import { crearPluginReprogramacion } from '../src/plugins/reprogramacion.ts';
-import type { ContextoPlugin, PluginConsulta } from '../src/plugins/tipos.ts';
+import {
+  formatearFechaHora,
+  type ContextoPlugin,
+  type PluginConsulta,
+} from '../src/plugins/tipos.ts';
 import {
   crearGestorReglas,
   detectarIntencionConReglas,
@@ -86,7 +98,10 @@ describe('Reglas externas (config/reglas.{es,en}.yaml) y detección rápida', ()
   it('recarga reglas modificadas en disco sin reiniciar y conserva las válidas ante YAML roto', () => {
     const dirTemp = mkdtempSync(join(tmpdir(), 'asistente-reglas-'));
     try {
-      cpSync(DIR_REGLAS_DEFECTO, dirTemp, { recursive: true });
+      // No usamos cpSync recursivo: en Windows con rutas con ñ (como "DiseñodeSoftware") cierra Node.
+      for (const archivo of readdirSync(DIR_REGLAS_DEFECTO)) {
+        copyFileSync(join(DIR_REGLAS_DEFECTO, archivo), join(dirTemp, archivo));
+      }
       const gestor = crearGestorReglas({
         dirReglas: dirTemp,
         logger: loggerDePrueba('asistente').logger,
@@ -161,6 +176,36 @@ describe('Plug-ins independientes y registro extensible (ADR-018)', () => {
     const respAjena = await plugin.atender(ctx, 'Estado de mi vuelo ZZZ999');
     expect(respAjena.reservas).toEqual([]);
     expect(respAjena.texto).toContain('ZZZ999');
+  });
+
+  it('muestra la hora en la zona horaria del usuario y, si falta o no es válida, en UTC', async () => {
+    // Las reservas se guardan en UTC: 11:30 UTC son las 08:30 en Buenos Aires (UTC-3).
+    const iso = '2026-12-10T11:30:00Z';
+    expect(formatearFechaHora(iso, 'es')).toContain('11:30');
+    expect(formatearFechaHora(iso, 'es', 'America/Argentina/Buenos_Aires')).toContain('08:30');
+    expect(formatearFechaHora(iso, 'es', 'Zona/Inventada')).toContain('11:30');
+
+    const listarReservas = vi.fn<ClienteViajes['listarReservas']>(async () => [
+      {
+        reservaId: 'r-1',
+        proveedor: 'aerolinea-andina',
+        numeroReserva: 'XKQ7PL',
+        tipoReserva: 'vuelo',
+        estado: 'confirmada',
+        inicio: iso,
+        fin: '2026-12-10T13:40:00Z',
+        origen: 'EZE',
+        destino: 'SCL',
+      },
+    ]);
+    const plugin = crearPluginEstado({ listarReservas });
+    const ctx = {
+      ...contextoBase('es'),
+      zonaHoraria: 'America/Argentina/Buenos_Aires',
+    };
+    const resp = await plugin.atender(ctx, '¿Cómo está mi vuelo XKQ7PL?');
+    expect(resp.texto).toContain('08:30');
+    expect(resp.texto).not.toContain('11:30');
   });
 
   it('plug-in de reprogramación solo pide opciones y nunca aplica sin confirmar()', async () => {

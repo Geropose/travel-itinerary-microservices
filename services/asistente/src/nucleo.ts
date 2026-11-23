@@ -70,12 +70,14 @@ export interface NucleoConversacion {
     auth: Autenticacion,
     texto: string,
     acceso: MetadatosAcceso,
+    zonaHoraria?: string,
   ): Promise<ResultadoTurno>;
   confirmarReprogramacion(
     conversacionId: string,
     auth: Autenticacion,
     opcionId: string,
     acceso: MetadatosAcceso,
+    zonaHoraria?: string,
   ): Promise<ResultadoTurno>;
   /** Espera las consultas en segundo plano antes de cerrar la base (apagado limpio). */
   detener(): Promise<void>;
@@ -334,6 +336,7 @@ export function crearNucleoConversacion(opciones: OpcionesNucleoConversacion): N
     auth: Autenticacion,
     texto: string,
     acceso: MetadatosAcceso,
+    zonaHoraria?: string,
   ): Promise<ResultadoTurno> {
     const inicioTurno = performance.now();
     const conv = await exigirConversacionPropia(conversacionId, auth.sub, acceso);
@@ -389,6 +392,7 @@ export function crearNucleoConversacion(opciones: OpcionesNucleoConversacion): N
         token: auth.token,
         reglas: reglasIdioma,
         historial,
+        ...(zonaHoraria ? { zonaHoraria } : {}),
         motivoDerivacion: reglasIdioma.textos.derivacionAutomaticaMotivo,
       };
       const respDerivar = await pluginDerivar.atender(contexto, texto);
@@ -419,6 +423,7 @@ export function crearNucleoConversacion(opciones: OpcionesNucleoConversacion): N
       token: auth.token,
       reglas: reglasIdioma,
       historial,
+      ...(zonaHoraria ? { zonaHoraria } : {}),
     };
 
     if (detectada === 'reprogramar') {
@@ -457,6 +462,7 @@ export function crearNucleoConversacion(opciones: OpcionesNucleoConversacion): N
     auth: Autenticacion,
     opcionId: string,
     acceso: MetadatosAcceso,
+    zonaHoraria?: string,
   ): Promise<ResultadoTurno> {
     const inicioTurno = performance.now();
     const conv = await exigirConversacionPropia(conversacionId, auth.sub, acceso);
@@ -505,6 +511,7 @@ export function crearNucleoConversacion(opciones: OpcionesNucleoConversacion): N
       token: auth.token,
       reglas: reglasIdioma,
       historial,
+      ...(zonaHoraria ? { zonaHoraria } : {}),
     };
 
     const { estado, respuesta } = await ejecutarConUmbralLento({

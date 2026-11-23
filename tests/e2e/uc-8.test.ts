@@ -27,7 +27,9 @@ describe.skipIf(!haySistema)(
   () => {
     let sesion: SesionE2E;
     const buzonGmail = `uc8-gmail-${idAleatorio()}@gmail.example`;
-    const codigoVuelo = 'XKQ7PL';
+    // Código propio de 6 caracteres con un dígito (lo reconoce el asistente). No usa el vuelo
+    // XKQ7PL de las semillas: Viajes descarta una reserva que ya pertenece a otro usuario.
+    const codigoVuelo = `U8${idAleatorio().slice(0, 4).toUpperCase()}`;
     const agencia = 'viajes-del-plata';
 
     beforeAll(async () => {
@@ -44,7 +46,27 @@ describe.skipIf(!haySistema)(
         body: JSON.stringify({ agenciaPreferida: agencia }),
       });
 
-      // Conectar buzón e inyectar vuelo canónico XKQ7PL.
+      // Crear la orden en mock-aerolínea, para que pueda ofrecer reprogramaciones.
+      const respOrden = await fetch(`${CONFIG_E2E.urlMockAerolinea}/admin/ordenes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          booking_reference: codigoVuelo,
+          status: 'confirmed',
+          passenger: { given_name: 'Viajero', family_name: 'UC8' },
+          flight_number: '1234',
+          origin_iata: 'EZE',
+          origin_city: 'Buenos Aires',
+          destination_iata: 'SCL',
+          destination_city: 'Santiago',
+          departing_at: '2026-12-10T08:30:00-03:00',
+          arriving_at: '2026-12-10T10:40:00-03:00',
+          seat: '14C',
+        }),
+      });
+      expect(respOrden.status).toBe(201);
+
+      // Conectar buzón e inyectar el correo del vuelo.
       await conectarOAuthMock({
         proveedor: 'gmail',
         emailBuzon: buzonGmail,
@@ -131,7 +153,7 @@ describe.skipIf(!haySistema)(
         };
       }
 
-      // 2. Consulta de ESTADO: ¿Cuál es el estado de mi vuelo XKQ7PL?
+      // 2. Consulta de ESTADO: ¿Cuál es el estado de mi vuelo? La hora sale en la zona del usuario.
       const respEstado = await pedirJson<RespuestaMensaje>(
         `${CONFIG_E2E.urlEnrutador}/api/asistente/conversaciones/${conversacionId}/mensajes`,
         {
@@ -141,11 +163,15 @@ describe.skipIf(!haySistema)(
             Authorization: `Bearer ${sesion.jwt}`,
             'X-Region': sesion.region,
           },
-          body: JSON.stringify({ texto: `¿Cuál es el estado de mi vuelo ${codigoVuelo}?` }),
+          body: JSON.stringify({
+            texto: `¿Cuál es el estado de mi vuelo ${codigoVuelo}?`,
+            zonaHoraria: 'America/Argentina/Buenos_Aires',
+          }),
         },
       );
       expect(respEstado.status).toBe(200);
-      expect(respEstado.datos?.respuesta.texto).toBeTruthy();
+      // El vuelo sale 08:30 (UTC-3), que se guarda como 11:30 UTC.
+      expect(respEstado.datos?.respuesta.texto).toContain('08:30');
       const reservasVistas = respEstado.datos?.respuesta.reservas ?? [];
       expect(reservasVistas.some((r) => r.numeroReserva === codigoVuelo)).toBe(true);
 
