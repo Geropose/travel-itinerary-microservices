@@ -45,7 +45,12 @@ export async function iniciarSesion(
     const { data, response } = await api.autenticacion.POST('/login', {
       body: { email, contrasena },
     });
-    if (!data) return { ok: false, error: errorDe(response.status) };
+    if (!data) {
+      return {
+        ok: false,
+        error: response.status === 400 ? 'credenciales' : errorDe(response.status),
+      };
+    }
     sesion.guardar(data);
     // La interfaz pasa al idioma de la cuenta.
     const idioma = sesion.claims()?.idioma;
@@ -64,7 +69,11 @@ export async function registrarse(
   datos: SolicitudRegistro,
 ): Promise<Resultado> {
   // La región elegida es donde se guardan los datos (CONST-6): X-Region manda la solicitud ahí.
-  sesion.recordarRegion(datos.region);
+  try {
+    sesion.recordarRegion(datos.region);
+  } catch {
+    // Si falla el almacenamiento local, se intenta igual con el valor por defecto del servidor.
+  }
   try {
     const { data, response } = await api.autenticacion.POST('/registro', { body: datos });
     if (!data) return { ok: false, error: errorDe(response.status) };
@@ -75,13 +84,32 @@ export async function registrarse(
 }
 
 /** Cierra la sesión: revoca el token de renovación y borra el panel guardado del usuario. */
-export async function cerrarSesion(api: Api, sesion: Sesion, claims: Claims | undefined) {
-  const datos = sesion.obtener();
-  if (datos) {
-    await api.autenticacion
-      .POST('/logout', { body: { tokenRenovacion: datos.tokenRenovacion } })
-      .catch(() => undefined);
+export async function cerrarSesion(
+  api: Api,
+  sesion: Sesion,
+  claims: Claims | undefined,
+  tiempoMaximoLogoutMs = 3_000,
+) {
+  try {
+    const datos = sesion.obtener();
+    if (datos) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([
+        api.autenticacion
+          .POST('/logout', {
+            body: { tokenRenovacion: datos.tokenRenovacion },
+            signal: AbortSignal.timeout(tiempoMaximoLogoutMs),
+          })
+          .catch(() => undefined),
+        new Promise<void>((resolver) => {
+          timer = setTimeout(resolver, tiempoMaximoLogoutMs);
+        }),
+      ]).finally(() => {
+        if (timer !== undefined) clearTimeout(timer);
+      });
+    }
+  } finally {
+    if (claims) await borrarPanel(claims.sub).catch(() => undefined);
+    sesion.cerrar();
   }
-  if (claims) await borrarPanel(claims.sub).catch(() => undefined);
-  sesion.cerrar();
 }

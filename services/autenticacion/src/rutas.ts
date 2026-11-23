@@ -6,7 +6,9 @@ import {
   contextoActual,
   enTransaccion,
   ErrorHttp,
+  ErrorTiempoAgotado,
   errores,
+  ipDe,
   type Logger,
   type Pool,
   type Region,
@@ -104,6 +106,7 @@ export function registrarRutas(
   }
 
   function rechazo(req: Request, status: 401 | 403, usuarioId?: string): void {
+    const ip = ipDe(req);
     negocio.registrar({
       servicio,
       metodo: req.method,
@@ -111,7 +114,7 @@ export function registrarRutas(
       status,
       motivo: status === 401 ? 'token-invalido' : 'sin-permiso',
       ...(usuarioId ? { usuarioId } : {}),
-      ...(req.ip ? { ip: req.ip } : {}),
+      ...(ip ? { ip } : {}),
       requestId: contextoActual()?.requestId ?? '',
     });
   }
@@ -128,6 +131,15 @@ export function registrarRutas(
 
     const usuarioId = randomUUID();
     const hashContrasenaNueva = await hashContrasena(cuerpo.contrasena);
+    const crearEnUsuarios = () =>
+      usuarios.crearCuenta({
+        usuarioId,
+        email: repositorio.normalizarEmail(cuerpo.email),
+        nombre: cuerpo.nombre,
+        region,
+        idioma: cuerpo.idioma,
+      });
+
     try {
       // Si Usuarios no crea la cuenta, la transacción se deshace y no queda la credencial.
       await enTransaccion(pool, async (db) => {
@@ -138,13 +150,15 @@ export function registrarRutas(
           roles: ['usuario'],
           idioma: cuerpo.idioma,
         });
-        await usuarios.crearCuenta({
-          usuarioId,
-          email: repositorio.normalizarEmail(cuerpo.email),
-          nombre: cuerpo.nombre,
-          region,
-          idioma: cuerpo.idioma,
-        });
+        try {
+          await crearEnUsuarios();
+        } catch (error) {
+          if (error instanceof ErrorTiempoAgotado) {
+            await crearEnUsuarios();
+          } else {
+            throw error;
+          }
+        }
       });
     } catch (error) {
       // Dos registros a la vez con el mismo email: el segundo choca con el UNIQUE.
@@ -162,14 +176,19 @@ export function registrarRutas(
     const { email, contrasena } = req.body as { email: string; contrasena: string };
     const { maxIntentos, ventanaMinutos } = limiteLogin;
 
-    const intentos = await repositorio.intentosRecientes(pool, email, ventanaMinutos);
-    if (intentos.cantidad >= maxIntentos) {
+    const reserva = await repositorio.reservarIntentoLogin(
+      pool,
+      email,
+      maxIntentos,
+      ventanaMinutos,
+    );
+    if (!reserva.permitido) {
       throw new ErrorHttp({
         status: 429,
         tipo: 'demasiados-intentos',
         titulo: 'Demasiados intentos',
-        detalle: `Hubo ${maxIntentos} intentos fallidos con ese email. Probá de nuevo en ${Math.ceil(intentos.liberaEnSeg / 60)} minutos.`,
-        encabezados: { 'Retry-After': String(intentos.liberaEnSeg) },
+        detalle: `Hubo ${maxIntentos} intentos fallidos con ese email. Probá de nuevo en ${Math.ceil(reserva.liberaEnSeg / 60)} minutos.`,
+        encabezados: { 'Retry-After': String(reserva.liberaEnSeg) },
       });
     }
 
@@ -179,15 +198,21 @@ export function registrarRutas(
       await verificarContrasena(await HASH_FALSO, contrasena);
       // Dispositivo nuevo: la cuenta puede ser de la otra región. Se responde 307 sin guardar
       // nada en esta región (ADR-017).
-      if (await enLaOtraRegion(email)) {
+      let existeEnOtra: boolean;
+      try {
+        existeEnOtra = await enLaOtraRegion(email);
+      } catch (error) {
+        await repositorio.borrarIntentoPorId(pool, reserva.intentoId).catch(() => undefined);
+        throw error;
+      }
+      if (existeEnOtra) {
+        await repositorio.borrarIntentoPorId(pool, reserva.intentoId).catch(() => undefined);
         haciaOtraRegion(res, '/login');
         return;
       }
-      await repositorio.registrarIntentoFallido(pool, email, ventanaMinutos);
       throw credencialesIncorrectas();
     }
     if (!(await verificarContrasena(credencial.hashContrasena, contrasena))) {
-      await repositorio.registrarIntentoFallido(pool, email, ventanaMinutos);
       throw credencialesIncorrectas();
     }
 

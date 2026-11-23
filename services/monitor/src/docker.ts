@@ -78,13 +78,18 @@ function llamar(socket: string, metodo: string, ruta: string): Promise<unknown> 
       let cuerpo = '';
       res.setEncoding('utf8');
       res.on('data', (parte: string) => (cuerpo += parte));
+      res.on('error', rechazar);
       res.on('end', () => {
         const status = res.statusCode ?? 0;
         if (status >= 300) {
           rechazar(new Error(`Docker respondió ${status} a ${metodo} ${ruta}: ${cuerpo}`));
           return;
         }
-        resolver(cuerpo ? (JSON.parse(cuerpo) as unknown) : undefined);
+        try {
+          resolver(cuerpo ? (JSON.parse(cuerpo) as unknown) : undefined);
+        } catch (error) {
+          rechazar(error);
+        }
       });
     });
     req.setTimeout(30_000, () => req.destroy(new Error('Docker no respondió')));

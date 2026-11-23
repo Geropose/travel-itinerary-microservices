@@ -142,7 +142,7 @@ describe('cliente de API', () => {
     expect(repetida?.cuerpo).toBe(p.pedidos[0]?.cuerpo);
   });
 
-  it('si no se puede renovar, cierra la sesión (la región queda recordada)', async () => {
+  it('si no se puede renovar (401), cierra la sesión (la región queda recordada)', async () => {
     const p = preparar((pedido) =>
       pedido.url.endsWith('/renovar') ? json(401, {}) : json(401, {}),
     );
@@ -152,5 +152,51 @@ describe('cliente de API', () => {
     expect(p.sesion.region()).toBe('region-2');
     expect(p.vencidas()).toBe(1);
     expect(p.pedidos.at(-1)?.headers.authorization).toBeUndefined();
+  });
+
+  it('un 503 transitorio al renovar conserva la sesión sin disparar alVencer', async () => {
+    const p = preparar((pedido) =>
+      pedido.url.endsWith('/renovar') ? json(503, { status: 503 }) : json(401, {}),
+    );
+    p.sesion.guardar({ jwt: jwt(-10), tokenRenovacion: 'renovacion-1', region: 'region-2' });
+    await p.api.viajes.GET('/panel');
+    expect(p.sesion.obtener()).toMatchObject({ tokenRenovacion: 'renovacion-1' });
+    expect(p.vencidas()).toBe(0);
+  });
+
+  it('si cambia la sesión mientras /renovar está en vuelo no pisa ni cierra la nueva', async () => {
+    const nuevoA = jwt(900, { sub: 'usuario-a' });
+    const jwtB = jwt(900, { sub: 'usuario-b' });
+    let liberarRenovar!: () => void;
+    const espera = new Promise<void>((r) => {
+      liberarRenovar = r;
+    });
+    const a = almacen();
+    const sesion = crearSesion(a, () => AHORA);
+    let vencidas = 0;
+    const api = crearApi({
+      urlBase: 'http://localhost:8000',
+      sesion,
+      alVencer: () => vencidas++,
+      fetch: (async (entrada: RequestInfo | URL) => {
+        const pedido = entrada as Request;
+        if (pedido.url.endsWith('/renovar')) {
+          await espera;
+          return json(200, { jwt: nuevoA });
+        }
+        return json(200, {});
+      }) as typeof fetch,
+    });
+    sesion.guardar({
+      jwt: jwt(-10, { sub: 'usuario-a' }),
+      tokenRenovacion: 'tok-a',
+      region: 'region-2',
+    });
+    const promesa = api.renovar();
+    sesion.guardar({ jwt: jwtB, tokenRenovacion: 'tok-b', region: 'region-2' });
+    liberarRenovar();
+    expect(await promesa).toBe(false);
+    expect(sesion.obtener()).toMatchObject({ jwt: jwtB, tokenRenovacion: 'tok-b' });
+    expect(vencidas).toBe(0);
   });
 });

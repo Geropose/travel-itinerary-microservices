@@ -23,8 +23,8 @@ export interface OpcionesApi {
   sesion: Sesion;
   /** fetch a usar (las pruebas pasan uno falso). */
   fetch?: typeof fetch;
-  /** Se llama cuando la sesión venció y no se pudo renovar (hay que volver a iniciar sesión). */
-  alVencer?: () => void;
+  /** Se llama cuando la sesión venció y no se pudo renovar (recibe el sub vencido para limpiar caché). */
+  alVencer?: (sub?: string) => void;
 }
 
 export interface Api {
@@ -54,21 +54,31 @@ export function crearApi(o: OpcionesApi): Api {
       if (!actual) return false;
       const region = o.sesion.region();
       try {
-        const { data } = await renovador.POST('/renovar', {
+        const { data, response } = await renovador.POST('/renovar', {
           body: { tokenRenovacion: actual.tokenRenovacion },
           headers: region ? { [HEADER_REGION]: region } : {},
         });
+        if (o.sesion.obtener()?.tokenRenovacion !== actual.tokenRenovacion) {
+          return false;
+        }
         if (data) {
           o.sesion.actualizarJwt(data.jwt);
           return true;
+        }
+        if (response.status !== 401 && response.status !== 400) {
+          return false;
         }
       } catch {
         // Sin red: la sesión sigue; se vuelve a intentar en la próxima solicitud.
         return false;
       }
+      if (o.sesion.obtener()?.tokenRenovacion !== actual.tokenRenovacion) {
+        return false;
+      }
+      const subVencido = o.sesion.claims()?.sub;
       // El token de renovación venció o se revocó: hay que iniciar sesión de nuevo.
       o.sesion.cerrar();
-      o.alVencer?.();
+      o.alVencer?.(subVencido);
       return false;
     })().finally(() => {
       renovando = undefined;

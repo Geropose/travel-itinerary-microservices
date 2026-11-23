@@ -402,4 +402,75 @@ describe('middleware con el contrato de otro servicio (gateway)', () => {
       validador.middleware(cargarSpec(rutaSpec), { reglas: { 'GET /no-existe': {} } }),
     ).toThrow(/no corresponde/);
   });
+
+  it('rutas con mayúsculas no evaden autenticación y los logs no filtran emails de designados', async () => {
+    const propias = await generarClaves();
+    const registrados: AccesoRechazado[] = [];
+    const logs = loggerDePrueba('validador-mayus');
+    const v = crearValidador({
+      servicio: 'prueba',
+      region: 'region-1',
+      logger: logs.logger,
+      claves: { 'region-1': { claves: propias.jwks } },
+      registrar: (r) => registrados.push(r),
+    });
+    await v.iniciar();
+    const app = express();
+    app.use('/api/prueba', v.middleware(cargarSpec(rutaSpec)), (_req, res) => {
+      res.json({ paso: true });
+    });
+    const s = createServer(app);
+    const base = await escuchar(s);
+    try {
+      const respMayus = await fetch(`${base}/api/prueba/PRIVADA`);
+      expect(respMayus.status).toBe(401);
+      expect(registrados.at(-1)).toMatchObject({ motivo: 'sin-token', status: 401 });
+
+      const respDesignado = await fetch(`${base}/api/prueba/viajes/ana%40correo.example`, {
+        method: 'DELETE',
+      });
+      expect(respDesignado.status).toBe(401);
+      expect(JSON.stringify(logs.lineas)).not.toContain('ana@correo.example');
+      expect(JSON.stringify(logs.lineas)).not.toContain('ana%40correo.example');
+    } finally {
+      s.close();
+      v.detener();
+    }
+  });
+
+  it('recarga el JWKS al aparecer un kid desconocido (una vez dentro del cooldown)', async () => {
+    let actuales = await generarClaves('k1');
+    let pedidos = 0;
+    const servidorJwks = createServer((_req, res) => {
+      pedidos++;
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(actuales.jwks));
+    });
+    const urlServidor = await escuchar(servidorJwks);
+    const v = crearValidador({
+      servicio: 'prueba',
+      region: 'region-1',
+      logger,
+      claves: { 'region-1': { url: urlServidor } },
+      registrar: () => undefined,
+    });
+    await v.iniciar();
+    try {
+      expect(pedidos).toBe(1);
+      actuales = await generarClaves('k2');
+      const tokenNuevo = await firmarJwt(actuales);
+      await expect(v.verificarToken(tokenNuevo)).resolves.toMatchObject({ region: 'region-1' });
+      expect(pedidos).toBe(2);
+
+      // Tokens falsos dentro del cooldown de 30 s no disparan otra descarga del JWKS.
+      const otraClave = await generarClaves('k3');
+      await expect(v.verificarToken(await firmarJwt(otraClave))).rejects.toBeInstanceOf(
+        ErrorTokenInvalido,
+      );
+      expect(pedidos).toBe(2);
+    } finally {
+      servidorJwks.close();
+      v.detener();
+    }
+  });
 });

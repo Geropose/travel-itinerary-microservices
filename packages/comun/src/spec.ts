@@ -96,7 +96,7 @@ function aRegex(ruta: string): RegExp {
     .split(/\{[^}]+\}/)
     .map((tramo) => tramo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
     .join('[^/]+');
-  return new RegExp(`^${escapada}/?$`);
+  return new RegExp(`^${escapada}/?$`, 'i');
 }
 
 function nombresSeguridad(requisitos: unknown): string[] {

@@ -116,6 +116,60 @@ export async function revocarToken(db: Db, hash: string): Promise<void> {
 
 // --- Límite de intentos -------------------------------------------------------------------
 
+export type ResultadoReservaIntento =
+  { permitido: true; intentoId: number } | { permitido: false; liberaEnSeg: number };
+
+/**
+ * Comprueba y reserva atómicamente un intento de login por email usando advisory lock transaccional
+ * antes de correr argon2id, evitando carreras multi-instancia contra el límite de 5 intentos.
+ */
+export async function reservarIntentoLogin(
+  pool: Pool,
+  email: string,
+  maxIntentos: number,
+  ventanaMinutos: number,
+): Promise<ResultadoReservaIntento> {
+  const normalizado = normalizarEmail(email);
+  const cliente = await pool.connect();
+  try {
+    await cliente.query('BEGIN');
+    await cliente.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`login:${normalizado}`]);
+    await cliente.query(
+      'DELETE FROM intentos_fallidos WHERE email = $1 AND fecha <= now() - make_interval(mins => $2)',
+      [normalizado, ventanaMinutos],
+    );
+    const { rows } = await cliente.query<{ cantidad: string; libera: number | null }>(
+      `SELECT count(*) AS cantidad,
+              extract(epoch FROM min(fecha) + make_interval(mins => $2) - now())::int AS libera
+         FROM intentos_fallidos
+        WHERE email = $1 AND fecha > now() - make_interval(mins => $2)`,
+      [normalizado, ventanaMinutos],
+    );
+    const cantidad = Number(rows[0]?.cantidad ?? 0);
+    if (cantidad >= maxIntentos) {
+      await cliente.query('COMMIT');
+      return { permitido: false, liberaEnSeg: Math.max(1, rows[0]?.libera ?? 1) };
+    }
+    const insertado = await cliente.query<{ id: string | number }>(
+      'INSERT INTO intentos_fallidos (email) VALUES ($1) RETURNING id',
+      [normalizado],
+    );
+    await cliente.query('COMMIT');
+    return { permitido: true, intentoId: Number(insertado.rows[0]?.id ?? 0) };
+  } catch (error) {
+    await cliente.query('ROLLBACK').catch(() => undefined);
+    throw error;
+  } finally {
+    cliente.release();
+  }
+}
+
+/** Elimina únicamente la marca tentativa cuando /login deriva hacia la otra región. */
+export async function borrarIntentoPorId(db: Db, intentoId: number): Promise<void> {
+  if (!Number.isInteger(intentoId) || intentoId <= 0) return;
+  await db.query('DELETE FROM intentos_fallidos WHERE id = $1', [intentoId]);
+}
+
 /**
  * Intentos fallidos del email dentro de la ventana y cuándo se libera el primero (para
  * Retry-After).

@@ -24,7 +24,7 @@ const logger = crearLogger({ servicio: SERVICIO, region: config.REGION, nivel: c
 const otraRegion: Region = config.REGION === 'region-1' ? 'region-2' : 'region-1';
 
 const claves = leerClaves(config.JWT_CLAVE_PRIVADA, config.REGION);
-const pool = crearPool({ url: config.URL_BASE });
+const pool = crearPool({ url: config.URL_BASE, logger });
 await migrar(
   pool,
   [MIGRACIONES_EVENTOS, fileURLToPath(new URL('../migrations/', import.meta.url))],
