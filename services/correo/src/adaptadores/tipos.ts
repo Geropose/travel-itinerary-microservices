@@ -8,6 +8,7 @@ export type CodigoErrorProveedor =
   | 'token-invalido'
   | 'limite-cuota'
   | 'cursor-expirado'
+  | 'mensaje-no-encontrado'
   | 'proveedor-no-disponible';
 
 /** Error normalizado que lanzan los adaptadores sin exponer credenciales ni detalles internos. */

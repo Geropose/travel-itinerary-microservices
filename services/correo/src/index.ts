@@ -20,7 +20,7 @@ const config = cargarConfig(esquemaConfig);
 const logger = crearLogger({ servicio: SERVICIO, region: config.REGION, nivel: config.NIVEL_LOG });
 const adaptadoresConfig = resolverConfigAdaptadores(config);
 
-const pool = crearPool({ url: config.URL_BASE });
+const pool = crearPool({ url: config.URL_BASE, logger });
 await migrar(
   pool,
   [MIGRACIONES_EVENTOS, fileURLToPath(new URL('../migrations/', import.meta.url))],
@@ -99,13 +99,14 @@ const servidor = crearApp({
   },
 });
 
-// Se apagan en orden inverso: primero procesadores/examinador/outbox, después cola/broker y al final la base.
+// Se apagan en orden inverso: examinador -> pausa cola -> drenaje procesadores -> outbox -> cola/broker -> pool.
 servidor.alApagar(() => pool.end());
-servidor.alApagar(() => cola.cerrar());
 servidor.alApagar(() => broker.cerrar());
+servidor.alApagar(() => cola.cerrar());
 servidor.alApagar(() => outbox.detener());
-servidor.alApagar(() => negocio.examinador.detener());
 servidor.alApagar(() => negocio.procesador.detener());
+servidor.alApagar(() => cola.pausarConsumidores?.() ?? Promise.resolve());
+servidor.alApagar(() => negocio.examinador.detener());
 
 await negocio.procesador.iniciar();
 await servidor.iniciar();

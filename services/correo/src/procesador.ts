@@ -6,6 +6,7 @@
 import {
   crearEvento,
   enTransaccion,
+  ErrorEventoInvalido,
   validadorEventos,
   type Broker,
   type Logger,
@@ -14,7 +15,9 @@ import {
   type ValidadorEventos,
 } from '@trotamundos/comun';
 import { ErrorProveedorCorreo, type MensajeCorreo } from './adaptadores/tipos.ts';
-import type { ColaBuzones, TrabajoRevisionBuzon } from './cola.ts';
+import { ErrorProcesadorDeteniendo, type ColaBuzones, type TrabajoRevisionBuzon } from './cola.ts';
+
+export { ErrorProcesadorDeteniendo };
 import { extraerReservaDeCorreo, TABLA_PROVEEDORES_DEFECTO } from './extractor.ts';
 import * as repositorio from './repositorio.ts';
 import { ErrorCuentaNoEncontrada, ErrorCuentaSinPermiso, type GestorTokens } from './tokens.ts';
@@ -148,9 +151,22 @@ export function crearProcesadorCorreo(opciones: OpcionesProcesadorCorreo): Proce
     const extraccion = extraerReservaDeCorreo(correo, cuenta.usuarioId, tablaProveedores);
     if (extraccion.tipo === 'reserva') {
       const sobre = crearEvento('ReservaDetectada', extraccion.datos, region);
-      // Validación estricta contra specs/schemas/ReservaDetectada.json antes del outbox.
-      validador.validar(sobre);
-      return { ...base, evento: sobre, validador };
+      try {
+        // Validación estricta contra specs/schemas/ReservaDetectada.json antes del outbox.
+        validador.validar(sobre);
+        return { ...base, evento: sobre, validador };
+      } catch (err) {
+        if (err instanceof ErrorEventoInvalido) {
+          return {
+            ...base,
+            noProcesado: {
+              motivo: 'marcado-invalido',
+              detalle: err.message,
+            },
+          };
+        }
+        throw err;
+      }
     }
     if (extraccion.tipo === 'no-procesado') {
       return { ...base, noProcesado: { motivo: extraccion.motivo, detalle: extraccion.detalle } };
@@ -160,18 +176,19 @@ export function crearProcesadorCorreo(opciones: OpcionesProcesadorCorreo): Proce
   }
 
   async function procesarCuenta(trabajo: TrabajoRevisionBuzon): Promise<void> {
-    if (deteniendo) return;
+    if (deteniendo) throw new ErrorProcesadorDeteniendo();
     const cuenta = await repositorio.obtenerCuentaParaProcesar(pool, trabajo.cuentaId);
     if (!cuenta || cuenta.estado !== 'conectada') return;
 
     const filtro = await repositorio.obtenerFiltroRemitentes(pool, cuenta.usuarioId);
+    const esPushPuntual = Boolean(trabajo.push?.mensajeIds && trabajo.push.mensajeIds.length > 0);
 
     try {
       let idsCandidatos: string[];
       let nuevoCursor: string | undefined;
       let cursorExpirado = false;
 
-      if (trabajo.push?.mensajeIds && trabajo.push.mensajeIds.length > 0) {
+      if (esPushPuntual && trabajo.push?.mensajeIds) {
         idsCandidatos = [...new Set(trabajo.push.mensajeIds)];
       } else {
         const lista = await gestorTokens.listarNuevosCuenta(cuenta.id, {
@@ -190,22 +207,35 @@ export function crearProcesadorCorreo(opciones: OpcionesProcesadorCorreo): Proce
 
       // Leemos y persistimos en lotes acotados: reduce contención de bloqueos y commits sin perder progreso ante 429.
       for (let i = 0; i < pendientes.length; i += tamanoBloque) {
-        if (deteniendo) break;
+        if (deteniendo) throw new ErrorProcesadorDeteniendo();
         const bloqueIds = pendientes.slice(i, i + tamanoBloque);
         const correos = await gestorTokens.ejecutarConToken(cuenta.id, (adaptador, accessToken) =>
-          mapearConConcurrencia(bloqueIds, concurrenciaLectura, (msgId) =>
-            adaptador.leerMensaje(accessToken, msgId),
-          ),
+          mapearConConcurrencia(bloqueIds, concurrenciaLectura, async (msgId) => {
+            try {
+              return await adaptador.leerMensaje(accessToken, msgId);
+            } catch (err) {
+              if (err instanceof ErrorProveedorCorreo && err.codigo === 'mensaje-no-encontrado') {
+                logger.info(
+                  { cuentaId: cuenta.id, correoId: msgId },
+                  'correo eliminado antes de leer; se omite del lote',
+                );
+                return undefined;
+              }
+              throw err;
+            }
+          }),
         );
-        if (deteniendo) break;
+        if (deteniendo) throw new ErrorProcesadorDeteniendo();
 
         const fechaActual = new Date(ahora());
-        const resultados = correos.map((correo) => {
-          if (!nuevoCursor && correo.cursor) {
-            nuevoCursor = correo.cursor;
-          }
-          return prepararResultadoCorreo(cuenta, filtro, correo, fechaActual);
-        });
+        const resultados = correos
+          .filter((correo): correo is MensajeCorreo => correo !== undefined)
+          .map((correo) => {
+            if (!esPushPuntual && !nuevoCursor && correo.cursor) {
+              nuevoCursor = correo.cursor;
+            }
+            return prepararResultadoCorreo(cuenta, filtro, correo, fechaActual);
+          });
 
         const reclamados = await enTransaccion(pool, (db) =>
           repositorio.guardarResultadosCorreosProcesados(db, resultados),

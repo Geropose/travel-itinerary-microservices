@@ -273,9 +273,13 @@ export function registrarRutas(servidor: Servidor, region: Region, negocio: Nego
     if (cuenta.suscripcionId) {
       const adaptador = adaptadores.obtener(cuenta.proveedor);
       if (adaptador?.desuscribirAvisos) {
+        const suscripcionId = cuenta.suscripcionId;
         try {
-          const tokenVigente = await gestorTokens.obtenerTokenValido(cuenta.id);
-          await adaptador.desuscribirAvisos(tokenVigente.accessToken, cuenta.suscripcionId);
+          await gestorTokens.ejecutarConToken(cuenta.id, (ad, accessToken) =>
+            ad.desuscribirAvisos
+              ? ad.desuscribirAvisos(accessToken, suscripcionId)
+              : Promise.resolve(),
+          );
         } catch (err) {
           logger.warn(
             {
@@ -394,23 +398,20 @@ export function registrarRutas(servidor: Servidor, region: Region, negocio: Nego
         continue;
       }
 
-      if (aviso.id) {
-        const esNuevo = await repositorio.registrarAvisoPushVisto(
-          pool,
-          'outlook',
-          aviso.id,
-          ahoraDate,
-        );
-        if (!esNuevo) continue;
-      }
-
       const grupo = porCuenta.get(cuenta.id) ?? { cuenta, mensajeIds: [], avisoIds: [] };
       grupo.mensajeIds.push(aviso.resourceData.id);
-      if (aviso.id) grupo.avisoIds.push(aviso.id);
+      if (aviso.id && !grupo.avisoIds.includes(aviso.id)) grupo.avisoIds.push(aviso.id);
       porCuenta.set(cuenta.id, grupo);
     }
 
     for (const { cuenta, mensajeIds, avisoIds } of porCuenta.values()) {
+      const registradosCuenta: string[] = [];
+      for (const id of avisoIds) {
+        const esNuevo = await repositorio.registrarAvisoPushVisto(pool, 'outlook', id, ahoraDate);
+        if (esNuevo) registradosCuenta.push(id);
+      }
+      if (avisoIds.length > 0 && registradosCuenta.length === 0) continue;
+
       try {
         await examinador.encolarPorPush({
           cuentaId: cuenta.id,
@@ -421,7 +422,7 @@ export function registrarRutas(servidor: Servidor, region: Region, negocio: Nego
           push: { mensajeIds },
         });
       } catch (err) {
-        for (const id of avisoIds) {
+        for (const id of registradosCuenta) {
           await repositorio.eliminarAvisoPushVisto(pool, 'outlook', id).catch(() => undefined);
         }
         logger.warn({ err, cuentaId: cuenta.id }, 'no se pudo encolar el aviso push de Outlook');

@@ -298,6 +298,21 @@ export async function designarPersona(
   return aDesignado(creado);
 }
 
+/**
+ * Serializa mediante lock transaccional por email con `crearCuenta`, resuelve la cuenta
+ * existente dentro de la transacción y guarda al designado para evitar `usuario_id = NULL`.
+ */
+export async function designarPersonaConCuenta(
+  db: ClienteDb,
+  viajeId: string,
+  email: string,
+): Promise<Designado> {
+  const normalizado = normalizarEmail(email);
+  await db.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`email:${normalizado}`]);
+  const cuenta = await buscarPorEmail(db, normalizado);
+  return designarPersona(db, viajeId, normalizado, cuenta?.usuarioId ?? null);
+}
+
 export async function quitarDesignado(db: Db, viajeId: string, email: string): Promise<boolean> {
   const { rowCount } = await db.query(
     `DELETE FROM designados_itinerario

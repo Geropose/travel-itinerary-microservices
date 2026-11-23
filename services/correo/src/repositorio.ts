@@ -153,7 +153,7 @@ export async function guardarCuentaConectada(
   );
   const refreshCifrado = encriptarTexto(claveTokens, refreshToken, datos.usuarioId);
 
-  if (fila) {
+  const actualizarExistente = async (id: string) => {
     await db.query(
       `UPDATE cuentas_correo
        SET estado = 'conectada',
@@ -167,7 +167,7 @@ export async function guardarCuentaConectada(
            actualizado_en = $6
        WHERE id = $1`,
       [
-        fila.id,
+        id,
         accessCifrado,
         refreshCifrado,
         datos.credenciales.expiraEn,
@@ -175,17 +175,23 @@ export async function guardarCuentaConectada(
         ahora,
       ],
     );
+  };
+
+  if (fila) {
+    await actualizarExistente(fila.id);
     return { resultado: 'ok', cuentaId: fila.id };
   }
 
   const cuentaId = randomUUID();
-  await db.query(
+  const insertada = await db.query<{ id: string }>(
     `INSERT INTO cuentas_correo (
        id, usuario_id, proveedor, email, estado,
        access_token_cifrado, refresh_token_cifrado, token_vence_en, scope_concedido,
        revision_prioritaria, proxima_revision, conectada_en, actualizado_en
      )
-     VALUES ($1, $2, $3, $4, 'conectada', $5, $6, $7, $8, true, $9, $9, $9)`,
+     VALUES ($1, $2, $3, $4, 'conectada', $5, $6, $7, $8, true, $9, $9, $9)
+     ON CONFLICT (proveedor, email) DO NOTHING
+     RETURNING id`,
     [
       cuentaId,
       datos.usuarioId,
@@ -198,7 +204,27 @@ export async function guardarCuentaConectada(
       ahora,
     ],
   );
-  return { resultado: 'ok', cuentaId };
+  if (insertada.rows[0]) {
+    return { resultado: 'ok', cuentaId: insertada.rows[0].id };
+  }
+
+  // Carrera concurrente al crear la fila: re-leemos con FOR UPDATE.
+  const enCarrera = await db.query<{ id: string; usuario_id: string }>(
+    `SELECT id, usuario_id
+     FROM cuentas_correo
+     WHERE proveedor = $1 AND email = $2
+     FOR UPDATE`,
+    [datos.proveedor, datos.email],
+  );
+  const filaCarrera = enCarrera.rows[0];
+  if (!filaCarrera) {
+    throw new Error('La cuenta de correo desapareció tras conflicto de inserción.');
+  }
+  if (filaCarrera.usuario_id !== datos.usuarioId) {
+    return { resultado: 'cuenta-de-otro-usuario' };
+  }
+  await actualizarExistente(filaCarrera.id);
+  return { resultado: 'ok', cuentaId: filaCarrera.id };
 }
 
 export async function guardarSuscripcionCuenta(
@@ -403,6 +429,7 @@ export interface CuentaCandidataExaminador {
   proveedor: ProveedorCorreo;
   email: string;
   suscripcionId: string | null;
+  suscripcionVenceEn?: Date | null;
   revisionPrioritaria: boolean;
   proximaRevision: Date;
   ultimoEncolado: Date | null;
@@ -453,12 +480,13 @@ export async function obtenerCuentasParaExaminar(
     proveedor: string;
     email: string;
     suscripcion_id: string | null;
+    suscripcion_vence_en: Date | null;
     revision_prioritaria: boolean;
     proxima_revision: Date;
     ultimo_encolado: Date | null;
     intentos_429: number;
   }>(
-    `SELECT id, usuario_id, proveedor, email, suscripcion_id,
+    `SELECT id, usuario_id, proveedor, email, suscripcion_id, suscripcion_vence_en,
             revision_prioritaria, proxima_revision, ultimo_encolado, intentos_429
      FROM cuentas_correo
      WHERE estado = 'conectada'
@@ -472,6 +500,7 @@ export async function obtenerCuentasParaExaminar(
     proveedor: r.proveedor,
     email: r.email,
     suscripcionId: r.suscripcion_id,
+    suscripcionVenceEn: r.suscripcion_vence_en,
     revisionPrioritaria: r.revision_prioritaria,
     proximaRevision: r.proxima_revision,
     ultimoEncolado: r.ultimo_encolado,
@@ -483,15 +512,17 @@ export async function marcarCuentasEncoladas(
   db: Db,
   cuentaIds: string[],
   ahora: Date,
+  opciones: { limpiarPrioridad?: boolean } = {},
 ): Promise<void> {
   if (cuentaIds.length === 0) return;
+  const limpiarPrioridad = opciones.limpiarPrioridad ?? true;
   await db.query(
     `UPDATE cuentas_correo
-     SET revision_prioritaria = false,
+     SET revision_prioritaria = CASE WHEN $3::boolean THEN false ELSE revision_prioritaria END,
          ultimo_encolado = $2,
          actualizado_en = $2
      WHERE id = ANY($1::uuid[])`,
-    [cuentaIds, ahora],
+    [cuentaIds, ahora, limpiarPrioridad],
   );
 }
 
@@ -795,6 +826,15 @@ export interface ResultadoCorreoProcesado {
   noProcesado?: { motivo: MotivoNoProcesado; detalle: string };
 }
 
+const REGEX_EMAIL_BASICO = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/;
+
+function normalizarRemitenteNoProcesado(remitente: string): string {
+  const limpio = remitente.trim();
+  const entreAngulos = /<([^<>]+)>/.exec(limpio);
+  const candidato = (entreAngulos?.[1] ?? limpio).trim().toLowerCase();
+  return REGEX_EMAIL_BASICO.test(candidato) ? candidato : 'desconocido@remitente.invalid';
+}
+
 /**
  * Registra en lote y de forma atómica los correos procesados y guarda (en la misma transacción)
  * sus eventos `ReservaDetectada` en el outbox o sus metadatos en `no_procesados`. Devuelve los
@@ -855,7 +895,7 @@ export async function guardarResultadosCorreosProcesados(
         noProcesados.map(({ item }) => item.usuarioId),
         noProcesados.map(({ item }) => item.proveedorCorreo),
         noProcesados.map(({ item }) => item.correoId),
-        noProcesados.map(({ item }) => item.remitente),
+        noProcesados.map(({ item }) => normalizarRemitenteNoProcesado(item.remitente)),
         noProcesados.map(({ item }) => item.asunto || null),
         noProcesados.map(({ item }) => item.recibidoEn),
         noProcesados.map(({ item }) => item.ahora),

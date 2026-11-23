@@ -57,10 +57,14 @@ export function clasificarCuentaParaRevision(
     return { debeEncolar: true, origen: 'cuenta-nueva', prioridad: 1 };
   }
 
-  // 2) Buzones con suscripción push activa en proveedor con push no se consultan por intervalo.
+  // 2) Buzones con suscripción push vigente en proveedor con push no se consultan por intervalo.
   const adaptador = adaptadores.obtener(cuenta.proveedor);
   const soportaPush = adaptador?.soportaPush ?? false;
-  if (soportaPush && cuenta.suscripcionId !== null) {
+  const suscripcionVigente =
+    cuenta.suscripcionVenceEn === undefined ||
+    cuenta.suscripcionVenceEn === null ||
+    cuenta.suscripcionVenceEn.getTime() > ahoraMs;
+  if (soportaPush && cuenta.suscripcionId !== null && suscripcionVigente) {
     return { debeEncolar: false };
   }
 
@@ -220,7 +224,9 @@ export function crearExaminador(opciones: OpcionesExaminador): Examinador {
         ...(params.push ? { push: params.push } : {}),
       };
       await cola.encolar(trabajo);
-      await repositorio.marcarCuentasEncoladas(pool, [params.cuentaId], ahoraDate);
+      await repositorio.marcarCuentasEncoladas(pool, [params.cuentaId], ahoraDate, {
+        limpiarPrioridad: !(params.push?.mensajeIds && params.push.mensajeIds.length > 0),
+      });
       return { encolado: true };
     },
 
