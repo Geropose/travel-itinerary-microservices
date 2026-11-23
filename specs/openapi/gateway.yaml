@@ -117,7 +117,8 @@ info:
 
     ## Monitor de salud (Iteración 1, ADR-007)
 
-    Tampoco tiene rutas propias. Hay uno por región: hace un ping a `GET /health` de cada instancia
+    Su contrato está en `specs/openapi/monitor.yaml` (`GET /health` y `GET /estado`, solo internas).
+    Hay uno por región: hace un ping a `GET /health` de cada instancia
     (gateway y cada microservicio) cada 5 s. Si una instancia no responde `200` 3 veces seguidas
     (15 s), la saca del balanceador (nginx) y la reinicia. Cuando vuelve a responder `200`, la vuelve
     a agregar.

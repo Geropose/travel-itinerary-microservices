@@ -9,8 +9,11 @@ type Objeto = { [clave: string]: Json };
 interface Esquema {
   $ref?: string;
   required?: string[];
-  properties?: Record<string, Esquema>;
+  properties?: Record<string, Esquema & { const?: Json }>;
   items?: Esquema;
+  oneOf?: Esquema[];
+  if?: { properties?: Record<string, { const?: Json }> };
+  then?: { required?: string[] };
 }
 interface Contenido {
   schema?: Esquema;
@@ -67,20 +70,56 @@ interface OpcionesCaso {
   camposAceptadosPendientes?: ReadonlySet<string>;
 }
 
+export type ServicioContrato =
+  | 'autenticacion'
+  | 'gateway'
+  | 'monitor'
+  | 'usuarios'
+  | 'correo'
+  | 'viajes'
+  | 'analitica'
+  | 'asistente'
+  | 'integraciones';
+
+const DUENOS: Record<ServicioContrato, 'A' | 'B' | 'C' | 'D'> = {
+  autenticacion: 'A',
+  gateway: 'A',
+  monitor: 'A',
+  usuarios: 'B',
+  correo: 'B',
+  viajes: 'C',
+  analitica: 'C',
+  asistente: 'D',
+  integraciones: 'D',
+};
+
+const PUERTOS_INTERNOS: Record<ServicioContrato, number> = {
+  gateway: 3000,
+  autenticacion: 3001,
+  usuarios: 3002,
+  correo: 3003,
+  viajes: 3004,
+  integraciones: 3005,
+  analitica: 3006,
+  asistente: 3007,
+  monitor: 3010,
+};
+
 const urlContratos = new URL('../../specs/openapi/', import.meta.url);
 const uri = (nombre: string) => `https://trotamundos.example/specs/openapi/${nombre}.yaml`;
 const leer = (nombre: string): Contrato =>
   parse(readFileSync(new URL(`${nombre}.yaml`, urlContratos), 'utf8')) as Contrato;
 const comun = leer('comun');
 
-async function pedir(servicio: string, pedido: Pedido): Promise<Respuesta> {
-  if (pedido.ruta.startsWith('/interna/')) {
-    // El gateway bloquea /interna. Ejecutar HTTP dentro de la red de pruebas de la región.
+async function pedir(servicio: ServicioContrato, pedido: Pedido): Promise<Respuesta> {
+  if (pedido.ruta.startsWith('/interna/') || servicio === 'monitor' || servicio === 'gateway') {
+    // El gateway bloquea /interna y monitor/gateway se consultan directo en la red regional.
+    const puerto = PUERTOS_INTERNOS[servicio];
     const codigo = `
       let entrada = '';
       for await (const parte of process.stdin) entrada += parte;
       const { ruta, metodo, ...init } = JSON.parse(entrada);
-      const respuesta = await fetch('http://${servicio}:3005' + ruta, {
+      const respuesta = await fetch('http://${servicio}:${puerto}' + ruta, {
         ...init, method: metodo, redirect: 'manual', signal: AbortSignal.timeout(20000),
       });
       console.log(JSON.stringify({
@@ -106,7 +145,8 @@ async function pedir(servicio: string, pedido: Pedido): Promise<Respuesta> {
   };
 }
 
-export function prepararContrato(servicio: 'asistente' | 'integraciones', token: string) {
+export function prepararContrato(servicio: ServicioContrato, token: string) {
+  const dueno = DUENOS[servicio];
   const contrato = leer(servicio);
   const ajv = new Ajv2020({ allErrors: true, strict: false });
   formatos.default(ajv);
@@ -157,7 +197,27 @@ export function prepararContrato(servicio: 'asistente' | 'integraciones', token:
       }
       return;
     }
-    for (const campo of s.required ?? []) {
+    if (s.oneOf) {
+      const variante = s.oneOf
+        .map((opcion) => resolver(opcion, 'schemas'))
+        .find((opcion) => (opcion.required ?? []).every((campo) => campo in dato));
+      if (variante) {
+        yield* omitirCampos(variante, dato, nivel);
+        return;
+      }
+    }
+    const requeridos = [...(s.required ?? [])];
+    if (s.if?.properties && s.then?.required) {
+      const cumpleCondicion = Object.entries(s.if.properties).every(
+        ([k, cond]) => cond.const !== undefined && dato[k] === cond.const,
+      );
+      if (cumpleCondicion) {
+        for (const extra of s.then.required) {
+          if (!requeridos.includes(extra)) requeridos.push(extra);
+        }
+      }
+    }
+    for (const campo of requeridos) {
       if (!(campo in dato)) throw new Error(`El ejemplo válido no contiene ${nivel}/${campo}`);
       const copia = Object.fromEntries(Object.entries(dato).filter(([clave]) => clave !== campo));
       yield [`${nivel}/${campo}`, copia];
@@ -178,6 +238,7 @@ export function prepararContrato(servicio: 'asistente' | 'integraciones', token:
     const encontrado = casos.get(id);
     if (!encontrado) throw new Error(`Operación sin contrato: ${servicio}/${id}`);
     const caso: Caso = encontrado;
+    const parametrosResueltos = caso.parametros.map((p) => resolver(p, 'parameters'));
     vistos.add(id);
     const cabeceras = { Authorization: `Bearer ${token}`, 'X-Region': 'region-1', ...ops.headers };
 
@@ -188,6 +249,7 @@ export function prepararContrato(servicio: 'asistente' | 'integraciones', token:
         status: number;
         headerAusente?: string;
         parametroInvalido?: string;
+        queryAusente?: string;
         estado?: string;
         estadoConocido?: string;
       },
@@ -203,10 +265,19 @@ export function prepararContrato(servicio: 'asistente' | 'integraciones', token:
       if (opciones.parametroInvalido)
         parametros[opciones.parametroInvalido] =
           ops.parametrosInvalidos?.[opciones.parametroInvalido] ?? '!';
-      const ruta = caso.ruta.replace(/\{([^}]+)\}/g, (_, nombre: string) =>
+      let ruta = caso.ruta.replace(/\{([^}]+)\}/g, (_, nombre: string) =>
         encodeURIComponent(parametros[nombre] ?? ''),
       );
-      const contexto = `[${servicio} · dueño D] ${caso.metodo} ${caso.ruta} · ${campo}`;
+      const query = new URLSearchParams();
+      for (const p of parametrosResueltos) {
+        if (p.in !== 'query' || p.name === opciones.queryAusente) continue;
+        const valor = parametros[p.name];
+        if (valor !== undefined) query.set(p.name, valor);
+      }
+      const queryTexto = query.toString();
+      if (queryTexto) ruta += `?${queryTexto}`;
+
+      const contexto = `[${servicio} · dueño ${dueno}] ${caso.metodo} ${caso.ruta} · ${campo}`;
       let respuesta: Respuesta;
       try {
         respuesta = await pedir(servicio, {
@@ -225,14 +296,23 @@ export function prepararContrato(servicio: 'asistente' | 'integraciones', token:
       const declarada = caso.operacion.responses[String(respuesta.status)];
       if (!declarada) throw new Error(`${contexto}: HTTP ${respuesta.status} sin contrato`);
       const esquemaRespuesta = resolver(declarada, 'responses');
+      if (!esquemaRespuesta.content) {
+        return undefined;
+      }
       const tipo = respuesta.tipo.split(';')[0]?.trim() ?? '';
-      const schema = esquemaRespuesta.content?.[tipo]?.schema;
+      const schema = esquemaRespuesta.content[tipo]?.schema;
       if (!schema) throw new Error(`${contexto}: Content-Type ${tipo} sin esquema`);
       const origen = declarada.$ref?.startsWith('./comun.yaml#') ? 'comun' : servicio;
+      const refSchema = schema.$ref;
+      const refResuelto = refSchema?.startsWith('#')
+        ? uri(origen) + refSchema
+        : refSchema?.startsWith('./comun.yaml#')
+          ? uri('comun') + refSchema.slice('./comun.yaml'.length)
+          : undefined;
       const validarRespuesta = ajv.compile({
-        $id: `${uri(origen)}-${id}-${opciones.status}-${encodeURIComponent(campo)}`,
+        $id: `${uri(origen)}-${id}-${opciones.status}-${encodeURIComponent(campo)}-${encodeURIComponent(tipo)}`,
         ...schema,
-        ...(schema.$ref?.startsWith('#') ? { $ref: uri(origen) + schema.$ref } : {}),
+        ...(refResuelto ? { $ref: refResuelto } : {}),
       });
       const valor = JSON.parse(respuesta.body) as Json;
       if (!validarRespuesta(valor)) {
@@ -277,7 +357,7 @@ export function prepararContrato(servicio: 'asistente' | 'integraciones', token:
     if (caso.operacion.requestBody?.required) {
       await ejecutar('falta el cuerpo', { status: 400 });
     }
-    for (const parametro of caso.parametros.map((p) => resolver(p, 'parameters'))) {
+    for (const parametro of parametrosResueltos) {
       if (!parametro.required) continue;
       const datos = cuerpo !== undefined ? { cuerpo } : {};
       if (parametro.in === 'path') {
@@ -285,6 +365,13 @@ export function prepararContrato(servicio: 'asistente' | 'integraciones', token:
           ...datos,
           parametroInvalido: parametro.name,
           status: ops.estadoWebhook ? 404 : 400,
+        });
+      }
+      if (parametro.in === 'query') {
+        await ejecutar(`falta ${parametro.name}`, {
+          ...datos,
+          queryAusente: parametro.name,
+          status: 400,
         });
       }
       if (parametro.in === 'header') {
@@ -303,7 +390,7 @@ export function prepararContrato(servicio: 'asistente' | 'integraciones', token:
     verificar() {
       const pendientes = [...casos.keys()].filter((id) => !vistos.has(id));
       const problemas = [
-        ...pendientes.map((id) => `[${servicio} · dueño D] Falta probar ${id}`),
+        ...pendientes.map((id) => `[${servicio} · dueño ${dueno}] Falta probar ${id}`),
         ...diferencias,
       ];
       if (problemas.length) throw new Error(problemas.join('\n'));

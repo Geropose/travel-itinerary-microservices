@@ -355,6 +355,28 @@ export function tokenServicioDePruebas(region: Region = 'region-1'): string {
   );
 }
 
+/** Firma el token interno propio del servicio Autenticación dentro de su contenedor regional. */
+export function tokenServicioAutenticacion(region: Region = 'region-1'): string {
+  const proyecto = region === 'region-1' ? 'r1' : 'r2';
+  return execFileSync(
+    'docker',
+    [
+      'exec',
+      `${proyecto}-autenticacion-1`,
+      'node',
+      '--input-type=module',
+      '-e',
+      `
+        import { leerClaves } from './services/autenticacion/src/claves.ts';
+        import { firmarTokenDeServicio } from './services/autenticacion/src/tokens.ts';
+        const claves = leerClaves(process.env.JWT_CLAVE_PRIVADA, process.env.REGION);
+        console.log(await firmarTokenDeServicio(claves, 'autenticacion', process.env.REGION));
+      `,
+    ],
+    { encoding: 'utf8', timeout: 15_000 },
+  ).trim();
+}
+
 /** Dispara en el acto la tarea de archivado de Viajes desde la red privada. */
 export function ejecutarArchivadoEnRegion(region: Region = 'region-1'): void {
   const token = tokenServicioDePruebas(region);
