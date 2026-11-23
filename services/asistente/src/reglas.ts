@@ -23,6 +23,7 @@ const esquemaReglasIdioma = z.object({
     reprogramar: z.array(z.string().min(1)).min(1),
     estado: z.array(z.string().min(1)).min(1),
     problemaMenor: z.array(z.string().min(1)).min(1),
+    cortesia: z.array(z.string().min(1)).optional(),
   }),
   afirmaciones: z.array(z.string().min(1)).min(1),
   problemasMenores: z.record(z.string().min(1), esquemaProblemaMenor),
@@ -108,6 +109,14 @@ export function detectarIntencionConReglas(
       if (contieneFrase(normalizado, palabra)) {
         return intencion;
       }
+    }
+  }
+
+  // Saludos, agradecimientos, despedidas y preguntas generales se evalúan al final para que
+  // mensajes como "Hola, ¿cómo está mi vuelo?" prioricen siempre la intención operativa.
+  for (const frase of reglas.intenciones.cortesia ?? []) {
+    if (contieneFrase(normalizado, frase)) {
+      return 'problemaMenor';
     }
   }
 

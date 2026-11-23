@@ -15,6 +15,8 @@ intenciones:
     - transfer
     - talk to someone
     - speak to someone
+    - talk to my agency
+    - complaint
   reprogramar:
     - reschedule
     - rebook
@@ -22,6 +24,8 @@ intenciones:
     - change my flight
     - change booking
     - change reservation
+    - modify flight
+    - modify booking
     - move flight
     - postpone
     - earlier flight
@@ -32,9 +36,17 @@ intenciones:
     - bookings
     - my bookings
     - my trips
+    - my flights
+    - my hotels
     - my flight
     - my hotel
     - my car
+    - my trip
+    - my reservation
+    - what trips do i have
+    - what bookings do i have
+    - next trip
+    - upcoming trip
     - itinerary
     - schedule
     - when does
@@ -59,7 +71,51 @@ intenciones:
     - designated
     - social network
     - seat
+    - archive
+    - archiving
+    - archived
+    - past trips
+    - connect email
+    - sync email
+    - gmail
+    - outlook
+    - mailbox
+    - whitelist
+    - filter
+    - filters
+    - sender
+    - senders
+    - offline
+    - no internet
+    - airplane mode
+    - add booking
+    - create booking
+    - edit booking
+    - delete booking
     - help
+  # Evaluated after derivar, reprogramar, problemaMenor and estado so messages like
+  # "Hi, what is the status of my flight?" always prioritize the operational intent.
+  cortesia:
+    - hi
+    - hello
+    - hey
+    - good morning
+    - good afternoon
+    - good evening
+    - how are you
+    - how is it going
+    - thanks
+    - thank you
+    - thx
+    - great
+    - awesome
+    - perfect
+    - bye
+    - goodbye
+    - see you
+    - who are you
+    - what can you do
+    - what do you do
 
 afirmaciones:
   - yes
@@ -103,18 +159,110 @@ problemasMenores:
     respuesta: >-
       You can share a trip from its detail page in the dashboard: add a designated person's email
       for read-only access, or post your itinerary to your social network without booking codes.
+  archivar:
+    palabrasClave:
+      - archive
+      - archiving
+      - archived
+      - past trips
+    respuesta: >-
+      You don't need to archive trips manually: they are archived automatically once their last
+      booking has ended (during the nightly job) and appear read-only under the Archived tab.
+  correo:
+    palabrasClave:
+      - connect email
+      - sync email
+      - gmail
+      - outlook
+      - mailbox
+    respuesta: >-
+      From the Email tab you can connect Gmail or Outlook with read-only OAuth access. Trotamundos
+      detects bookings automatically and never stores your email password.
+  whitelist:
+    palabrasClave:
+      - whitelist
+      - filter
+      - filters
+      - sender
+      - senders
+    respuesta: >-
+      In the Whitelist tab you can enable sender filters and choose which email addresses or domains
+      are allowed when scanning your inbox.
+  offline:
+    palabrasClave:
+      - offline
+      - no internet
+      - airplane mode
+    respuesta: >-
+      Trotamundos caches your latest dashboard locally on your device so you can still check your
+      active bookings even without an internet connection.
+  gestionManual:
+    palabrasClave:
+      - add booking
+      - create booking
+      - edit booking
+      - delete booking
+    respuesta: >-
+      On the Dashboard you can add a booking manually and edit or delete existing ones directly from
+      each booking card.
+  quienSos:
+    palabrasClave:
+      - who are you
+      - what can you do
+      - what do you do
+    respuesta: >-
+      Hi! I'm the Trotamundos virtual assistant. I can check your booking status, look for flight
+      rescheduling options, answer questions about baggage, check-in, email sync or archived trips,
+      or escalate your case to your travel agency.
+  comoEstas:
+    palabrasClave:
+      - how are you
+      - how is it going
+    respuesta: >-
+      I'm doing great, thanks for asking! How can I help you with your trips or bookings today?
+  despedida:
+    palabrasClave:
+      - bye
+      - goodbye
+      - see you
+    respuesta: >-
+      See you later! Safe travels, and feel free to message me anytime if you need help with your
+      bookings.
+  gracias:
+    palabrasClave:
+      - thanks
+      - thank you
+      - thx
+      - great
+      - awesome
+      - perfect
+    respuesta: >-
+      You're welcome! Let me know if you need to check another booking, reschedule a flight, or
+      contact your travel agency.
+  saludo:
+    palabrasClave:
+      - hi
+      - hello
+      - hey
+      - good morning
+      - good afternoon
+      - good evening
+    respuesta: >-
+      Hi! How can I help you today? You can ask about your trip status, reschedule a flight, ask
+      about baggage or check-in, or request to talk to your travel agency.
   general:
     palabrasClave:
       - help
     respuesta: >-
       I can check your booking status, look for flight rescheduling options, answer questions about
-      baggage, check-in or sharing an itinerary, or escalate your case to your travel agency.
+      baggage, check-in, email sync, whitelist or archived trips, or escalate your case to your
+      travel agency.
 
 textos:
   saludo: Hi, I'm the Trotamundos assistant. How can I help you?
   repregunta: >-
-    I didn't understand that. Would you like to check a trip status, reschedule a booking, or talk
-    to your agency?
+    I didn't quite catch that. You can ask about your trip or flight status, reschedule a flight,
+    ask about baggage or check-in, or ask me to connect you with your agency.
   derivacionAutomaticaMotivo: >-
     The assistant could not understand the user's request after two consecutive attempts.
   sinReservas: I couldn't find any active bookings in your account right now.

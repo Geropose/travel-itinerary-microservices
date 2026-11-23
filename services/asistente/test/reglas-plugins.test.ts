@@ -289,4 +289,58 @@ describe('Plug-ins independientes y registro extensible (ADR-018)', () => {
     expect(resp.resultado).toBe('derivado');
     expect(resp.caso).toEqual({ agencia: 'viajes-del-plata', numeroCaso: '35436' });
   });
+
+  it('atiende saludos, agradecimientos, despedidas y dudas de la app sin pisar intenciones operativas', async () => {
+    const gestor = crearGestorReglas();
+    const es = gestor.obtener('es');
+    const en = gestor.obtener('en');
+    const plugin = crearPluginProblemasMenores();
+
+    // Cortesía y preguntas generales caen en problemaMenor con respuesta adecuada.
+    expect(detectarIntencionConReglas('Hola', es)).toBe('problemaMenor');
+    expect(detectarIntencionConReglas('Buenas tardes', es)).toBe('problemaMenor');
+    expect(detectarIntencionConReglas('Muchas gracias!', es)).toBe('problemaMenor');
+    expect(detectarIntencionConReglas('Chau, nos vemos', es)).toBe('problemaMenor');
+    expect(detectarIntencionConReglas('Hello there', en)).toBe('problemaMenor');
+    expect(detectarIntencionConReglas('Thank you!', en)).toBe('problemaMenor');
+
+    // Si el saludo acompaña una consulta operativa, prevalece la consulta operativa.
+    expect(detectarIntencionConReglas('Hola, ¿cómo está mi vuelo XKQ7PL?', es)).toBe('estado');
+    expect(detectarIntencionConReglas('Buenas, quiero reprogramar mi vuelo', es)).toBe(
+      'reprogramar',
+    );
+    expect(detectarIntencionConReglas('Hola, quiero hablar con mi agencia', es)).toBe('derivar');
+    expect(detectarIntencionConReglas('Hi, what is the status of my flight?', en)).toBe('estado');
+
+    // Dentro de problemaMenor, las dudas específicas prevalecen sobre el saludo.
+    const respSaludo = await plugin.atender(contextoBase('es', gestor), 'Hola!');
+    expect(respSaludo.texto).toMatch(/Hola/i);
+
+    const respComoEstas = await plugin.atender(contextoBase('es', gestor), 'Hola, ¿cómo estás?');
+    expect(respComoEstas.texto).toMatch(/bien/i);
+
+    const respGracias = await plugin.atender(contextoBase('es', gestor), 'Muchas gracias');
+    expect(respGracias.texto).toMatch(/De nada/i);
+
+    const respChau = await plugin.atender(contextoBase('es', gestor), 'Chau!');
+    expect(respChau.texto).toMatch(/Hasta luego/i);
+
+    const respEquipajeConSaludo = await plugin.atender(
+      contextoBase('es', gestor),
+      'Hola, ¿cuánto equipaje puedo llevar?',
+    );
+    expect(respEquipajeConSaludo.texto).toMatch(/8 kg/i);
+
+    const respArchivar = await plugin.atender(
+      contextoBase('es', gestor),
+      '¿Cómo archivo un viaje?',
+    );
+    expect(respArchivar.texto).toMatch(/automáticamente/i);
+
+    const respEnArchive = await plugin.atender(
+      contextoBase('en', gestor),
+      'Hi, how do I archive a trip?',
+    );
+    expect(respEnArchive.texto).toMatch(/automatically/i);
+  });
 });
