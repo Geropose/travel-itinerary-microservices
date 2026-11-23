@@ -6,12 +6,24 @@ Es el prototipo del Trabajo Especial de Diseño de Sistemas de Software. Usa mic
 
 ## Requisitos y arranque
 
-- Docker Desktop abierto, con Docker Compose v2.
+- Docker Desktop, con Docker Compose v2.
 - Node.js 24 con npm. La versión está en [`.nvmrc`](.nvmrc).
 - 16 GB de RAM como mínimo para el entorno local. Las mediciones de carga del proyecto se hicieron en un equipo con más memoria.
 - Git para clonar el repositorio. También podés descargarlo desde **Code → Download ZIP**.
 
-Desde la carpeta del repositorio, ejecutá estos tres comandos:
+### Inicio rápido (recomendado — un solo paso)
+
+> [!TIP]
+> Podés levantar todo automáticamente sin correr comandos uno por uno:
+>
+> - **Windows:** hacé **doble clic en [`iniciar.bat`](iniciar.bat)** (o ejecutá `.\iniciar.bat` desde la terminal).
+> - **macOS / Linux / Git Bash:** ejecutá **`./iniciar.sh`** ([`iniciar.sh`](iniciar.sh)).
+>
+> El ejecutable verifica Node.js 24 y Docker (en Windows intenta instalarlos con `winget` si faltan), **abre Docker Desktop** si está cerrado, instala las dependencias (`npm ci`) si faltan o cambió `package-lock.json`, levanta toda la infraestructura, carga los usuarios de prueba (`--sin-semillas` para omitirlos), inicia la web y **abre [http://localhost:5173](http://localhost:5173)** en el navegador.
+
+### Arranque manual (3 comandos)
+
+Si preferís correr cada paso a mano desde la carpeta del repositorio (con Docker Desktop abierto):
 
 ```bash
 npm ci
@@ -20,8 +32,6 @@ npm run web
 ```
 
 `infra:levantar` genera `.env` si hace falta, construye las imágenes y espera los chequeos de salud. Abrí [la web en localhost:5173](http://localhost:5173). El enrutador de la API escucha en [localhost:8000](http://localhost:8000/health). Para detener el entorno y conservar sus datos, ejecutá `npm run infra:bajar`.
-
-También podés iniciar todo en un solo paso ejecutando [`iniciar.bat`](iniciar.bat) (Windows, con doble clic o desde la terminal) o `./iniciar.sh` ([`iniciar.sh`](iniciar.sh) en macOS/Linux/Git Bash): verifica Node.js 24 y Docker (abre Docker Desktop si está cerrado e intenta instalar los requisitos con `winget` en Windows si faltan), corre `npm ci` si faltan dependencias o cambió `package-lock.json`, levanta los contenedores, carga las semillas (`--sin-semillas` para omitirlas), inicia la web y abre `http://localhost:5173`.
 
 ## Usuarios de prueba
 
