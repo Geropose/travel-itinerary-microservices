@@ -15,21 +15,35 @@ intenciones:
     - derivar
     - derivame
     - hablar con alguien
+    - hablar con mi agencia
+    - comunicarme con
+    - pasame con
     - soporte humano
     - atencion al cliente
+    - reclamo
+    - queja
   reprogramar:
     - reprogramar
+    - reprogramame
     - reprogramacion
     - cambiar vuelo
     - cambiar mi vuelo
+    - cambiar de vuelo
     - cambiar reserva
+    - cambiar mi reserva
+    - modificar vuelo
+    - modificar mi vuelo
+    - modificar reserva
     - cambiar fecha
     - cambiar horario
+    - pasar mi vuelo
     - mover vuelo
     - adelantar
     - postergar
     - posponer
     - otro vuelo
+    - otro horario
+    - otra fecha
     - reubicar
     - reubicacion
   estado:
@@ -37,9 +51,23 @@ intenciones:
     - reservas
     - mis reservas
     - mis viajes
+    - mis vuelos
+    - mis hoteles
+    - mis autos
     - mi vuelo
     - mi hotel
     - mi auto
+    - mi viaje
+    - mi reserva
+    - que viajes tengo
+    - que reservas tengo
+    - cuando viajo
+    - proximo viaje
+    - proxima reserva
+    - ver mis viajes
+    - ver mis reservas
+    - como esta mi vuelo
+    - como viene mi vuelo
     - itinerario
     - horario
     - cuando sale
@@ -67,7 +95,72 @@ intenciones:
     - designado
     - red social
     - asiento
+    - archivar
+    - archivo
+    - archiva
+    - archivan
+    - archivado
+    - archivados
+    - viaje pasado
+    - viajes pasados
+    - conectar correo
+    - sincronizar correo
+    - gmail
+    - outlook
+    - buzon
+    - whitelist
+    - filtro
+    - filtros
+    - remitente
+    - remitentes
+    - sin internet
+    - sin conexion
+    - offline
+    - modo avion
+    - agregar reserva
+    - cargar reserva
+    - crear reserva
+    - editar reserva
+    - borrar reserva
+    - eliminar reserva
     - ayuda
+  # Se evalúa después de derivar, reprogramar, problemaMenor y estado para que mensajes como
+  # "Hola, ¿cómo está mi vuelo?" prioricen siempre la consulta operativa.
+  cortesia:
+    - hola
+    - holis
+    - buenas
+    - buen dia
+    - buenos dias
+    - buenas tardes
+    - buenas noches
+    - hey
+    - ey
+    - que tal
+    - como estas
+    - como andas
+    - todo bien
+    - gracias
+    - muchas gracias
+    - mil gracias
+    - te agradezco
+    - genial
+    - barbaro
+    - joya
+    - excelente
+    - perfecto
+    - listo
+    - chau
+    - chao
+    - adios
+    - hasta luego
+    - nos vemos
+    - quien sos
+    - que sos
+    - que podes hacer
+    - que sabes hacer
+    - en que me podes ayudar
+    - para que servis
 
 # Respuestas afirmativas que aceptan una derivación ofrecida previamente (`ofreceDerivar: true`).
 afirmaciones:
@@ -116,18 +209,131 @@ problemasMenores:
       Podés compartir un viaje desde su detalle en el panel: agregá el email de una persona
       designada para darle acceso de solo lectura, o publicalo en tu red social sin códigos de
       reserva.
+  archivar:
+    palabrasClave:
+      - archivar
+      - archivo
+      - archiva
+      - archivan
+      - archivado
+      - archivados
+      - viaje pasado
+      - viajes pasados
+    respuesta: >-
+      No hace falta archivar a mano: los viajes se archivan automáticamente cuando termina su última
+      reserva (en la tarea nocturna) y pasan a la pestaña Archivados en modo solo lectura.
+  correo:
+    palabrasClave:
+      - conectar correo
+      - sincronizar correo
+      - gmail
+      - outlook
+      - buzon
+    respuesta: >-
+      Desde la pestaña Correo podés conectar Gmail u Outlook con permiso de solo lectura (OAuth).
+      Trotamundos detecta tus reservas automáticamente y nunca guarda la contraseña de tu correo.
+  whitelist:
+    palabrasClave:
+      - whitelist
+      - filtro
+      - filtros
+      - remitente
+      - remitentes
+    respuesta: >-
+      En la pestaña Whitelist podés activar filtros y elegir qué remitentes o dominios (por ejemplo
+      @aerolinea-andina.example) querés que se procesen al leer tu correo.
+  offline:
+    palabrasClave:
+      - sin internet
+      - sin conexion
+      - offline
+      - modo avion
+    respuesta: >-
+      Trotamundos guarda en tu dispositivo el último panel cargado, así que podés abrir la app sin
+      conexión y consultar tus reservas activas igual.
+  gestionManual:
+    palabrasClave:
+      - agregar reserva
+      - cargar reserva
+      - crear reserva
+      - editar reserva
+      - borrar reserva
+      - eliminar reserva
+    respuesta: >-
+      En la pantalla Panel tenés el botón para agregar una reserva manualmente y, dentro de cada
+      tarjeta, las opciones para editarla o eliminarla.
+  quienSos:
+    palabrasClave:
+      - quien sos
+      - que sos
+      - que podes hacer
+      - que sabes hacer
+      - en que me podes ayudar
+      - para que servis
+    respuesta: >-
+      ¡Hola! Soy el asistente virtual de Trotamundos. Podés pedirme que revise el estado de tus
+      viajes (ej. "¿Cómo está mi vuelo?"), busque opciones para reprogramar un vuelo, te ayude con
+      dudas sobre equipaje, check-in, correo o viajes archivados, o derive tu consulta a tu agencia.
+  comoEstas:
+    palabrasClave:
+      - como estas
+      - como andas
+      - todo bien
+      - que tal
+    respuesta: >-
+      ¡Todo muy bien por acá, gracias por preguntar! ¿En qué te puedo ayudar hoy con tus viajes o
+      reservas?
+  despedida:
+    palabrasClave:
+      - chau
+      - chao
+      - adios
+      - hasta luego
+      - nos vemos
+    respuesta: >-
+      ¡Hasta luego! Buen viaje, y si necesitás algo más con tus reservas, escribime cuando quieras.
+  gracias:
+    palabrasClave:
+      - gracias
+      - muchas gracias
+      - mil gracias
+      - te agradezco
+      - genial
+      - barbaro
+      - joya
+      - excelente
+      - perfecto
+      - listo
+    respuesta: >-
+      ¡De nada! Si necesitás consultar otra reserva, reprogramar un vuelo o hablar con tu agencia,
+      acá estoy.
+  saludo:
+    palabrasClave:
+      - hola
+      - holis
+      - buenas
+      - buen dia
+      - buenos dias
+      - buenas tardes
+      - buenas noches
+      - hey
+      - ey
+    respuesta: >-
+      ¡Hola! ¿Cómo te puedo ayudar hoy? Podés consultarme el estado de tus vuelos o reservas,
+      reprogramar un vuelo, preguntarme sobre equipaje o check-in, o pedir hablar con tu agencia.
   general:
     palabrasClave:
       - ayuda
     respuesta: >-
       Puedo consultar el estado de tus reservas, buscar opciones para reprogramar vuelos, responder
-      dudas sobre equipaje, check-in o cómo compartir un itinerario, o derivar tu caso a tu agencia.
+      dudas sobre equipaje, check-in, correo, whitelist o viajes archivados, o derivar tu caso a tu
+      agencia.
 
 textos:
   saludo: Hola, soy el asistente de Trotamundos. ¿En qué te ayudo?
   repregunta: >-
-    No te entendí. ¿Querés saber el estado de un viaje, reprogramar una reserva o hablar con tu
-    agencia?
+    No llegué a entenderte. Podés preguntarme por el estado de tus vuelos o reservas, pedir
+    reprogramar un vuelo, consultar sobre equipaje o check-in, o pedirme que te derive a tu agencia.
   derivacionAutomaticaMotivo: >-
     El asistente no pudo comprender la consulta del usuario tras dos intentos consecutivos.
   sinReservas: No encontré reservas activas en tu cuenta en este momento.
