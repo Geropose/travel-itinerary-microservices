@@ -397,3 +397,179 @@ test('consola /analitica: ante conflicto 409 sigue la ejecución que ya estaba e
   await expect(page.getByTestId('badge-estado-ejecucion')).toHaveText('Terminada');
   await expect(page.getByTestId('resultado-analitica')).toContainText('Santiago (SCL)');
 });
+
+test('C11 /analitica: abrir ejecución terminada cancela el sondeo previo e ignora respuesta tardía', async ({
+  page,
+}) => {
+  await apiFalsa(page, { analitica: { sondeosEnCurso: 1 } });
+  await iniciarSesion(page, analista);
+  await expect(page).toHaveURL('/analitica');
+
+  await page.getByRole('button', { name: 'Ejecutar con Map-Reduce' }).click();
+  await expect(page.getByTestId('badge-estado-ejecucion')).toHaveText('Terminada');
+  const idTerminada = (
+    await page.locator('[data-testid="estado-ejecucion"] code').textContent()
+  )?.trim();
+  expect(idTerminada).toBeTruthy();
+
+  let liberarSondeoTardio!: () => void;
+  const bloqueoSondeo = new Promise<void>((res) => {
+    liberarSondeoTardio = res;
+  });
+
+  await page.route('**/api/analitica/consultas/ejecuciones/*', async (route) => {
+    const id = route.request().url().split('/').pop();
+    if (id && id !== idTerminada) {
+      await bloqueoSondeo;
+    }
+    await route.fallback();
+  });
+
+  await page.getByLabel('Desde').fill('2025-02-01');
+  await page.getByRole('button', { name: 'Ejecutar con Map-Reduce' }).click();
+
+  const btnVerTerminada = page
+    .locator('section:has(#titulo-historial) li')
+    .filter({ hasText: 'Terminada' })
+    .getByRole('button', { name: 'Ver' });
+  await expect(btnVerTerminada).toBeVisible();
+  await btnVerTerminada.click();
+
+  await expect(page.getByTestId('estado-ejecucion')).toContainText(idTerminada ?? '');
+  await expect(page.getByTestId('badge-estado-ejecucion')).toHaveText('Terminada');
+
+  liberarSondeoTardio();
+  await page.waitForTimeout(500);
+
+  await expect(page.getByTestId('estado-ejecucion')).toContainText(idTerminada ?? '');
+  await expect(page.getByTestId('badge-estado-ejecucion')).toHaveText('Terminada');
+});
+
+test('C12 detalle de viaje: respuesta tardía de viaje previo no sobrescribe el viaje actual', async ({
+  page,
+}) => {
+  const viajeA: ViajePrueba = {
+    viajeId: '50000000-0000-4000-8000-000000000011',
+    usuarioId: subDe(usuaria.email),
+    destino: 'Bariloche',
+    inicio: '2026-12-01T10:00:00Z',
+    fin: '2026-12-03T18:00:00Z',
+    estado: 'activo',
+    reservas: [
+      {
+        reservaId: '60000000-0000-4000-8000-000000000011',
+        viajeId: '50000000-0000-4000-8000-000000000011',
+        proveedor: 'aerolinea-andina',
+        tipoReserva: 'vuelo',
+        numeroReserva: 'BRC100',
+        inicio: '2026-12-01T10:00:00Z',
+        fin: '2026-12-01T12:00:00Z',
+        origen: 'AEP',
+        destino: 'BRC',
+        estado: 'confirmada',
+        detalle: {},
+        origenCambio: 'manual',
+        actualizadoEn: '2026-11-18T10:00:00Z',
+      },
+    ],
+  };
+  const viajeB: ViajePrueba = {
+    viajeId: '50000000-0000-4000-8000-000000000012',
+    usuarioId: subDe(usuaria.email),
+    destino: 'Mendoza',
+    inicio: '2026-12-10T10:00:00Z',
+    fin: '2026-12-14T18:00:00Z',
+    estado: 'activo',
+    reservas: [
+      {
+        reservaId: '60000000-0000-4000-8000-000000000012',
+        viajeId: '50000000-0000-4000-8000-000000000012',
+        proveedor: 'aerolinea-andina',
+        tipoReserva: 'vuelo',
+        numeroReserva: 'MEN200',
+        inicio: '2026-12-10T10:00:00Z',
+        fin: '2026-12-10T12:00:00Z',
+        origen: 'AEP',
+        destino: 'MDZ',
+        estado: 'confirmada',
+        detalle: {},
+        origenCambio: 'manual',
+        actualizadoEn: '2026-11-18T11:00:00Z',
+      },
+    ],
+  };
+
+  await apiFalsa(page, { panel: { viajes: [viajeA, viajeB] } });
+
+  let liberarViajeA!: () => void;
+  const bloqueoViajeA = new Promise<void>((res) => {
+    liberarViajeA = res;
+  });
+  await page.route(`**/api/viajes/viajes/${viajeA.viajeId}`, async (route) => {
+    await bloqueoViajeA;
+    await route.fallback();
+  });
+
+  await iniciarSesion(page);
+  await page
+    .getByTestId(`viaje-${viajeA.viajeId}`)
+    .getByRole('link', { name: 'Ver detalle y compartir' })
+    .click();
+  await expect(page).toHaveURL(`/viajes/${viajeA.viajeId}`);
+
+  await page.evaluate((destino) => {
+    window.history.pushState({}, '', destino);
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  }, `/viajes/${viajeB.viajeId}`);
+
+  await expect(page.getByRole('heading', { name: 'Mendoza' })).toBeVisible();
+  await expect(page.getByTestId('reserva-MEN200')).toBeVisible();
+
+  liberarViajeA();
+  await page.waitForTimeout(200);
+
+  await expect(page.getByRole('heading', { name: 'Mendoza' })).toBeVisible();
+  await expect(page.getByTestId('reserva-MEN200')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Bariloche' })).toHaveCount(0);
+});
+
+test('C16 edición de reserva con segundos/ms no envía inicio/fin si solo cambia destino', async ({
+  page,
+}) => {
+  const viajeConSegundos: ViajePrueba = {
+    viajeId: '50000000-0000-4000-8000-000000000020',
+    usuarioId: subDe(usuaria.email),
+    destino: 'Santiago de Chile',
+    inicio: '2026-12-10T08:30:45.500Z',
+    fin: '2026-12-10T10:45:30.250Z',
+    estado: 'activo',
+    reservas: [
+      {
+        reservaId: '60000000-0000-4000-8000-000000000020',
+        viajeId: '50000000-0000-4000-8000-000000000020',
+        proveedor: 'aerolinea-andina',
+        tipoReserva: 'vuelo',
+        numeroReserva: 'SEC100',
+        inicio: '2026-12-10T08:30:45.500Z',
+        fin: '2026-12-10T10:45:30.250Z',
+        origen: 'EZE',
+        destino: 'SCL',
+        estado: 'confirmada',
+        detalle: {},
+        origenCambio: 'manual',
+        actualizadoEn: '2026-11-18T10:00:00Z',
+      },
+    ],
+  };
+
+  const api = await apiFalsa(page, { panel: { viajes: [viajeConSegundos] } });
+  await iniciarSesion(page);
+
+  await page.getByRole('button', { name: 'Editar reserva SEC100' }).click();
+  await page.getByLabel('Destino').fill('Santiago Centro (SCL)');
+  await page.getByRole('button', { name: 'Guardar cambios' }).click();
+
+  await expect(page.getByRole('status')).toHaveText('Reserva SEC100 actualizada.');
+  const patch = api.a('/api/viajes/reservas/60000000-0000-4000-8000-000000000020')[0];
+  expect(patch?.cuerpo).toEqual({ destino: 'Santiago Centro (SCL)' });
+});

@@ -11,6 +11,7 @@ import {
   enTransaccion,
   errores,
   ErrorRespuestaHttp,
+  ipDe,
   type ClienteHttp,
   type Logger,
   type Pool,
@@ -162,12 +163,18 @@ export function crearNegocioViajes(opciones: OpcionesNegocioViajes): NegocioViaj
         return { panel: enCache, origenDato: 'cache' };
       }
 
-      const viajes = await leerConFallback(
-        (db) => repositorio.listarViajesConReservas(db, usuarioId, 'activo'),
-        'el panel',
-      );
+      const versionAntes = await cache.obtenerVersion?.(usuarioId);
+      const usarPrincipalPorMutacion =
+        poolLectura !== poolPrincipal && (await cache.mutacionReciente?.(usuarioId)) === true;
+
+      const viajes = usarPrincipalPorMutacion
+        ? await repositorio.listarViajesConReservas(poolPrincipal, usuarioId, 'activo')
+        : await leerConFallback(
+            (db) => repositorio.listarViajesConReservas(db, usuarioId, 'activo'),
+            'el panel',
+          );
       const panel: PanelPublico = { viajes: viajes.map(aViajePublico) };
-      await cache.guardar(usuarioId, panel);
+      await cache.guardar(usuarioId, panel, versionAntes);
       return { panel, origenDato: 'replica' };
     },
 
@@ -239,7 +246,7 @@ export function crearNegocioViajes(opciones: OpcionesNegocioViajes): NegocioViaj
           }
         }
         logger.warn(
-          { err, viajeId, red },
+          { err, red },
           'falló la publicación del itinerario en el Servicio de Integraciones',
         );
         throw new ErrorNegocioViajes(
@@ -346,6 +353,7 @@ export function registrarRutas(
   const viajePorRequest = new WeakMap<Request, ViajeConReservas>();
 
   function registrarProhibido(req: Request, usuarioId: string): void {
+    const ip = ipDe(req);
     negocio.registrar?.({
       servicio,
       metodo: req.method,
@@ -353,7 +361,7 @@ export function registrarRutas(
       status: 403,
       motivo: 'sin-permiso',
       usuarioId,
-      ...(req.ip ? { ip: req.ip } : {}),
+      ...(ip ? { ip } : {}),
       requestId: contextoActual()?.requestId ?? '',
     });
   }

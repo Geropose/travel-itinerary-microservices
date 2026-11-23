@@ -63,11 +63,13 @@ function mapearFila(f: FilaSql): FilaAnonimizadaGuardada {
   };
 }
 
+export type AccionAnonimizada = 'insertada' | 'actualizada' | 'movida' | 'omitida';
+
 async function ejecutarGuardarEnCliente(
   db: ClienteDb,
   fila: ViajeAnonimizado,
   ahora: Date,
-): Promise<{ accion: 'insertada' | 'actualizada' | 'movida'; fila: FilaAnonimizadaGuardada }> {
+): Promise<{ accion: AccionAnonimizada; fila: FilaAnonimizadaGuardada }> {
   // Serializa cambios concurrentes sobre la misma reserva anonimizada para garantizar una única fila.
   await db.query('SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))', [
     `${fila.region}:${fila.proveedor}:${fila.codigoReserva}`,
@@ -76,14 +78,20 @@ async function ejecutarGuardarEnCliente(
   // Garantiza la existencia de la partición mensual de destino.
   await db.query('SELECT asegurar_particion_mes($1::date)', [fila.inicio]);
 
-  const existente = await db.query<{ inicio: string }>(
-    `SELECT to_char(inicio, 'YYYY-MM-DD') AS inicio
+  const existente = await db.query<FilaSql>(
+    `SELECT codigo_reserva, region, proveedor, tipo_reserva, origen, destino,
+            to_char(inicio, 'YYYY-MM-DD') AS inicio, to_char(fin, 'YYYY-MM-DD') AS fin,
+            estado, origen_cambio, actualizado_en
      FROM reservas_anonimizadas
      WHERE region = $1 AND proveedor = $2 AND codigo_reserva = $3
      LIMIT 1`,
     [fila.region, fila.proveedor, fila.codigoReserva],
   );
-  const inicioAnterior = existente.rows[0]?.inicio;
+  const filaExistente = existente.rows[0];
+  if (filaExistente && ahora.getTime() < filaExistente.actualizado_en.getTime()) {
+    return { accion: 'omitida', fila: mapearFila(filaExistente) };
+  }
+  const inicioAnterior = filaExistente?.inicio;
 
   if (inicioAnterior === undefined) {
     const ins = await db.query<FilaSql>(
@@ -183,6 +191,19 @@ async function ejecutarGuardarEnCliente(
 }
 
 /**
+ * Valida estrictamente `fila` contra ViajeAnonimizado.json y persiste la fila en un cliente de DB ya abierto
+ * (permite reutilizar la conexión transaccional del consumidor cuando analítica comparte la base regional).
+ */
+export async function guardarFilaAnonimizadaEnCliente(
+  db: ClienteDb,
+  fila: unknown,
+  ahora: Date = new Date(),
+): Promise<{ accion: AccionAnonimizada; fila: FilaAnonimizadaGuardada }> {
+  const validada = validarViajeAnonimizado(fila);
+  return await ejecutarGuardarEnCliente(db, validada, ahora);
+}
+
+/**
  * Valida estrictamente `fila` contra ViajeAnonimizado.json y realiza un upsert en la tabla
  * particionada `reservas_anonimizadas` manteniendo siempre una sola fila por reserva.
  */
@@ -190,7 +211,7 @@ export async function guardarFilaAnonimizada(
   pool: Pool,
   fila: unknown,
   ahora: Date = new Date(),
-): Promise<{ accion: 'insertada' | 'actualizada' | 'movida'; fila: FilaAnonimizadaGuardada }> {
+): Promise<{ accion: AccionAnonimizada; fila: FilaAnonimizadaGuardada }> {
   const validada = validarViajeAnonimizado(fila);
   return await enTransaccion(pool, (db) => ejecutarGuardarEnCliente(db, validada, ahora));
 }
@@ -369,6 +390,38 @@ function esDuplicadoPg(err: unknown): boolean {
   return (err as { code?: string } | null)?.code === '23505';
 }
 
+export async function expirarEjecucionesHuerfanas(
+  db: Db,
+  umbral: Date,
+  ahora: Date,
+): Promise<number> {
+  const res = await db.query(
+    `UPDATE ejecuciones_consultas
+     SET estado = 'fallida',
+         terminada_en = $2,
+         actualizado_en = $2,
+         error = 'Ejecución expirada por inactividad de la instancia.'
+     WHERE estado IN ('pendiente', 'enCurso')
+       AND actualizado_en < $1`,
+    [umbral, ahora],
+  );
+  return res.rowCount ?? 0;
+}
+
+export async function actualizarHeartbeatEjecucion(
+  db: Db,
+  consultaId: string,
+  ahora: Date,
+): Promise<void> {
+  await db.query(
+    `UPDATE ejecuciones_consultas
+     SET actualizado_en = $2
+     WHERE consulta_id = $1
+       AND estado IN ('pendiente', 'enCurso')`,
+    [consultaId, ahora],
+  );
+}
+
 export async function crearEjecucion(
   db: Db,
   datos: {
@@ -377,40 +430,58 @@ export async function crearEjecucion(
     parametros: ParametrosConsulta;
     claveDedup: string;
     creadaEn: Date;
+    ttlHuerfanaMs?: number;
   },
 ): Promise<
   { creada: true; ejecucion: EjecucionPublica } | { creada: false; consultaIdExistente: string }
 > {
-  try {
-    const res = await db.query<FilaEjecucionSql>(
-      `INSERT INTO ejecuciones_consultas (
-         consulta_id, tipo, parametros, clave_dedup, estado, procesadores, progreso, creada_en
-       )
-       VALUES ($1, $2, $3::jsonb, $4, 'pendiente', 0, 0, $5)
-       RETURNING consulta_id, tipo, parametros, estado, procesadores, progreso,
-                 creada_en, iniciada_en, terminada_en, duracion_ms, resultado, error`,
-      [
-        datos.consultaId,
-        datos.tipo,
-        JSON.stringify(datos.parametros),
-        datos.claveDedup,
-        datos.creadaEn,
-      ],
-    );
-    const fila = res.rows[0];
-    if (!fila) throw new Error('No se pudo crear el registro de ejecución.');
-    return { creada: true, ejecucion: mapearEjecucion(fila) };
-  } catch (err) {
-    if (!esDuplicadoPg(err)) throw err;
-    const activa = await db.query<{ consulta_id: string }>(
-      `SELECT consulta_id
-       FROM ejecuciones_consultas
-       WHERE clave_dedup = $1 AND estado IN ('pendiente', 'enCurso')
-       LIMIT 1`,
-      [datos.claveDedup],
-    );
-    return { creada: false, consultaIdExistente: activa.rows[0]?.consulta_id ?? '' };
+  const ttlHuerfanaMs = Math.max(100, datos.ttlHuerfanaMs ?? 5 * 60_000);
+  await expirarEjecucionesHuerfanas(
+    db,
+    new Date(datos.creadaEn.getTime() - ttlHuerfanaMs),
+    datos.creadaEn,
+  );
+
+  for (let intento = 0; intento < 2; intento++) {
+    try {
+      const res = await db.query<FilaEjecucionSql>(
+        `INSERT INTO ejecuciones_consultas (
+           consulta_id, tipo, parametros, clave_dedup, estado, procesadores, progreso,
+           creada_en, actualizado_en
+         )
+         VALUES ($1, $2, $3::jsonb, $4, 'pendiente', 0, 0, $5, $5)
+         RETURNING consulta_id, tipo, parametros, estado, procesadores, progreso,
+                   creada_en, iniciada_en, terminada_en, duracion_ms, resultado, error`,
+        [
+          datos.consultaId,
+          datos.tipo,
+          JSON.stringify(datos.parametros),
+          datos.claveDedup,
+          datos.creadaEn,
+        ],
+      );
+      const fila = res.rows[0];
+      if (!fila) throw new Error('No se pudo crear el registro de ejecución.');
+      return { creada: true, ejecucion: mapearEjecucion(fila) };
+    } catch (err) {
+      if (!esDuplicadoPg(err)) throw err;
+      const activa = await db.query<{ consulta_id: string }>(
+        `SELECT consulta_id
+         FROM ejecuciones_consultas
+         WHERE clave_dedup = $1 AND estado IN ('pendiente', 'enCurso')
+         LIMIT 1`,
+        [datos.claveDedup],
+      );
+      const existenteId = activa.rows[0]?.consulta_id;
+      if (existenteId) {
+        return { creada: false, consultaIdExistente: existenteId };
+      }
+      if (intento === 1) {
+        return { creada: false, consultaIdExistente: '' };
+      }
+    }
   }
+  return { creada: false, consultaIdExistente: '' };
 }
 
 export async function marcarEjecucionEnCurso(
@@ -423,7 +494,8 @@ export async function marcarEjecucionEnCurso(
     `UPDATE ejecuciones_consultas
      SET estado = 'enCurso',
          procesadores = $2,
-         iniciada_en = $3
+         iniciada_en = $3,
+         actualizado_en = $3
      WHERE consulta_id = $1`,
     [consultaId, procesadores, iniciadaEn],
   );
@@ -433,13 +505,15 @@ export async function actualizarProgresoEjecucion(
   db: Db,
   consultaId: string,
   progreso: number,
+  ahora: Date = new Date(),
 ): Promise<void> {
   const acotado = Math.min(1, Math.max(0, progreso));
   await db.query(
     `UPDATE ejecuciones_consultas
-     SET progreso = GREATEST(progreso, $2)
+     SET progreso = GREATEST(progreso, $2),
+         actualizado_en = $3
      WHERE consulta_id = $1 AND estado = 'enCurso'`,
-    [consultaId, acotado],
+    [consultaId, acotado, ahora],
   );
 }
 
@@ -453,6 +527,7 @@ export async function marcarEjecucionTerminada(
      SET estado = 'terminada',
          progreso = 1,
          terminada_en = $2,
+         actualizado_en = $2,
          duracion_ms = $3,
          resultado = $4::jsonb
      WHERE consulta_id = $1`,
@@ -474,6 +549,7 @@ export async function marcarEjecucionFallida(
     `UPDATE ejecuciones_consultas
      SET estado = 'fallida',
          terminada_en = $2,
+         actualizado_en = $2,
          duracion_ms = $3,
          error = $4
      WHERE consulta_id = $1`,

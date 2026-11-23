@@ -1,0 +1,24 @@
+# Auditoría de Viajes, Analítica y Pantallas C (P5.1 · Dueño C)
+
+Auditoría cruzada sobre `services/analitica`, `services/viajes` y sus pantallas en `web/` contra `specs/openapi/{viajes,analitica,comun}.yaml`, `specs/asyncapi/eventos.yaml`, `specs/schemas/ViajeAnonimizado.json` y `docs/CONVENCIONES.md`.
+
+## Resumen de hallazgos resueltos (PR #57)
+
+| ID | Gravedad | Componente | Problema y resolución |
+| --- | --- | --- | --- |
+| C1 | Alta | `services/analitica/{migrations/003_heartbeat_ejecuciones.sql,src/repositorio.ts,src/rutas.ts}` | Una caída de instancia dejaba ejecuciones atascadas en `pendiente`/`enCurso` bloqueando nuevas consultas (`409` permanente) y existía una carrera en `23505` sin `consultaId`. Se agregó `actualizado_en` + heartbeat periódico, expiración automática de huérfanas y reintento ante `23505`. |
+| C2 | Alta | `services/analitica/src/{mapreduce.ts,trabajador-mr.ts}` | Sin `timeoutArranqueMs` ni `timeoutTotalMs` ni `connectionTimeoutMillis` + listener `'error'` en `pg.Client`, una réplica/BD caída colgaba indefinidamente los worker threads. Endurecido y cubierto en `auditoria.test.ts`. |
+| C3 | Media | `services/analitica/src/mapreduce.ts` | Un worker que salía prematuramente con código `0` no fallaba el Map-Reduce y `terminate()` inmediato interrumpía `cliente.end()`. Ahora cualquier `exit` antes de terminar falla y se respeta una ventana de gracia tras `{ tipo: 'fin' }`. |
+| C4 | Media | `services/analitica/src/rutas.ts` | `marcarEjecucionFallida` fallaba sin reintentar ante cortes transitorios de DB. Se agregó reintento con backoff antes de abandonar. |
+| C5 | Media | `services/viajes/src/{gestor,cache,rutas}.ts` | Se registraban `numeroReserva`, `usuarioId` o `viajeId` en logs operativos (`conflicto-usuario`, `ReservaActualizada`, Redis y redes). Se eliminaron de los payloads de log (`services/viajes/test/auditoria.test.ts`). |
+| C6 | Media | `services/viajes/src/{cache,rutas}.ts` | `obtenerPanel` (cache miss) podía sobrescribir Redis con datos previos a una mutación concurrente y leer con lag de la réplica justo tras invalidar. Se incorporaron versión atómica (`panel:ver:{usuarioId}`) y ventana corta de lectura principal (`panel:mut:{usuarioId}`) con scripts Lua en Redis. |
+| C7 | Media | `services/viajes/src/archivado.ts` | Si fallaba `ROLLBACK` o `pg_advisory_unlock`, `cliente.release()` devolvía una conexión rota o con lock retenido al pool. Ahora libera con `cliente.release(true)` cuando cualquiera falla. |
+| C8 | Media | `services/viajes/src/index.ts` | El pool de la read replica usaba timeouts por defecto largos antes de degradar a `poolPrincipal` y faltaba `logger` en `crearPool`. Se configuraron `connectionTimeoutMillis: 600`, `statementTimeoutMs: 800`, `queryTimeoutMs: 800` y `logger`. |
+| C9 | Media | `services/viajes/src/rutas.ts` | `registrarProhibido` enviaba `req.ip` sin validar, descartando `AccesoRechazado` con `X-Forwarded-For` forjado. Ahora usa `ipDe(req)`. |
+| C10 | Media | `services/analitica/src/{consumidor,repositorio,index}.ts` | Eventos `ViajeActualizado` desordenados podían sobrescribir filas más recientes, el timestamps ignoraba `evento.ocurridoEn` y `poolAnalitica === poolRegional` abría una segunda conexión dentro del mismo manejador. Se agregó guarda por `actualizado_en`, reutilización de cliente transaccional y dimensionamiento del pool. |
+| C11 | Media | `web/src/pantallas/Analitica.tsx` | Al abrir una ejecución histórica terminada (`Ver`), un sondeo previo en vuelo podía seguir corriendo y pisar la vista. Se agregó secuencia de cancelación (`sondeoSecuenciaRef`) y llamada a `detenerSondeo()` en `Ver`. |
+| C12 | Media | `web/src/pantallas/ViajeDetalle.tsx` | Cambiar rápidamente `/viajes/:idA` → `/viajes/:idB` o mutar sin guardar vigencia podía aplicar respuestas viejas o redirigir al viaje equivocado. Se validó vigencia por secuencia y `viajeIdActualRef` en cada carga/mutación. |
+| C13 | Baja | `services/viajes/src/gestor.ts` | `crearReservaManual` y `modificarReservaManual` ejecutaban `FOR UPDATE` sobre un `viajeId` ajeno antes de verificar propiedad. Ahora verifican dueño sin lock antes de bloquear (`auditoria.test.ts`). |
+| C14 | Baja | `services/viajes/src/gestor.ts` | Strings con solo espacios o con espacios al borde en campos obligatorios (`proveedor`, `numeroReserva`, `destino`, `origen` de vuelos) pasaban sin recortar o sin error `400`. Normalizados y validados (`auditoria.test.ts`). |
+| C15 | Baja | `services/analitica/` | Se mantuvo documentada la observación menor de consistencia eventual entre particiones en lecturas rápidas directas (sin impacto en el alcance del prototipo). |
+| C16 | Baja | `web/src/pantallas/viajes-componentes.tsx` | Al editar una reserva con segundos/milisegundos en ISO (`inicio`/`fin`), `ReservaFormulario` enviaba cambios espurios al truncar a minutos del input. Ahora compara contra `aInputFechaHora(reservaInicial.{inicio,fin})` (`web/e2e/pantallas-c.spec.ts`). |

@@ -5,11 +5,15 @@ import { createClient } from 'redis';
 import type { PanelPublico } from './modelo.ts';
 
 export const clavePanelUsuario = (usuarioId: string) => `panel:${usuarioId}`;
+export const claveVersionPanel = (usuarioId: string) => `panel:ver:${usuarioId}`;
+export const claveMutacionPanel = (usuarioId: string) => `panel:mut:${usuarioId}`;
 
 export interface CachePanel {
   obtener(usuarioId: string): Promise<PanelPublico | null>;
-  guardar(usuarioId: string, panel: PanelPublico): Promise<void>;
+  guardar(usuarioId: string, panel: PanelPublico, versionEsperada?: string | null): Promise<void>;
   invalidar(usuarioId: string): Promise<void>;
+  obtenerVersion?(usuarioId: string): Promise<string | null>;
+  mutacionReciente?(usuarioId: string): Promise<boolean>;
   cerrar(): Promise<void>;
 }
 
@@ -20,6 +24,8 @@ export interface OpcionesCacheRedis {
   ttlSegundos?: number;
   /** Tiempo máximo por operación contra Redis antes de degradar a la réplica (por defecto 500 ms). */
   timeoutMs?: number;
+  /** Ventana en segundos tras invalidar para leer desde la base principal y evitar lag de réplica. */
+  ventanaMutacionSegundos?: number;
 }
 
 function conTimeout<T>(promesa: Promise<T>, ms: number, etiqueta: string): Promise<T> {
@@ -38,6 +44,8 @@ export function crearCacheNula(): CachePanel {
     obtener: async () => null,
     guardar: async () => undefined,
     invalidar: async () => undefined,
+    obtenerVersion: async () => null,
+    mutacionReciente: async () => false,
     cerrar: async () => undefined,
   };
 }
@@ -51,6 +59,7 @@ export async function crearCacheRedis(opciones: OpcionesCacheRedis): Promise<Cac
   const { url, logger } = opciones;
   const ttlSegundos = Math.max(1, opciones.ttlSegundos ?? 600);
   const timeoutMs = Math.max(50, opciones.timeoutMs ?? 500);
+  const ventanaMutacionSegundos = Math.max(1, opciones.ventanaMutacionSegundos ?? 5);
 
   const cliente = createClient({
     url,
@@ -82,30 +91,98 @@ export async function crearCacheRedis(opciones: OpcionesCacheRedis): Promise<Cac
         if (!crudo) return null;
         return JSON.parse(crudo) as PanelPublico;
       } catch (err) {
-        logger.warn({ err, usuarioId }, 'falló lectura de cache del panel; se leerá de base');
+        logger.warn({ err }, 'falló lectura de cache del panel; se leerá de base');
         return null;
       }
     },
 
-    async guardar(usuarioId, panel) {
+    async obtenerVersion(usuarioId) {
+      if (!cliente.isReady) return null;
+      try {
+        const valor = await conTimeout(
+          cliente.get(claveVersionPanel(usuarioId)),
+          timeoutMs,
+          'GET VER',
+        );
+        return typeof valor === 'string' ? valor : null;
+      } catch (err) {
+        logger.warn({ err }, 'falló lectura de versión de cache del panel');
+        return null;
+      }
+    },
+
+    async mutacionReciente(usuarioId) {
+      if (!cliente.isReady) return false;
+      try {
+        const existe = await conTimeout(
+          cliente.exists(claveMutacionPanel(usuarioId)),
+          timeoutMs,
+          'EXISTS MUT',
+        );
+        return existe > 0;
+      } catch (err) {
+        logger.warn({ err }, 'falló consulta de mutación reciente del panel');
+        return false;
+      }
+    },
+
+    async guardar(usuarioId, panel, versionEsperada) {
       if (!cliente.isReady) return;
       try {
+        const carga = JSON.stringify(panel);
+        if (versionEsperada !== undefined) {
+          await conTimeout(
+            cliente.eval(
+              `if (redis.call('GET', KEYS[2]) or '') == ARGV[3] then
+                 redis.call('SET', KEYS[1], ARGV[1], 'EX', tonumber(ARGV[2]))
+                 return 1
+               end
+               return 0`,
+              {
+                keys: [clavePanelUsuario(usuarioId), claveVersionPanel(usuarioId)],
+                arguments: [carga, String(ttlSegundos), versionEsperada ?? ''],
+              },
+            ),
+            timeoutMs,
+            'EVAL SET',
+          );
+          return;
+        }
         await conTimeout(
-          cliente.set(clavePanelUsuario(usuarioId), JSON.stringify(panel), { EX: ttlSegundos }),
+          cliente.set(clavePanelUsuario(usuarioId), carga, { EX: ttlSegundos }),
           timeoutMs,
           'SET',
         );
       } catch (err) {
-        logger.warn({ err, usuarioId }, 'falló guardado en cache del panel');
+        logger.warn({ err }, 'falló guardado en cache del panel');
       }
     },
 
     async invalidar(usuarioId) {
       if (!cliente.isReady) return;
       try {
-        await conTimeout(cliente.del(clavePanelUsuario(usuarioId)), timeoutMs, 'DEL');
+        const ttlVersion = Math.max(ttlSegundos * 2, 3600);
+        await conTimeout(
+          cliente.eval(
+            `redis.call('DEL', KEYS[1])
+             redis.call('INCR', KEYS[2])
+             redis.call('EXPIRE', KEYS[2], tonumber(ARGV[1]))
+             redis.call('SET', KEYS[3], '1', 'EX', tonumber(ARGV[2]))
+             return 1`,
+            {
+              keys: [
+                clavePanelUsuario(usuarioId),
+                claveVersionPanel(usuarioId),
+                claveMutacionPanel(usuarioId),
+              ],
+              arguments: [String(ttlVersion), String(ventanaMutacionSegundos)],
+            },
+          ),
+          timeoutMs,
+          'EVAL INVALIDAR',
+        );
       } catch (err) {
-        logger.warn({ err, usuarioId }, 'falló invalidación de cache del panel');
+        logger.warn({ err }, 'falló invalidación de cache del panel');
       }
     },
 

@@ -28,6 +28,10 @@ export interface OpcionesNegocioAnalitica {
   logger: Logger;
   procesadoresDefecto?: number;
   ahora?: () => number;
+  intervaloHeartbeatMs?: number;
+  ttlHuerfanaMs?: number;
+  ejecutarMr?: typeof ejecutarMapReduce;
+  reintentosFalloMs?: readonly number[];
 }
 
 export interface NegocioAnalitica {
@@ -145,15 +149,51 @@ export function crearNegocioAnalitica(opciones: OpcionesNegocioAnalitica): Negoc
   const { poolAnalitica, urlBaseAnalitica, logger } = opciones;
   const procesadoresDefecto = opciones.procesadoresDefecto ?? 4;
   const ahora = opciones.ahora ?? Date.now;
+  const intervaloHeartbeatMs = Math.max(50, opciones.intervaloHeartbeatMs ?? 30_000);
+  const ttlHuerfanaMs = Math.max(100, opciones.ttlHuerfanaMs ?? 5 * 60_000);
+  const ejecutarMr = opciones.ejecutarMr ?? ejecutarMapReduce;
+  const reintentosFalloMs = opciones.reintentosFalloMs ?? [200, 1000, 3000];
   const ejecucionesEnCurso = new Set<Promise<void>>();
+
+  async function registrarFalloConReintento(
+    consultaId: string,
+    duracionMs: number,
+    error: string,
+  ): Promise<void> {
+    const totalIntentos = reintentosFalloMs.length + 1;
+    for (let intento = 0; intento < totalIntentos; intento++) {
+      try {
+        await repositorio.marcarEjecucionFallida(poolAnalitica, consultaId, {
+          terminadaEn: new Date(ahora()),
+          duracionMs,
+          error,
+        });
+        return;
+      } catch (errDb) {
+        const espera = reintentosFalloMs[intento];
+        if (espera === undefined) {
+          logger.warn({ err: errDb, consultaId }, 'no se pudo registrar el fallo de la consulta');
+          return;
+        }
+        await new Promise((r) => setTimeout(r, espera));
+      }
+    }
+  }
 
   async function correrEnSegundoPlano(
     consultaId: string,
     consulta: ConsultaMapReduce,
   ): Promise<void> {
     const inicioReal = performance.now();
+    const timerHeartbeat = setInterval(() => {
+      void repositorio
+        .actualizarHeartbeatEjecucion(poolAnalitica, consultaId, new Date(ahora()))
+        .catch(() => undefined);
+    }, intervaloHeartbeatMs);
+    timerHeartbeat.unref();
+
     try {
-      const resultadoMr = await ejecutarMapReduce({
+      const resultadoMr = await ejecutarMr({
         urlBaseAnalitica,
         consulta,
         procesadoresDefecto,
@@ -167,7 +207,12 @@ export function crearNegocioAnalitica(opciones: OpcionesNegocioAnalitica): Negoc
           );
         },
         alProgresar: async (progreso) => {
-          await repositorio.actualizarProgresoEjecucion(poolAnalitica, consultaId, progreso);
+          await repositorio.actualizarProgresoEjecucion(
+            poolAnalitica,
+            consultaId,
+            progreso,
+            new Date(ahora()),
+          );
         },
       });
 
@@ -191,15 +236,9 @@ export function crearNegocioAnalitica(opciones: OpcionesNegocioAnalitica): Negoc
       const mensaje =
         err instanceof Error ? err.message : 'Error inesperado durante la ejecución Map-Reduce.';
       logger.error({ err, consultaId, tipo: consulta.tipo }, 'falló la consulta Map-Reduce');
-      await repositorio
-        .marcarEjecucionFallida(poolAnalitica, consultaId, {
-          terminadaEn: new Date(ahora()),
-          duracionMs,
-          error: mensaje,
-        })
-        .catch((errDb: unknown) => {
-          logger.warn({ err: errDb, consultaId }, 'no se pudo registrar el fallo de la consulta');
-        });
+      await registrarFalloConReintento(consultaId, duracionMs, mensaje);
+    } finally {
+      clearInterval(timerHeartbeat);
     }
   }
 
@@ -242,6 +281,7 @@ export function crearNegocioAnalitica(opciones: OpcionesNegocioAnalitica): Negoc
         parametros,
         claveDedup,
         creadaEn,
+        ttlHuerfanaMs,
       });
       if (!alta.creada) {
         throw errores.conflicto(

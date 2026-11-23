@@ -307,6 +307,14 @@ export interface OpcionesMapReduce {
   alIniciar?: (procesadoresUsados: number, totalBloques: number) => void | Promise<void>;
   alProgresar?: (progreso: number, completados: number, total: number) => void | Promise<void>;
   ahora?: () => number;
+  /** Tiempo máximo para que todos los worker_threads se conecten y reporten 'listo'. */
+  timeoutArranqueMs?: number;
+  /** Tiempo máximo total de ejecución de la consulta Map-Reduce. */
+  timeoutTotalMs?: number;
+  /** Espera de gracia para apagado limpio de workers antes de llamar terminate(). */
+  graciaApagadoMs?: number;
+  /** Override opcional de la ruta del trabajador (útil en pruebas unitarias). */
+  rutaTrabajador?: URL;
 }
 
 export interface ResultadoEjecucionMapReduce {
@@ -370,8 +378,13 @@ export async function ejecutarMapReduce(
 
   await opciones.alIniciar?.(cantidadTrabajadores, bloques.length);
 
-  const rutaTrabajador = new URL('./trabajador-mr.ts', import.meta.url);
+  const rutaTrabajador = opciones.rutaTrabajador ?? new URL('./trabajador-mr.ts', import.meta.url);
+  const timeoutArranqueMs = Math.max(10, opciones.timeoutArranqueMs ?? 30_000);
+  const timeoutTotalMs = Math.max(10, opciones.timeoutTotalMs ?? 10 * 60_000);
+  const graciaApagadoMs = Math.max(0, opciones.graciaApagadoMs ?? 1_000);
   const trabajadores: Worker[] = [];
+  const salidos = new Set<Worker>();
+  const esperandoFin = new Set<Worker>();
   const parciales: ParcialMap[] = [];
   let inicioProcesamientoMs = 0;
 
@@ -381,17 +394,42 @@ export async function ejecutarMapReduce(
       let completados = 0;
       let listos = 0;
       let terminado = false;
+      let timerArranque: NodeJS.Timeout | undefined;
+      let timerTotal: NodeJS.Timeout | undefined;
+
+      const limpiarTemporizadores = () => {
+        if (timerArranque) {
+          clearTimeout(timerArranque);
+          timerArranque = undefined;
+        }
+        if (timerTotal) {
+          clearTimeout(timerTotal);
+          timerTotal = undefined;
+        }
+      };
 
       const fallar = (err: Error) => {
         if (terminado) return;
         terminado = true;
+        limpiarTemporizadores();
         rechazar(err);
       };
+
+      timerArranque = setTimeout(() => {
+        fallar(new Error('Tiempo agotado esperando inicio de trabajadores Map-Reduce.'));
+      }, timeoutArranqueMs);
+      timerArranque.unref();
+
+      timerTotal = setTimeout(() => {
+        fallar(new Error('Tiempo máximo de ejecución Map-Reduce excedido.'));
+      }, timeoutTotalMs);
+      timerTotal.unref();
 
       const asignarSiguiente = (trabajador: Worker) => {
         if (terminado) return;
         const bloque = bloques[siguienteBloque++];
         if (!bloque) {
+          esperandoFin.add(trabajador);
           const fin: MensajeAlTrabajador = { tipo: 'fin' };
           trabajador.postMessage(fin);
           return;
@@ -402,7 +440,11 @@ export async function ejecutarMapReduce(
 
       for (let i = 0; i < cantidadTrabajadores; i++) {
         const trabajador = new Worker(rutaTrabajador, {
-          workerData: { urlBaseAnalitica, tarea },
+          workerData: {
+            urlBaseAnalitica,
+            tarea,
+            connectionTimeoutMs: Math.min(timeoutArranqueMs, 10_000),
+          },
         });
         trabajadores.push(trabajador);
 
@@ -411,6 +453,10 @@ export async function ejecutarMapReduce(
           if (msg.tipo === 'listo') {
             listos += 1;
             if (listos === cantidadTrabajadores) {
+              if (timerArranque) {
+                clearTimeout(timerArranque);
+                timerArranque = undefined;
+              }
               // Arrancamos los N trabajadores simultáneamente cuando todos conectaron.
               inicioProcesamientoMs = performance.now();
               for (const t of trabajadores) {
@@ -432,6 +478,7 @@ export async function ejecutarMapReduce(
 
           if (completados === bloques.length) {
             terminado = true;
+            limpiarTemporizadores();
             resolver();
             return;
           }
@@ -443,7 +490,8 @@ export async function ejecutarMapReduce(
         });
 
         trabajador.on('exit', (codigo) => {
-          if (!terminado && codigo !== 0) {
+          salidos.add(trabajador);
+          if (!terminado && (!esperandoFin.has(trabajador) || codigo !== 0)) {
             fallar(
               new Error(`Trabajador Map-Reduce finalizó inesperadamente con código ${codigo}`),
             );
@@ -452,16 +500,33 @@ export async function ejecutarMapReduce(
       }
     });
   } finally {
-    // Apagamos todos los trabajadores al terminar (o ante fallo): nunca quedan procesos colgados.
+    // Pedimos cierre ordenado y damos una breve ventana antes de forzar terminate().
     await Promise.allSettled(
       trabajadores.map(async (trabajador) => {
+        if (salidos.has(trabajador)) return;
         try {
           const fin: MensajeAlTrabajador = { tipo: 'fin' };
           trabajador.postMessage(fin);
         } catch {
           // El trabajador ya se cerró.
         }
-        await trabajador.terminate();
+        if (graciaApagadoMs > 0 && !salidos.has(trabajador)) {
+          await new Promise<void>((res) => {
+            const alSalir = () => {
+              clearTimeout(timer);
+              res();
+            };
+            const timer = setTimeout(() => {
+              trabajador.off('exit', alSalir);
+              res();
+            }, graciaApagadoMs);
+            timer.unref();
+            trabajador.once('exit', alSalir);
+          });
+        }
+        if (!salidos.has(trabajador)) {
+          await trabajador.terminate();
+        }
       }),
     );
   }
