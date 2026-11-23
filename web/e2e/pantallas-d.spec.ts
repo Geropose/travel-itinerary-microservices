@@ -209,7 +209,6 @@ test('tras 3 errores seguidos del asistente, oculta el chat y muestra "Contactar
 test('una respuesta pendiente pertenece al chat desde el que se hizo la consulta', async ({
   page,
 }) => {
-  test.skip(process.env.AUDITORIA === undefined, 'Prueba de regresión de la auditoría');
   await apiFalsa(page, { asistente: { reprogramacionLenta: true } });
 
   const sondeoIniciado = Promise.withResolvers<undefined>();

@@ -355,6 +355,36 @@ describe('Adaptador de aerolínea (HMAC + traducción)', () => {
       expect(resInvalido.cuerpoSinDatosPersonales).toContain('[quitado]');
     }
   });
+
+  it('rechaza avisos sin campos obligatorios de AvisoAerolinea (sobre, owner, passengers, fechas o segmentos)', () => {
+    const base = avisoAerolineaBase();
+    const variantesInvalidas: unknown[] = [
+      { ...base, id: undefined },
+      { ...base, type: 'order.unknown' },
+      { ...base, created_at: 'no-fecha' },
+      { ...base, idempotency_key: '' },
+      { ...base, data: { object: { ...base.data.object, removed: undefined } } },
+      { ...base, data: { object: { ...base.data.object, added: [{ id: 'seg_x' }] } } },
+      {
+        ...base,
+        data: {
+          object: {
+            ...base.data.object,
+            removed: [{ ...base.data.object.removed[0], origin: { iata_code: 'EZE' } }],
+          },
+        },
+      },
+      avisoAerolineaBase({ id: undefined }),
+      avisoAerolineaBase({ updated_at: undefined }),
+      avisoAerolineaBase({ cancelled_at: undefined }),
+      avisoAerolineaBase({ owner: { iata_code: 'AN' } }),
+      avisoAerolineaBase({ passengers: [{ id: 'pas_1', given_name: 'Ana' }] }),
+    ];
+
+    for (const variante of variantesInvalidas) {
+      expect(adaptador.traducir(variante).ok).toBe(false);
+    }
+  });
 });
 
 describe('Adaptadores de hotel y rentadora (diff mínimo, cancelación y PII)', () => {

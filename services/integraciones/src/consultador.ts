@@ -132,10 +132,25 @@ export function crearConsultadorProveedores(
         noTraducidos,
       };
     } finally {
+      let errorDesbloqueo: unknown;
       if (tieneLock) {
-        await repositorio.liberarLockConsulta(clienteLock, adaptador.nombre);
+        try {
+          await repositorio.liberarLockConsulta(clienteLock, adaptador.nombre);
+        } catch (error) {
+          errorDesbloqueo = error;
+          logger.warn(
+            { err: error, proveedor: adaptador.nombre },
+            'No se pudo liberar el bloqueo de consulta periódica; se descarta la conexión del pool',
+          );
+        }
       }
-      clienteLock.release();
+      clienteLock.release(
+        errorDesbloqueo !== undefined
+          ? errorDesbloqueo instanceof Error
+            ? errorDesbloqueo
+            : true
+          : undefined,
+      );
     }
   }
 

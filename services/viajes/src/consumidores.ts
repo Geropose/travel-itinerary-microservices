@@ -31,10 +31,14 @@ export async function registrarConsumidoresViajes(
       tipo: 'ReservaDetectada',
       pool,
       prefetch,
-      manejar: async (evento, cliente) => {
+      manejar: async (evento, cliente, alConfirmar) => {
         const resultado = await gestor.procesarReservaDetectada(cliente, evento.datos);
         if (resultado.accion === 'creada' || resultado.accion === 'actualizada') {
-          await alCambiarUsuario?.(resultado.usuarioId);
+          if (alCambiarUsuario) {
+            const invalidar = () => alCambiarUsuario(resultado.usuarioId);
+            if (alConfirmar) alConfirmar(invalidar);
+            else await invalidar();
+          }
         }
       },
     });
@@ -43,10 +47,14 @@ export async function registrarConsumidoresViajes(
       tipo: 'ReservaActualizada',
       pool,
       prefetch,
-      manejar: async (evento, cliente) => {
+      manejar: async (evento, cliente, alConfirmar) => {
         const resultado = await gestor.procesarReservaActualizada(cliente, evento.datos);
         if (resultado.accion === 'actualizada') {
-          await alCambiarUsuario?.(resultado.usuarioId);
+          if (alCambiarUsuario) {
+            const invalidar = () => alCambiarUsuario(resultado.usuarioId);
+            if (alConfirmar) alConfirmar(invalidar);
+            else await invalidar();
+          }
         }
       },
     });

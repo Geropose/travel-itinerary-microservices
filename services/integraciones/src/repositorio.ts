@@ -232,9 +232,9 @@ export async function intentarLockConsulta(
 }
 
 export async function liberarLockConsulta(cliente: ClienteDb, proveedor: string): Promise<void> {
-  await cliente
-    .query('SELECT pg_advisory_unlock(hashtext($1))', [`${PREFIJO_LOCK_CONSULTA}${proveedor}`])
-    .catch(() => undefined);
+  await cliente.query('SELECT pg_advisory_unlock(hashtext($1))', [
+    `${PREFIJO_LOCK_CONSULTA}${proveedor}`,
+  ]);
 }
 
 export interface OpcionReprogramacionGuardada {
@@ -243,6 +243,7 @@ export interface OpcionReprogramacionGuardada {
   opcionId: string;
   venceEn: string;
   aplicadaEn?: string;
+  enCursoDesde?: string;
 }
 
 interface FilaOpcionReprogramacion {
@@ -251,10 +252,22 @@ interface FilaOpcionReprogramacion {
   opcion_id: string;
   vence_en: Date | string;
   aplicada_en: Date | string | null;
+  en_curso_desde: Date | string | null;
 }
 
 function aIso(valor: Date | string): string {
   return valor instanceof Date ? valor.toISOString() : new Date(valor).toISOString();
+}
+
+function mapearOpcionReprogramacion(fila: FilaOpcionReprogramacion): OpcionReprogramacionGuardada {
+  return {
+    proveedor: fila.proveedor,
+    numeroReserva: fila.numero_reserva,
+    opcionId: fila.opcion_id,
+    venceEn: aIso(fila.vence_en),
+    ...(fila.aplicada_en !== null ? { aplicadaEn: aIso(fila.aplicada_en) } : {}),
+    ...(fila.en_curso_desde !== null ? { enCursoDesde: aIso(fila.en_curso_desde) } : {}),
+  };
 }
 
 export async function guardarOpcionesReprogramacion(
@@ -282,20 +295,57 @@ export async function obtenerOpcionReprogramacion(
   opcionId: string,
 ): Promise<OpcionReprogramacionGuardada | undefined> {
   const { rows } = await db.query<FilaOpcionReprogramacion>(
-    `SELECT proveedor, numero_reserva, opcion_id, vence_en, aplicada_en
+    `SELECT proveedor, numero_reserva, opcion_id, vence_en, aplicada_en, en_curso_desde
        FROM opciones_reprogramacion_ofrecidas
       WHERE proveedor = $1 AND numero_reserva = $2 AND opcion_id = $3`,
     [proveedor, numeroReserva, opcionId],
   );
   const fila = rows[0];
-  if (!fila) return undefined;
-  return {
-    proveedor: fila.proveedor,
-    numeroReserva: fila.numero_reserva,
-    opcionId: fila.opcion_id,
-    venceEn: aIso(fila.vence_en),
-    ...(fila.aplicada_en !== null ? { aplicadaEn: aIso(fila.aplicada_en) } : {}),
-  };
+  return fila ? mapearOpcionReprogramacion(fila) : undefined;
+}
+
+/**
+ * Reserva atómicamente una opción ofrecida para aplicarla ante el proveedor sin duplicados
+ * entre réplicas. Si otra instancia tomó la reserva hace menos de 30 s, devuelve `undefined`.
+ */
+export async function reservarOpcionParaAplicar(
+  db: Ejecutor,
+  proveedor: string,
+  numeroReserva: string,
+  opcionId: string,
+  ahoraIso: string,
+): Promise<OpcionReprogramacionGuardada | undefined> {
+  const { rows } = await db.query<FilaOpcionReprogramacion>(
+    `UPDATE opciones_reprogramacion_ofrecidas
+        SET en_curso_desde = $4::timestamptz
+      WHERE proveedor = $1
+        AND numero_reserva = $2
+        AND opcion_id = $3
+        AND aplicada_en IS NULL
+        AND (
+          en_curso_desde IS NULL
+          OR en_curso_desde < $4::timestamptz - interval '30 seconds'
+        )
+        AND vence_en >= $4::timestamptz
+      RETURNING proveedor, numero_reserva, opcion_id, vence_en, aplicada_en, en_curso_desde`,
+    [proveedor, numeroReserva, opcionId, ahoraIso],
+  );
+  const fila = rows[0];
+  return fila ? mapearOpcionReprogramacion(fila) : undefined;
+}
+
+export async function liberarOpcionEnCurso(
+  db: Ejecutor,
+  proveedor: string,
+  numeroReserva: string,
+  opcionId: string,
+): Promise<void> {
+  await db.query(
+    `UPDATE opciones_reprogramacion_ofrecidas
+        SET en_curso_desde = NULL
+      WHERE proveedor = $1 AND numero_reserva = $2 AND opcion_id = $3 AND aplicada_en IS NULL`,
+    [proveedor, numeroReserva, opcionId],
+  );
 }
 
 export async function marcarOpcionAplicada(
@@ -307,7 +357,8 @@ export async function marcarOpcionAplicada(
 ): Promise<void> {
   await db.query(
     `UPDATE opciones_reprogramacion_ofrecidas
-        SET aplicada_en = COALESCE(aplicada_en, $4::timestamptz)
+        SET aplicada_en = COALESCE(aplicada_en, $4::timestamptz),
+            en_curso_desde = NULL
       WHERE proveedor = $1 AND numero_reserva = $2 AND opcion_id = $3`,
     [proveedor, numeroReserva, opcionId, aplicadaEn],
   );

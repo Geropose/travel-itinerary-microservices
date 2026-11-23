@@ -407,3 +407,37 @@ describe('Integraciones P2.D3: agencias y redes sociales contra mocks reales', (
     expect(resp503.status).toBe(503);
   });
 });
+
+describe('Cliente de Usuarios (ErrorRespuestaHttp)', () => {
+  it('propaga errores 401/403/404 como ErrorHttp con su código en lugar de traducirlos a 503', async () => {
+    const { crearClienteUsuarios } = await import('../src/usuarios.ts');
+    const probarStatus = async (status: number, tipoEsperado: string) => {
+      const cliente = crearClienteUsuarios({
+        urlBase: 'http://usuarios.invalid',
+        fetch: async () =>
+          new Response(JSON.stringify({ status, title: 'Error', type: tipoEsperado }), {
+            status,
+            headers: { 'content-type': 'application/problem+json' },
+          }),
+      });
+      await expect(cliente.obtenerPerfil('jwt-prueba')).rejects.toMatchObject({
+        status,
+        tipo: tipoEsperado,
+      });
+    };
+
+    await probarStatus(401, 'no-autenticado');
+    await probarStatus(403, 'prohibido');
+    await probarStatus(404, 'no-encontrado');
+    await probarStatus(400, 'solicitud-invalida');
+
+    const cliente500 = crearClienteUsuarios({
+      urlBase: 'http://usuarios.invalid',
+      fetch: async () => new Response('boom', { status: 502 }),
+    });
+    await expect(cliente500.obtenerPerfil('jwt-prueba')).rejects.toMatchObject({
+      status: 503,
+      tipo: 'tercero-no-disponible',
+    });
+  });
+});

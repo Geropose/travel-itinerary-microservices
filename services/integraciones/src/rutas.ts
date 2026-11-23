@@ -193,59 +193,86 @@ export function registrarRutas(
       throw errores.noEncontrado(`No hay un adaptador configurado para el proveedor ${proveedor}.`);
     }
 
-    // Nunca enviar una opción inventada al proveedor: tiene que haberse ofrecido antes.
-    const guardada = await repositorio.obtenerOpcionReprogramacion(
-      negocio.pool,
-      proveedor,
-      numeroReserva,
-      opcionId,
-    );
-    if (!guardada) {
-      throw errores.noEncontrado(
-        `La opción ${opcionId} no se ofreció para la reserva ${numeroReserva}.`,
-      );
-    }
-    if (guardada.aplicadaEn) {
-      res.status(200).json({
+    // Nunca enviar una opción inventada ni duplicarla entre réplicas concurrentes.
+    const limiteEsperaMs = 20_000;
+    const inicioEspera = Date.now();
+
+    for (;;) {
+      const reservada = await repositorio.reservarOpcionParaAplicar(
+        negocio.pool,
         proveedor,
         numeroReserva,
         opcionId,
-        estado: 'aplicada',
-        aplicadaEn: guardada.aplicadaEn,
-      });
-      return;
-    }
-    if (Date.parse(guardada.venceEn) < ahora()) {
-      throw new ErrorHttp({
-        status: 409,
-        tipo: 'opcion-vencida',
-        titulo: 'La opción ya no está disponible',
-        detalle: `La opción ${opcionId} venció. Pedí opciones de nuevo.`,
-      });
-    }
+        new Date(ahora()).toISOString(),
+      );
+      if (reservada) {
+        let resultado;
+        try {
+          resultado = await adaptador.aplicarReprogramacion(numeroReserva, opcionId);
+        } catch (error) {
+          await repositorio
+            .liberarOpcionEnCurso(negocio.pool, proveedor, numeroReserva, opcionId)
+            .catch(() => undefined);
+          traducirErrorExterno(error);
+        }
 
-    let resultado;
-    try {
-      resultado = await adaptador.aplicarReprogramacion(numeroReserva, opcionId);
-    } catch (error) {
-      traducirErrorExterno(error);
+        await repositorio.marcarOpcionAplicada(
+          negocio.pool,
+          proveedor,
+          numeroReserva,
+          opcionId,
+          resultado.aplicadaEn,
+        );
+
+        res.status(200).json({
+          proveedor,
+          numeroReserva,
+          opcionId,
+          estado: 'aplicada',
+          aplicadaEn: resultado.aplicadaEn,
+        });
+        return;
+      }
+
+      const guardada = await repositorio.obtenerOpcionReprogramacion(
+        negocio.pool,
+        proveedor,
+        numeroReserva,
+        opcionId,
+      );
+      if (!guardada) {
+        throw errores.noEncontrado(
+          `La opción ${opcionId} no se ofreció para la reserva ${numeroReserva}.`,
+        );
+      }
+      if (guardada.aplicadaEn) {
+        res.status(200).json({
+          proveedor,
+          numeroReserva,
+          opcionId,
+          estado: 'aplicada',
+          aplicadaEn: guardada.aplicadaEn,
+        });
+        return;
+      }
+      if (Date.parse(guardada.venceEn) < ahora()) {
+        throw new ErrorHttp({
+          status: 409,
+          tipo: 'opcion-vencida',
+          titulo: 'La opción ya no está disponible',
+          detalle: `La opción ${opcionId} venció. Pedí opciones de nuevo.`,
+        });
+      }
+      if (Date.now() - inicioEspera >= limiteEsperaMs) {
+        throw new ErrorHttp({
+          status: 503,
+          tipo: 'tercero-no-disponible',
+          titulo: 'Reprogramación en curso',
+          detalle: 'La reprogramación ya se está aplicando. Reintentá en unos segundos.',
+        });
+      }
+      await new Promise((resolver) => setTimeout(resolver, 35));
     }
-
-    await repositorio.marcarOpcionAplicada(
-      negocio.pool,
-      proveedor,
-      numeroReserva,
-      opcionId,
-      resultado.aplicadaEn,
-    );
-
-    res.status(200).json({
-      proveedor,
-      numeroReserva,
-      opcionId,
-      estado: 'aplicada',
-      aplicadaEn: resultado.aplicadaEn,
-    });
   });
 
   // --- Agencias (Iteración 3 y 7, UC-6, ADR-019) ---

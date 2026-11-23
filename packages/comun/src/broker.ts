@@ -40,6 +40,8 @@ export interface OpcionesBroker {
   reconexion?: { esperaInicialMs?: number; esperaMaximaMs?: number; intentosAlArrancar?: number };
 }
 
+export type EfectoPostCommit = () => Promise<void> | void;
+
 export interface OpcionesConsumidor<D> {
   tipo: TipoEvento;
   /** Base del servicio: ahí está eventos_procesados y ahí se aplica el cambio. */
@@ -47,8 +49,13 @@ export interface OpcionesConsumidor<D> {
   /**
    * Aplica el evento. Corre dentro de la transacción que guarda el eventId en eventos_procesados:
    * usar el cliente que recibe para que el cambio y la marca se guarden juntos.
+   * Si se registra un efecto vía `alConfirmar`, se ejecuta recién después del `COMMIT` (sin bloquear el ack).
    */
-  manejar: (evento: Sobre<D>, cliente: ClienteDb) => Promise<void>;
+  manejar: (
+    evento: Sobre<D>,
+    cliente: ClienteDb,
+    alConfirmar?: (efecto: EfectoPostCommit) => void,
+  ) => Promise<void>;
   /** Nombre de la cola (por defecto <servicio>.<tipo>, por ejemplo viajes.ReservaDetectada). */
   cola?: string;
   /** Cuántos mensajes sin confirmar puede tener a la vez (por defecto 10). */
@@ -71,6 +78,87 @@ export interface Broker {
 }
 
 const esperar = (ms: number) => new Promise((resolver) => setTimeout(resolver, ms));
+
+/** Ejecuta un mensaje de consumidor: valida, corre transacción idempotente, aplica efectos post-commit y confirma. */
+export async function procesarMensajeConsumidor<D>(
+  canal: Pick<Channel, 'ack' | 'nack'>,
+  cola: string,
+  mensaje: ConsumeMessage,
+  c: OpcionesConsumidor<D>,
+  validador: ValidadorEventos,
+  logger: Logger,
+): Promise<void> {
+  const confirmar = (ok: boolean) => {
+    try {
+      if (ok) canal.ack(mensaje);
+      else canal.nack(mensaje, false, false);
+    } catch {
+      // El canal se cerró (broker caído): el mensaje vuelve a llegar y la idempotencia lo cubre.
+    }
+  };
+  let evento: Sobre<D>;
+  try {
+    evento = validador.validar<D>(JSON.parse(mensaje.content.toString('utf8')));
+    if (evento.tipo !== c.tipo) throw new ErrorEventoInvalido([`se esperaba ${c.tipo}`]);
+  } catch (error) {
+    logger.error({ err: error, cola }, 'Evento inválido: va a la DLQ sin reintentos');
+    confirmar(false);
+    return;
+  }
+
+  const esperas = c.esperasReintentoMs ?? [500, 1000, 2000];
+  for (let intento = 0; ; intento++) {
+    const efectosPostCommit: EfectoPostCommit[] = [];
+    let repetido: boolean;
+    try {
+      repetido = await conContexto({ requestId: evento.eventId }, () =>
+        enTransaccion(c.pool, async (cliente) => {
+          const marca = await cliente.query(
+            'INSERT INTO eventos_procesados (event_id, cola) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+            [evento.eventId, cola],
+          );
+          if (marca.rowCount === 0) return true;
+          await c.manejar(evento, cliente, (efecto) => {
+            efectosPostCommit.push(efecto);
+          });
+          return false;
+        }),
+      );
+    } catch (error) {
+      const espera = esperas[intento];
+      if (espera === undefined) {
+        logger.error(
+          { err: error, eventId: evento.eventId, cola, intentos: intento + 1 },
+          'El evento falló en todos los intentos: va a la DLQ',
+        );
+        confirmar(false);
+        return;
+      }
+      logger.warn({ err: error, eventId: evento.eventId, cola, intento: intento + 1 }, 'Reintento');
+      await esperar(espera);
+      continue;
+    }
+
+    if (repetido) {
+      logger.info({ eventId: evento.eventId, cola }, 'Evento repetido: se ignora');
+    } else if (efectosPostCommit.length > 0) {
+      await conContexto({ requestId: evento.eventId }, async () => {
+        for (const efecto of efectosPostCommit) {
+          try {
+            await efecto();
+          } catch (errorPostCommit) {
+            logger.warn(
+              { err: errorPostCommit, eventId: evento.eventId, cola },
+              'Falló el efecto posterior al commit (el evento ya quedó confirmado)',
+            );
+          }
+        }
+      });
+    }
+    confirmar(true);
+    return;
+  }
+}
 
 /**
  * Conecta con RabbitMQ (amqplib) con reconexión automática: si se cae el broker, reintenta con
@@ -104,67 +192,8 @@ export async function conectarBroker(opciones: OpcionesBroker): Promise<Broker> 
     await canal.bindQueue(cola, EXCHANGE, c.tipo);
     await canal.prefetch(c.prefetch ?? 10);
     await canal.consume(cola, (mensaje) => {
-      if (mensaje) void procesar(canal, cola, mensaje, c);
+      if (mensaje) void procesarMensajeConsumidor(canal, cola, mensaje, c, validador, logger);
     });
-  }
-
-  async function procesar<D>(
-    canal: Channel,
-    cola: string,
-    mensaje: ConsumeMessage,
-    c: OpcionesConsumidor<D>,
-  ) {
-    const confirmar = (ok: boolean) => {
-      try {
-        if (ok) canal.ack(mensaje);
-        else canal.nack(mensaje, false, false);
-      } catch {
-        // El canal se cerró (broker caído): el mensaje vuelve a llegar y la idempotencia lo cubre.
-      }
-    };
-    let evento: Sobre<D>;
-    try {
-      evento = validador.validar<D>(JSON.parse(mensaje.content.toString('utf8')));
-      if (evento.tipo !== c.tipo) throw new ErrorEventoInvalido([`se esperaba ${c.tipo}`]);
-    } catch (error) {
-      logger.error({ err: error, cola }, 'Evento inválido: va a la DLQ sin reintentos');
-      confirmar(false);
-      return;
-    }
-    const esperas = c.esperasReintentoMs ?? [500, 1000, 2000];
-    for (let intento = 0; ; intento++) {
-      try {
-        const repetido = await conContexto({ requestId: evento.eventId }, () =>
-          enTransaccion(c.pool, async (cliente) => {
-            const marca = await cliente.query(
-              'INSERT INTO eventos_procesados (event_id, cola) VALUES ($1, $2) ON CONFLICT DO NOTHING',
-              [evento.eventId, cola],
-            );
-            if (marca.rowCount === 0) return true;
-            await c.manejar(evento, cliente);
-            return false;
-          }),
-        );
-        if (repetido) logger.info({ eventId: evento.eventId, cola }, 'Evento repetido: se ignora');
-        confirmar(true);
-        return;
-      } catch (error) {
-        const espera = esperas[intento];
-        if (espera === undefined) {
-          logger.error(
-            { err: error, eventId: evento.eventId, cola, intentos: intento + 1 },
-            'El evento falló en todos los intentos: va a la DLQ',
-          );
-          confirmar(false);
-          return;
-        }
-        logger.warn(
-          { err: error, eventId: evento.eventId, cola, intento: intento + 1 },
-          'Reintento',
-        );
-        await esperar(espera);
-      }
-    }
   }
 
   const reconexion = opciones.reconexion ?? {};

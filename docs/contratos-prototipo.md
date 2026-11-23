@@ -30,7 +30,7 @@ Son advertencias del lint sobre los contratos existentes. Su confirmación como 
 
 ### Diferencia HTTP del webhook de Aerolínea Andina
 
-**Dueño D · Integraciones.** El contrato de `AvisoAerolinea` indica que un aviso firmado con campos obligatorios faltantes debe terminar como `no-traducido`. En la corrida #127, el servicio respondió `aceptado` para avisos incompletos con referencias de reserva distintas. La prueba verifica el HTTP y el esquema de todas las respuestas. Cuando recibe exactamente `aceptado` para una de las omisiones registradas, deja una advertencia con el campo, el estado esperado y el dueño. Cualquier otro incumplimiento sigue haciendo fallar la prueba. El dueño debe decidir si valida el esquema completo antes de traducir o actualiza el contrato para reflejar lo que acepta el adaptador. [Contrato](../specs/openapi/integraciones.yaml#L1128) · [Casos registrados](../tests/e2e/openapi-d.test.ts) · [Corrida #127](https://github.com/facubelmonte/Trabajo-especial-trotamundos/actions/runs/45052388875)
+**Dueño D · Integraciones (Resuelto en PR #56).** El adaptador en [aerolinea.ts](../services/integraciones/src/adaptadores/aerolinea.ts) ahora valida todos los campos obligatorios de `AvisoAerolinea`, `OrdenAerolinea` y `SegmentoAerolinea` (incluidos `removed` y `added`) antes de traducir, devolviendo `no-traducido` cuando falta cualquiera de ellos. Se eliminó la excepción `camposAceptadosPendientes` en [la prueba de contrato de Integraciones](../tests/e2e/openapi-d.test.ts) para verificar de forma estricta el contrato [AvisoAerolinea](../specs/openapi/integraciones.yaml#L1128).
 
 ## Cómo ejecutar
 

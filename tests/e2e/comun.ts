@@ -55,11 +55,22 @@ export function subDeJwt(jwt: string): string {
   return claims.sub;
 }
 
-/** Las pruebas ejecutan comandos síncronos de Docker entre peticiones al enrutador. */
+const ORIGENES_LOCALES_E2E = new Set([
+  CONFIG_E2E.urlEnrutador,
+  CONFIG_E2E.urlMockGmail,
+  CONFIG_E2E.urlMockOutlook,
+  CONFIG_E2E.urlMockAerolinea,
+  CONFIG_E2E.urlMockHotel,
+  CONFIG_E2E.urlMockRentadora,
+  CONFIG_E2E.urlMockAgencia,
+  CONFIG_E2E.urlMockRedSocial,
+]);
+
+/** Las pruebas ejecutan comandos síncronos de Docker entre peticiones al sistema y mocks. */
 export function pedirHttpE2E(url: string, init: RequestInit = {}): Promise<Response> {
-  if (new URL(url).origin !== CONFIG_E2E.urlEnrutador) return fetch(url, init);
+  if (!ORIGENES_LOCALES_E2E.has(new URL(url).origin)) return fetch(url, init);
   const headers = new Headers(init.headers);
-  // Evita reutilizar una conexión que el enrutador cerró durante esos comandos.
+  // Evita reutilizar una conexión cerrada entre comandos o reinicios de contenedores.
   headers.set('Connection', 'close');
   return fetch(url, { ...init, headers });
 }

@@ -233,6 +233,7 @@ export async function restaurarPrincipalViajes(
   docker(['network', 'connect', '--alias', 'postgres-viajes-replica', red, replica], true);
   docker(['start', replica]);
 
+  let replicaLista = false;
   const limiteReplica = Date.now() + 60_000;
   while (Date.now() < limiteReplica) {
     try {
@@ -243,15 +244,36 @@ export async function restaurarPrincipalViajes(
         '-U',
         'admin',
         '-d',
-        'postgres',
+        'viajes',
         '-tAc',
         'SELECT pg_is_in_recovery()',
       ]);
-      if (rec === 't') break;
+      const streaming = Number(
+        docker([
+          'exec',
+          principal,
+          'psql',
+          '-U',
+          'admin',
+          '-d',
+          'postgres',
+          '-tAc',
+          "SELECT count(*) FROM pg_stat_replication WHERE state = 'streaming'",
+        ]),
+      );
+      if (rec === 't' && streaming >= 1) {
+        replicaLista = true;
+        break;
+      }
     } catch {
-      // Aún clonando o arrancando standby.
+      // Aún clonando, sincronizando replicación o arrancando standby.
     }
     await new Promise((r) => setTimeout(r, 500));
+  }
+  if (!replicaLista) {
+    throw new Error(
+      `La réplica ${replica} no quedó lista en modo standby/streaming en 60 s al restaurar ${principal}.`,
+    );
   }
 
   const instancias = listarContenedoresViajes(proyecto);
