@@ -978,6 +978,7 @@ export interface operations {
                     "application/json": components["schemas"]["DuenoViaje"];
                 };
             };
+            400: components["responses"]["SolicitudInvalida"];
             401: components["responses"]["NoAutenticado"];
             404: components["responses"]["NoEncontrado"];
             503: components["responses"]["NoDisponible"];

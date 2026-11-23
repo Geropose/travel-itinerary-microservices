@@ -497,8 +497,11 @@ export function registrarRutas(
 
   app.get('/interna/reservas/:numeroReserva', async (req, res) => {
     const { sub } = autenticacion(req);
-    const numeroReserva = String(req.params.numeroReserva);
-    const proveedor = String(req.query.proveedor);
+    const numeroReserva = String(req.params.numeroReserva ?? '').trim();
+    const proveedor = String(req.query.proveedor ?? '').trim();
+    if (!numeroReserva || !proveedor) {
+      throw errores.solicitudInvalida('El proveedor y el número de reserva son obligatorios.');
+    }
     const reserva = await negocio.obtenerReservaPorNumeroInterna(sub, proveedor, numeroReserva);
     if (!reserva) {
       throw errores.noEncontrado('La reserva no existe.');

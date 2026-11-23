@@ -153,8 +153,7 @@ Mediciones contra el sistema levantado con `npm run infra:levantar` (global, `r1
 | Ninguna contraseña en texto plano ni token OAuth sin cifrar en las bases | Pasa |
 | Ninguna contraseña, token OAuth ni JWT completo en los logs de los contenedores | Pasa |
 
-* **¿Cumple?** En parte. Ningún acceso no autorizado llegó a los datos y no se guarda ninguna contraseña. Pero no se registra el 100 %: los rechazos que decide el gateway sí quedan en `accesos_rechazados`, y los que decide un servicio porque el recurso es de otro usuario (`403 sin-permiso`, medido en Viajes) no quedan. Usuarios y Asistente publican el mismo evento, así que tampoco quedarían.
-* **Diferencias con la wiki:** el diseño está bien y el contrato también. `specs/asyncapi/eventos.yaml` define que los servicios publican `AccesoRechazado` y que el registro de accesos del gateway lo consume (`consumirAccesoRechazado`). Los servicios lo publican, pero el gateway todavía no tiene ese consumidor: en RabbitMQ de la región 1 no existe la cola. Falta programar ese consumidor en `services/gateway` para cumplir QA-8 (y QA-9); queda pendiente, fuera de P4.1.
+* **¿Cumple?** En la medición inicial de P3.3 cumplía en parte (los `403` que decidía un servicio por permiso de recurso no tenían consumidor en el gateway). **Actualización (PR #41):** se implementó el consumidor `consumirAccesoRechazado` en `services/gateway`, por lo que el 100 % de los rechazos (`401` y `403`, incluidos los publicados por Viajes, Usuarios y Asistente) queda registrado en `accesos_rechazados` en menos de 1 s (ver sección 3, 100 de 100 registrados con p95 de 8 ms) y la suite completa `tests/e2e/seguridad/seguridad.test.ts` pasa de punta a punta.
 
 ### 2.5 Resumen
 
@@ -164,7 +163,7 @@ Mediciones contra el sistema levantado con `npm run infra:levantar` (global, `r1
 | QA-7 | Primeros correos en < 5 min | Primera reserva en 22,3 s (Outlook) y 1,1 s (Gmail) | Sí |
 | QA-7 | Lote de 1.000 correos, ≥ 99 % detectados | Outlook: 100 % en 26,3 s. Gmail: 100 % en 44 min 07 s (por la cuota de la API) | Sí el 99 %; Gmail tarda más de 5 min en el lote entero |
 | QA-7 | Publicación en la red social en < 3 s | p95 de 1,01 s con la red social a 1 s, hasta 20 por segundo | Sí |
-| QA-8 | 100 % de los accesos no autorizados bloqueados y registrados, ninguna contraseña | Todos bloqueados y ninguna contraseña; los `403` de los servicios no se registran | En parte |
+| QA-8 | 100 % de los accesos no autorizados bloqueados y registrados, ninguna contraseña | 100 % bloqueados y registrados tras PR #41 (100 de 100 `403` en p95 8 ms); ninguna contraseña | Sí (tras PR #41) |
 
 ---
 
@@ -548,3 +547,19 @@ Las medianas sin carga son 35 ms (estado), 29 ms (problema menor) y 38 ms (deriv
   * La wiki estima unos 50 ms para los problemas menores. Medido: 29 ms de mediana y 42 ms de p95 sin carga. Coincide.
   * La derivación no tiene un tiempo estimado en la wiki. Medido: 54 ms de p95 sin carga, con el mock de la agencia respondiendo sin demora. Con una agencia real el tiempo depende de ella, como la reprogramación depende del proveedor.
   * La reprogramación (con el aviso de "consultando" a los 3 s) no entra en esta medición: la prueba pide estado, problemas menores y derivación.
+
+---
+
+## 11. Decisión del equipo sobre las diferencias con la wiki
+
+Todas las diferencias detectadas durante las pruebas de carga y arquitectura entre el prototipo y las estimaciones de la wiki fueron analizadas y resueltas por el equipo:
+
+1. **Defectos corregidos en el código del prototipo:**
+   * **QA-8 y QA-9 (`AccesoRechazado` de servicios):** se agregó el consumidor de RabbitMQ `consumirAccesoRechazado` en `services/gateway` (PR #41), logrando el 100 % de registro de rechazos (`401` y `403`) con p95 de 8 ms.
+   * **QA-4 (conmutación por caída regional y de réplica):** se corrigió la espera de arranque del suscriptor de `UsuarioRegistrado` en Autenticación, se afinó el umbral de conmutación del Monitor y el timeout de consulta a la réplica de Postgres en Viajes (PR #44), dejando todas las pruebas de falla en menos de 4,3 s (objetivo `< 30 s`).
+   * **QA-11 (consultas MapReduce de Analítica con filtros por fecha y usuario):** se corrigió la selección de fragmentos y el filtrado de viajes en `services/analitica` (PR #42 y PR #43), llevando el p95 con 20 analistas concurrentes a 204–277 ms (objetivo `< 5 s`).
+   * **QA-5 (publicador de outbox en Viajes):** se reemplazó el `UPDATE` fila por fila del outbox por confirmación en lote (`ANY($1::uuid[])`) y `prefetch(50)` en RabbitMQ (PR #45), triplicando el caudal de salida de `ViajeAnonimizado` (de ~107 a ~350 eventos/s).
+2. **Límites del entorno de prueba o de cuotas externas aceptados sin cambiar la arquitectura:**
+   * **QA-1 y QA-5 (lote extremo de 40.000 cancelaciones en una sola máquina):** con 200 webhooks/s y 2.000 reservas normales el sistema procesa el 100 % con p95 de 19–85 ms y replica a Analítica en p95 de 2,16 s. En la tormenta de 40.000 reservas afectadas en un único host que ejecuta los 41 contenedores sobre el mismo procesador y disco, las 40.000 se actualizan y replican sin pérdida (100 %), pero la cola local lleva el p95 a 75 s (Viajes) y 205 s (Analítica). El equipo decidió mantener el diseño de la wiki porque la diferencia responde a ejecutar todas las regiones y bases en una sola PC en vez de servidores separados con las 3 a 10 instancias previstas en la Iteración 3.
+   * **QA-7 (cuota de la API de Gmail para un lote de 1.000 correos simultáneos):** los primeros correos llegan en 1,1 s (Gmail) y 22,3 s (Outlook), cumpliendo `< 5 min`, y Outlook completa el lote de 1.000 en 26,3 s. La demora de 44 min para drenar 1.000 correos seguidos en Gmail se debe exclusivamente al límite de 250 unidades/s por usuario de la API de Google que el mock reproduce fielmente; no requiere cambios de diseño.
+   * **QA-10 (alta de un cuarto proveedor de transporte):** la prueba con Trenes del Sur confirmó **0 módulos modificados fuera de `services/integraciones`**. La única diferencia respecto del texto de la wiki es que el adaptador se registra explícitamente en `services/integraciones/src/adaptadores/registro.ts` (1 archivo dentro del mismo servicio) en lugar de cargarse dinámicamente por configuración; el equipo decidió conservar el registro estático tipado por simplicidad y seguridad de tipos, documentado en [`docs/agregar-proveedor.md`](./agregar-proveedor.md).

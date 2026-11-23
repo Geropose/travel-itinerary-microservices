@@ -428,6 +428,8 @@ paths:
               example:
                 viajeId: 9a1d7c3e-2b4f-4e6a-8c0d-5f1e2a3b4c5d
                 esDueno: true
+        '400':
+          $ref: './comun.yaml#/components/responses/SolicitudInvalida'
         '401':
           $ref: './comun.yaml#/components/responses/NoAutenticado'
         '404':
