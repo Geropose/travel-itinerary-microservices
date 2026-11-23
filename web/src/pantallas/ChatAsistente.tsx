@@ -43,6 +43,15 @@ function guardarConversacionId(usuarioId: string | undefined, id: string | null)
   }
 }
 
+/** Zona horaria del dispositivo (por ejemplo, `America/Argentina/Buenos_Aires`), para que el asistente muestre las horas como el panel. */
+function zonaHorariaDelDispositivo(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  } catch {
+    return 'UTC';
+  }
+}
+
 function combinarMensajes(actuales: Mensaje[], nuevos: Mensaje[]): Mensaje[] {
   if (nuevos.length === 0) return actuales;
   const porId = new Map<string, Mensaje>();
@@ -490,7 +499,7 @@ function VentanaChat({ modo }: PropsVentanaChat) {
         '/conversaciones/{conversacionId}/mensajes',
         {
           params: { path: { conversacionId: idActual } },
-          body: { texto: limpio },
+          body: { texto: limpio, zonaHoraria: zonaHorariaDelDispositivo() },
         },
       );
       if (data) {
@@ -523,7 +532,7 @@ function VentanaChat({ modo }: PropsVentanaChat) {
         '/conversaciones/{conversacionId}/confirmaciones',
         {
           params: { path: { conversacionId } },
-          body: { opcionId: opcion.opcionId },
+          body: { opcionId: opcion.opcionId, zonaHoraria: zonaHorariaDelDispositivo() },
         },
       );
       if (data) {

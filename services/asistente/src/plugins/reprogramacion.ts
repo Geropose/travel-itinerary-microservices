@@ -25,8 +25,9 @@ function traducirOpcion(
   oferta: OpcionDeIntegraciones,
   reserva: ReservaDeViajes,
   idioma: IdiomaAsistente,
+  zonaHoraria?: string,
 ): OpcionReprogramacion {
-  const fechaTexto = formatearFechaHora(oferta.inicio, idioma);
+  const fechaTexto = formatearFechaHora(oferta.inicio, idioma, zonaHoraria);
   const vuelo = oferta.detalle?.numeroVuelo ? `${oferta.detalle.numeroVuelo}, ` : '';
   const costoTexto = describirCosto(oferta.costo, idioma);
   return {
@@ -144,7 +145,9 @@ export function crearPluginReprogramacion(dependencias: {
         };
       }
 
-      const opciones = ofertas.map((o) => traducirOpcion(o, elegida, contexto.idioma));
+      const opciones = ofertas.map((o) =>
+        traducirOpcion(o, elegida, contexto.idioma, contexto.zonaHoraria),
+      );
       return {
         texto: contexto.reglas.textos.opcionesEncontradas,
         resultado: 'opciones',
@@ -181,7 +184,7 @@ export function crearPluginReprogramacion(dependencias: {
       return {
         texto: interpolarTexto(contexto.reglas.textos.reprogramadoOk, {
           numeroReserva: opcion.numeroReserva,
-          inicio: formatearFechaHora(opcion.inicio, contexto.idioma),
+          inicio: formatearFechaHora(opcion.inicio, contexto.idioma, contexto.zonaHoraria),
         }),
         resultado: 'reprogramado',
       };
