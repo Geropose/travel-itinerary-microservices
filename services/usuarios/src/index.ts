@@ -18,7 +18,7 @@ import { esquemaConfig, parsearAgencias } from './config.ts';
 const config = cargarConfig(esquemaConfig);
 const logger = crearLogger({ servicio: SERVICIO, region: config.REGION, nivel: config.NIVEL_LOG });
 
-const pool = crearPool({ url: config.URL_BASE });
+const pool = crearPool({ url: config.URL_BASE, logger });
 await migrar(
   pool,
   [MIGRACIONES_EVENTOS, fileURLToPath(new URL('../migrations/', import.meta.url))],

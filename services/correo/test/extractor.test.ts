@@ -192,4 +192,34 @@ describe('Extractor de reservas (JSON-LD + reglas de texto + no_procesados)', ()
     );
     expect(noViajePromo).toEqual({ tipo: 'no-viaje' });
   });
+
+  it('rechaza fechas ISO sin segundos o con rollover de calendario (compatible con ajv-formats)', () => {
+    const usuarioId = randomUUID();
+    for (const fechaMala of ['2026-12-10T08:30Z', '2026-02-30T08:30:00Z']) {
+      const res = extraerReservaDeCorreo(
+        {
+          id: `fecha-${fechaMala}`,
+          remitente: 'reservas@aerolinea-andina.example',
+          asunto: 'Confirmación de vuelo',
+          recibidoEn: new Date(),
+          cuerpoHtml: `<script type="application/ld+json">${JSON.stringify({
+            '@context': 'https://schema.org',
+            '@type': 'FlightReservation',
+            reservationNumber: 'BAD123',
+            reservationStatus: 'https://schema.org/ReservationConfirmed',
+            reservationFor: {
+              '@type': 'Flight',
+              flightNumber: 'AN 123',
+              departureTime: fechaMala,
+              arrivalTime: '2026-12-10T12:00:00Z',
+              departureAirport: { iataCode: 'EZE' },
+              arrivalAirport: { iataCode: 'SCL' },
+            },
+          })}</script>`,
+        },
+        usuarioId,
+      );
+      expect(res).toMatchObject({ tipo: 'no-procesado', motivo: 'marcado-invalido' });
+    }
+  });
 });

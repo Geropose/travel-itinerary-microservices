@@ -270,3 +270,92 @@ describe('enrutador global con una región caída', () => {
     }
   });
 });
+
+describe('webhooks de proveedores (fan-out a ambas regiones)', () => {
+  it('envía el cuerpo crudo a ambas regiones, devuelve el primer 2xx o el peor error, y respeta prefijo/X-Region', async () => {
+    let estadoR1 = 200;
+    let estadoR2 = 200;
+    const recibidosR1: Array<{ url: string; cuerpo: string; firma: string }> = [];
+    const recibidosR2: Array<{ url: string; cuerpo: string; firma: string }> = [];
+
+    const crearMockRegion = (
+      obtenerEstado: () => number,
+      destino: Array<{ url: string; cuerpo: string; firma: string }>,
+    ) =>
+      createServer((req, res) => {
+        const trozos: Buffer[] = [];
+        req.on('data', (c: Buffer) => trozos.push(c));
+        req.on('end', () => {
+          destino.push({
+            url: req.url ?? '',
+            cuerpo: Buffer.concat(trozos).toString('utf8'),
+            firma: String(req.headers['x-webhook-signature'] ?? ''),
+          });
+          const status = obtenerEstado();
+          res.writeHead(status, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ status }));
+        });
+      });
+
+    const s1 = crearMockRegion(() => estadoR1, recibidosR1);
+    const s2 = crearMockRegion(() => estadoR2, recibidosR2);
+    const [u1, u2] = await Promise.all([escuchar(s1), escuchar(s2)]);
+    const appWebhook = crearApp({
+      puerto: 0,
+      logger,
+      regiones: { 'region-1': u1, 'region-2': u2 },
+      regionPorDefecto: 'region-1',
+    });
+    const base = `http://127.0.0.1:${await appWebhook.iniciar()}`;
+    try {
+      const cuerpoCrudo = '{"id":  "wev_1", "raw":true}';
+      estadoR1 = 503;
+      estadoR2 = 200;
+      const resOk = await fetch(`${base}/api/integraciones/webhooks/proveedores/aerolinea-andina`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-webhook-signature': 't=1,v1=abc' },
+        body: cuerpoCrudo,
+      });
+      expect(resOk.status).toBe(200);
+      expect(recibidosR1).toEqual([
+        {
+          url: '/api/integraciones/webhooks/proveedores/aerolinea-andina',
+          cuerpo: cuerpoCrudo,
+          firma: 't=1,v1=abc',
+        },
+      ]);
+      expect(recibidosR2).toEqual(recibidosR1);
+
+      estadoR1 = 401;
+      estadoR2 = 503;
+      const resPeor = await fetch(
+        `${base}/api/integraciones/webhooks/proveedores/aerolinea-andina`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: cuerpoCrudo,
+        },
+      );
+      expect(resPeor.status).toBe(503);
+
+      recibidosR1.length = 0;
+      recibidosR2.length = 0;
+      estadoR2 = 200;
+      const resPrefijo = await fetch(
+        `${base}/region-2/api/integraciones/webhooks/proveedores/aerolinea-andina`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: cuerpoCrudo,
+        },
+      );
+      expect(resPrefijo.status).toBe(200);
+      expect(recibidosR1).toHaveLength(0);
+      expect(recibidosR2).toHaveLength(1);
+    } finally {
+      await appWebhook.detener();
+      s1.close();
+      s2.close();
+    }
+  });
+});

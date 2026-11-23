@@ -68,26 +68,34 @@ export function crearVigilante(o: OpcionesVigilante): Vigilante {
   const ping = o.ping ?? pingHttp;
   const ahora = o.ahora ?? (() => new Date());
   const seguimiento = new Map<string, Seguimiento>();
+  const reiniciandoIds = new Set<string>();
   let actualizadoEn: string | null = null;
   let temporizador: NodeJS.Timeout | undefined;
   let activo = false;
 
   function reiniciar(inst: Instancia, s: Seguimiento, momento: Date): void {
+    if (reiniciandoIds.has(inst.id)) return;
+    reiniciandoIds.add(inst.id);
     s.estado = 'reiniciando';
-    s.reinicios++;
-    s.ultimoReinicio = momento.toISOString();
     s.graciaHasta = momento.getTime() + graciaMs;
     s.fallasSeguidas = 0;
     // Sin esperar: un reinicio tarda unos segundos y no puede atrasar el próximo ping.
     docker.reiniciar(inst.id).then(
-      () =>
+      () => {
+        reiniciandoIds.delete(inst.id);
+        s.reinicios++;
+        s.ultimoReinicio = momento.toISOString();
         logger.info(
           { instancia: inst.nombre, servicioInstancia: inst.servicio },
           'Instancia reiniciada',
-        ),
+        );
+      },
       (error: unknown) => {
-        s.estado = 'caida';
-        delete s.graciaHasta;
+        reiniciandoIds.delete(inst.id);
+        if (s.estado === 'reiniciando') {
+          s.estado = 'caida';
+          delete s.graciaHasta;
+        }
         logger.error(
           { err: error, instancia: inst.nombre, servicioInstancia: inst.servicio },
           'No se pudo reiniciar la instancia',
@@ -164,7 +172,10 @@ export function crearVigilante(o: OpcionesVigilante): Vigilante {
     if (!activo) return;
     temporizador = setTimeout(
       () => {
-        void ciclo().finally(() => programar(proximo + intervaloMs));
+        void ciclo().finally(() => {
+          const siguiente = proximo + intervaloMs;
+          programar(siguiente <= Date.now() ? Date.now() + intervaloMs : siguiente);
+        });
       },
       Math.max(0, proximo - Date.now()),
     );
@@ -173,6 +184,7 @@ export function crearVigilante(o: OpcionesVigilante): Vigilante {
   return {
     ciclo,
     iniciar() {
+      if (activo) return;
       activo = true;
       programar(Date.now());
     },

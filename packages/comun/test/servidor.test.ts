@@ -168,11 +168,28 @@ describe('crearServidor sin validador', () => {
       res.json({ texto: 'no tendría que llegar acá' });
     });
     const base = `http://127.0.0.1:${await sinValidador.iniciar()}`;
-    const privada = await fetch(`${base}/privada`);
+    const privada = await fetch(`${base}/privada`, { headers: { 'x-request-id': REQUEST_ID } });
     expect(privada.status).toBe(401);
     expect(privada.headers.get('content-type')).toContain('application/problem+json');
+    expect(await privada.json()).toMatchObject({ requestId: REQUEST_ID });
+    expect((await fetch(`${base}/PRIVADA`)).status).toBe(401);
     expect((await fetch(`${base}/publica`)).status).toBe(200);
     expect((await fetch(`${base}/no-existe`)).status).toBe(404);
     await sinValidador.detener();
+  });
+
+  it('tapa emails en los logs de solicitudes atendidas', async () => {
+    const res = await fetch(
+      `${url}/itinerarios/7f3c1e2a-9b4d-4c6e-8a1f-2d3e4f5a6b7c/designados/ana%40correo.example`,
+      { method: 'DELETE' },
+    );
+    expect(res.status).toBe(404);
+    expect(
+      lineas.some(
+        (l) => l.ruta === '/itinerarios/7f3c1e2a-9b4d-4c6e-8a1f-2d3e4f5a6b7c/designados/:email',
+      ),
+    ).toBe(true);
+    expect(JSON.stringify(lineas)).not.toContain('ana@correo.example');
+    expect(JSON.stringify(lineas)).not.toContain('ana%40correo.example');
   });
 });

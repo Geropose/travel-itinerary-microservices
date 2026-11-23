@@ -19,32 +19,58 @@ export const MIGRACIONES_REGISTRO_ACCESOS = fileURLToPath(
 export interface OpcionesPool {
   url: string;
   maximo?: number;
+  logger?: Logger;
+  connectionTimeoutMillis?: number;
+  statementTimeoutMs?: number;
+  queryTimeoutMs?: number;
 }
 
 /** Pool de conexiones de PostgreSQL de un servicio (una base por servicio, ADR-001). */
-export function crearPool({ url, maximo = 10 }: OpcionesPool): Pool {
-  return new pg.Pool({ connectionString: url, max: maximo });
+export function crearPool({
+  url,
+  maximo = 10,
+  logger,
+  connectionTimeoutMillis = 5000,
+  statementTimeoutMs,
+  queryTimeoutMs,
+}: OpcionesPool): Pool {
+  const pool = new pg.Pool({
+    connectionString: url,
+    max: maximo,
+    connectionTimeoutMillis,
+    ...(statementTimeoutMs !== undefined ? { statement_timeout: statementTimeoutMs } : {}),
+    ...(queryTimeoutMs !== undefined ? { query_timeout: queryTimeoutMs } : {}),
+  });
+  pool.on('error', (error) => {
+    logger?.error({ err: error }, 'Error en conexión inactiva de PostgreSQL');
+  });
+  return pool;
 }
 
 /**
  * Ejecuta fn dentro de una transacción: COMMIT si termina bien, ROLLBACK si lanza un error (y el
- * error se vuelve a lanzar).
+ * error se vuelve a lanzar). Si falla el ROLLBACK, descarta la conexión del pool.
  */
 export async function enTransaccion<T>(
   pool: Pool,
   fn: (cliente: ClienteDb) => Promise<T>,
 ): Promise<T> {
   const cliente = await pool.connect();
+  let destruir = false;
   try {
     await cliente.query('BEGIN');
     const resultado = await fn(cliente);
     await cliente.query('COMMIT');
     return resultado;
   } catch (error) {
-    await cliente.query('ROLLBACK').catch(() => undefined);
+    try {
+      await cliente.query('ROLLBACK');
+    } catch {
+      destruir = true;
+    }
     throw error;
   } finally {
-    cliente.release();
+    cliente.release(destruir ? true : undefined);
   }
 }
 
@@ -70,6 +96,7 @@ export async function migrar(pool: Pool, carpetas: string[], logger?: Logger): P
 
   const cliente = await pool.connect();
   const aplicadas: string[] = [];
+  let destruir = false;
   try {
     await cliente.query('SELECT pg_advisory_lock($1)', [LOCK_MIGRACIONES]);
     await cliente.query(
@@ -88,15 +115,23 @@ export async function migrar(pool: Pool, carpetas: string[], logger?: Logger): P
         await cliente.query('INSERT INTO migraciones (nombre) VALUES ($1)', [archivo.nombre]);
         await cliente.query('COMMIT');
       } catch (error) {
-        await cliente.query('ROLLBACK');
+        try {
+          await cliente.query('ROLLBACK');
+        } catch {
+          destruir = true;
+        }
         throw new Error(`Falló la migración ${archivo.nombre}`, { cause: error });
       }
       aplicadas.push(archivo.nombre);
       logger?.info({ migracion: archivo.nombre }, 'Migración aplicada');
     }
   } finally {
-    await cliente.query('SELECT pg_advisory_unlock($1)', [LOCK_MIGRACIONES]).catch(() => undefined);
-    cliente.release();
+    try {
+      await cliente.query('SELECT pg_advisory_unlock($1)', [LOCK_MIGRACIONES]);
+    } catch {
+      destruir = true;
+    }
+    cliente.release(destruir ? true : undefined);
   }
   return aplicadas;
 }

@@ -16,6 +16,7 @@ import {
   conContexto,
   errores,
   manejadorErrores,
+  rutaParaLog,
   type Logger,
   type Region,
 } from '@trotamundos/comun';
@@ -71,13 +72,8 @@ interface Locales {
 
 const locales = (res: Response) => res.locals as Locales;
 
-/** Ruta para el log: sin la query y con los emails tapados (por ejemplo .../designados/{email}). */
-export function rutaParaLog(ruta: string): string {
-  return ruta
-    .split('/')
-    .map((parte) => (/@|%40/i.test(parte) ? ':email' : parte))
-    .join('/');
-}
+/** Ruta para el log: reexportada desde el kit común (sin query y con emails tapados). */
+export { rutaParaLog };
 
 interface RespuestaRegion {
   status: number;
@@ -226,34 +222,90 @@ export function crearApp(o: OpcionesApp): Enrutador {
 
   // Login y registro: se lee el cuerpo para poder repetirlo en la otra región si responde 307.
   // El cuerpo solo pasa: no se guarda ni se escribe en el log.
-  app.post(
-    RUTAS_CON_307,
-    express.raw({ type: () => true, limit: o.limiteCuerpo ?? '1mb', inflate: false }),
-    async (req, res) => {
-      const cuerpo: unknown = req.body;
-      const datos = Buffer.isBuffer(cuerpo) ? cuerpo : Buffer.alloc(0);
-      const region = locales(res).region ?? o.regionPorDefecto;
-      const aRegion = async (destino: Region) => {
-        try {
-          return await enviar(o.regiones[destino], req, datos, tiempoMaximoMs);
-        } catch (error) {
-          logger.warn({ err: error, regionDestino: destino }, 'La región no respondió');
-          throw errores.noDisponible(`La región ${destino} no respondió. Probá de nuevo.`);
+  const leerCuerpoCrudo = express.raw({
+    type: () => true,
+    limit: o.limiteCuerpo ?? '1mb',
+    inflate: false,
+  });
+  app.post(RUTAS_CON_307, leerCuerpoCrudo, async (req, res) => {
+    const cuerpo: unknown = req.body;
+    const datos = Buffer.isBuffer(cuerpo) ? cuerpo : Buffer.alloc(0);
+    const region = locales(res).region ?? o.regionPorDefecto;
+    const aRegion = async (destino: Region) => {
+      try {
+        return await enviar(o.regiones[destino], req, datos, tiempoMaximoMs);
+      } catch (error) {
+        logger.warn({ err: error, regionDestino: destino }, 'La región no respondió');
+        throw errores.noDisponible(`La región ${destino} no respondió. Probá de nuevo.`);
+      }
+    };
+    let respuesta = await aRegion(region);
+    const otra = respuesta.status === 307 ? regionDel307(respuesta.cuerpo) : undefined;
+    if (otra && otra !== region) {
+      locales(res).reenviadaA = otra;
+      respuesta = await aRegion(otra);
+    }
+    res.status(respuesta.status);
+    for (const [nombre, valor] of Object.entries(respuesta.headers)) {
+      if (valor !== undefined && !DE_UN_TRAMO.has(nombre)) res.setHeader(nombre, valor);
+    }
+    res.end(respuesta.cuerpo);
+  });
+
+  // Webhooks de proveedores (specs/openapi/gateway.yaml): sin JWT, prefijo ni X-Region, manda el
+  // cuerpo crudo a ambas regiones en paralelo y responde el primer 2xx o el peor error.
+  const regexWebhookProveedor = /^\/api\/integraciones\/webhooks\/proveedores\/[^/?#]+$/i;
+  app.use((req, res, next) => {
+    if (req.method !== 'POST' || !regexWebhookProveedor.test(req.path)) {
+      next();
+      return;
+    }
+    leerCuerpoCrudo(req, res, (err: unknown) => {
+      if (err) {
+        next(err);
+        return;
+      }
+      void (async () => {
+        const cuerpo: unknown = req.body;
+        const datos = Buffer.isBuffer(cuerpo) ? cuerpo : Buffer.alloc(0);
+        const { region = o.regionPorDefecto, motivo } = locales(res);
+
+        const enviarConFallback = async (destino: Region) => {
+          try {
+            const resp = await enviar(o.regiones[destino], req, datos, tiempoMaximoMs);
+            return { region: destino, ...resp };
+          } catch (error) {
+            logger.warn({ err: error, regionDestino: destino }, 'La región no respondió');
+            const problema = aProblema(
+              errores.noDisponible(`La región ${destino} no respondió. Probá de nuevo.`),
+              String(req.headers['x-request-id'] ?? ''),
+            );
+            return {
+              region: destino,
+              status: 503,
+              headers: {
+                'content-type': 'application/problem+json; charset=utf-8',
+              } as IncomingHttpHeaders,
+              cuerpo: Buffer.from(JSON.stringify(problema), 'utf8'),
+            };
+          }
+        };
+
+        const destinos: Region[] = motivo === 'por-defecto' ? ['region-1', 'region-2'] : [region];
+        const respuestas = await Promise.all(destinos.map((d) => enviarConFallback(d)));
+        const elegida =
+          respuestas.find((r) => r.status >= 200 && r.status < 300) ??
+          respuestas.reduce((peor, actual) => (actual.status >= peor.status ? actual : peor));
+
+        locales(res).region = elegida.region;
+        res.status(elegida.status);
+        for (const [nombre, valor] of Object.entries(elegida.headers)) {
+          if (valor !== undefined && !DE_UN_TRAMO.has(nombre)) res.setHeader(nombre, valor);
         }
-      };
-      let respuesta = await aRegion(region);
-      const otra = respuesta.status === 307 ? regionDel307(respuesta.cuerpo) : undefined;
-      if (otra && otra !== region) {
-        locales(res).reenviadaA = otra;
-        respuesta = await aRegion(otra);
-      }
-      res.status(respuesta.status);
-      for (const [nombre, valor] of Object.entries(respuesta.headers)) {
-        if (valor !== undefined && !DE_UN_TRAMO.has(nombre)) res.setHeader(nombre, valor);
-      }
-      res.end(respuesta.cuerpo);
-    },
-  );
+        res.end(elegida.cuerpo);
+      })().catch(next);
+    });
+  });
 
   // Todo lo demás pasa en streaming al nginx de la región.
   const proxyA = (region: Region): RequestHandler =>

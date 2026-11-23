@@ -15,6 +15,17 @@ beforeAll(async () => {
       setTimeout(() => res.end('{}'), 300);
       return;
     }
+    if (req.url?.startsWith('/cuerpo-colgado')) {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.write('{"parcial":');
+      setTimeout(() => res.end(), 300);
+      return;
+    }
+    if (req.url?.startsWith('/json-roto-502')) {
+      res.writeHead(502, { 'content-type': 'application/json' });
+      res.end('no es json');
+      return;
+    }
     if (req.url?.startsWith('/no-existe')) {
       res.writeHead(404, { 'content-type': 'application/problem+json' });
       res.end(JSON.stringify({ status: 404, title: 'No encontrado' }));
@@ -68,10 +79,29 @@ describe('cliente http', () => {
     await expect(cliente.get('/lento')).rejects.toThrow(/no respondió en 50 ms/);
   });
 
-  it('una respuesta de error lanza ErrorRespuestaHttp con status y cuerpo', async () => {
+  it('una respuesta de error lanza ErrorRespuestaHttp con status y cuerpo sin filtrar query', async () => {
     const cliente = crearClienteHttp({ urlBase: url });
-    const error = await cliente.get('/no-existe').catch((e: unknown) => e);
+    const error = await cliente.get('/no-existe?email=ana@correo.example').catch((e: unknown) => e);
     expect(error).toBeInstanceOf(ErrorRespuestaHttp);
     expect(error).toMatchObject({ status: 404, cuerpo: { title: 'No encontrado' } });
+    expect((error as Error).message).not.toContain('ana@correo.example');
+    expect((error as Error).message).not.toContain('?');
+  });
+
+  it('corta el timeout al leer un cuerpo colgado (ErrorTiempoAgotado) y tolera JSON roto en 502', async () => {
+    const cliente = crearClienteHttp({ urlBase: url, tiempoMaximoMs: 60 });
+    await expect(cliente.get('/cuerpo-colgado?email=secreto@correo.example')).rejects.toMatchObject(
+      {
+        name: 'ErrorTiempoAgotado',
+      },
+    );
+    const errorTimeout = await cliente
+      .get('/cuerpo-colgado?email=secreto@correo.example')
+      .catch((e: unknown) => e);
+    expect((errorTimeout as Error).message).not.toContain('secreto@correo.example');
+
+    const error502 = await cliente.get('/json-roto-502').catch((e: unknown) => e);
+    expect(error502).toBeInstanceOf(ErrorRespuestaHttp);
+    expect(error502).toMatchObject({ status: 502, cuerpo: 'no es json' });
   });
 });

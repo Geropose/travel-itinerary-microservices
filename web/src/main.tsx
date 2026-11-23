@@ -5,6 +5,7 @@ import { BrowserRouter } from 'react-router';
 import { crearApi } from './api/cliente.ts';
 import { crearSesion } from './api/sesion.ts';
 import { App } from './App.tsx';
+import { borrarPanel } from './cache/panel.ts';
 import { ProveedorApp } from './contexto.tsx';
 import { idiomaInicial, iniciarIdiomas } from './idiomas/i18n.ts';
 import './estilos.css';
@@ -15,6 +16,9 @@ iniciarIdiomas(idiomaInicial(almacen, navigator.language));
 const api = crearApi({
   urlBase: (import.meta.env.VITE_URL_API as string | undefined) ?? 'http://localhost:8000',
   sesion,
+  alVencer: (sub) => {
+    if (sub) void borrarPanel(sub).catch(() => undefined);
+  },
 });
 // Para las pantallas de cada dueño (cache de las consultas en memoria).
 const consultas = new QueryClient({ defaultOptions: { queries: { retry: 1 } } });

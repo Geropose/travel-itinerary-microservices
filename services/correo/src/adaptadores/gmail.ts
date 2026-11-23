@@ -318,6 +318,12 @@ export function crearAdaptadorGmail(opciones: OpcionesAdaptadorGmail): Adaptador
         accessToken,
         `/gmail/v1/users/me/messages/${encodeURIComponent(mensajeId)}?${qs}`,
       );
+      if (status === 404) {
+        throw new ErrorProveedorCorreo(
+          'mensaje-no-encontrado',
+          `Gmail messages.get respondió 404 para el mensaje ${mensajeId}.`,
+        );
+      }
       if (status >= 400) {
         throw new ErrorProveedorCorreo(
           'proveedor-no-disponible',

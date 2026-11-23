@@ -387,8 +387,8 @@ export function ReservaFormulario({
       if (!reservaInicial) return;
       const cambios: CambioReserva = {};
       if (viajeId && viajeId !== reservaInicial.viajeId) cambios.viajeId = viajeId;
-      if (inicioIso !== reservaInicial.inicio) cambios.inicio = inicioIso;
-      if (finIso !== reservaInicial.fin) cambios.fin = finIso;
+      if (inicio !== aInputFechaHora(reservaInicial.inicio)) cambios.inicio = inicioIso;
+      if (fin !== aInputFechaHora(reservaInicial.fin)) cambios.fin = finIso;
       if (mostrarOrigen && origenLimpio && origenLimpio !== (reservaInicial.origen ?? '')) {
         cambios.origen = origenLimpio;
       }

@@ -1,5 +1,5 @@
 import { loggerDePrueba } from '@trotamundos/comun/pruebas';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { aInstancias, type ClienteDocker, type Instancia } from '../src/docker.ts';
 import { crearVigilante } from '../src/vigilante.ts';
 
@@ -152,6 +152,85 @@ describe('ping-echo del monitor (ADR-007)', () => {
       expect.objectContaining({ nivel: 'error', mensaje: 'No se pudo consultar a Docker' }),
     );
   });
+
+  it('evita ráfaga de pings tras ciclo lento e iniciar() es idempotente', async () => {
+    vi.useFakeTimers();
+    try {
+      const { logger } = loggerDePrueba('monitor');
+      let llamadasListar = 0;
+      const vigilante = crearVigilante({
+        docker: {
+          listar: async () => {
+            llamadasListar++;
+            if (llamadasListar === 1) {
+              await vi.advanceTimersByTimeAsync(12_000);
+            }
+            return [];
+          },
+          reiniciar: async () => undefined,
+        },
+        intervaloMs: 5_000,
+        logger,
+      });
+
+      vigilante.iniciar();
+      vigilante.iniciar();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(llamadasListar).toBe(1);
+
+      await vi.advanceTimersByTimeAsync(4_900);
+      expect(llamadasListar).toBe(1);
+
+      await vi.advanceTimersByTimeAsync(200);
+      expect(llamadasListar).toBe(2);
+      vigilante.detener();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('no incrementa reinicios ni pisa estado sana si falla un docker.reiniciar diferido', async () => {
+    const { logger } = loggerDePrueba('monitor');
+    let rechazarReinicio!: (err: Error) => void;
+    let caida = true;
+    const reiniciosSolicitados: string[] = [];
+    const vigilante = crearVigilante({
+      docker: {
+        listar: async () => [instancia(1)],
+        reiniciar: (id) => {
+          reiniciosSolicitados.push(id);
+          return new Promise<void>((_res, rej) => {
+            rechazarReinicio = rej;
+          });
+        },
+      },
+      ping: async () => !caida,
+      graciaReinicioMs: 0,
+      logger,
+    });
+
+    for (let i = 0; i < 3; i++) await vigilante.ciclo();
+    expect(reiniciosSolicitados).toEqual(['id-1']);
+    expect(vigilante.estado().instancias[0]?.reinicios).toBe(0);
+
+    // Aunque venza graciaMs mientras reiniciar() sigue en vuelo, no lanza un segundo reinicio.
+    for (let i = 0; i < 3; i++) await vigilante.ciclo();
+    expect(reiniciosSolicitados).toEqual(['id-1']);
+
+    // La instancia se recupera y vuelve a 'sana' antes de que rechace reiniciar().
+    caida = false;
+    await vigilante.ciclo();
+    expect(vigilante.estado().instancias[0]?.estado).toBe('sana');
+
+    rechazarReinicio(new Error('fallo tardio'));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(vigilante.estado().instancias[0]?.estado).toBe('sana');
+    expect(vigilante.estado().instancias[0]?.reinicios).toBe(0);
+  });
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe('aInstancias', () => {

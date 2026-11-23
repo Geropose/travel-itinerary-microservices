@@ -93,9 +93,11 @@ export function Analitica() {
   const [resultadoDirecto, setResultadoDirecto] = useState<ResultadoMostrado>();
 
   const sondeoRef = useRef<number | undefined>(undefined);
+  const sondeoSecuenciaRef = useRef(0);
   const montadoRef = useRef(true);
 
   const detenerSondeo = useCallback(() => {
+    sondeoSecuenciaRef.current += 1;
     if (sondeoRef.current !== undefined) {
       window.clearTimeout(sondeoRef.current);
       sondeoRef.current = undefined;
@@ -112,11 +114,13 @@ export function Analitica() {
   const consultarEstadoEjecucion = useCallback(
     async (consultaId: string) => {
       detenerSondeo();
+      const secuencia = sondeoSecuenciaRef.current;
+      const sigueVigente = () => montadoRef.current && secuencia === sondeoSecuenciaRef.current;
       try {
         const { data, response } = await api.analitica.GET('/consultas/ejecuciones/{consultaId}', {
           params: { path: { consultaId } },
         });
-        if (!montadoRef.current) return;
+        if (!sigueVigente()) return;
         if (!data) {
           setAviso({ tipo: 'error', clave: claveErrorHttp(response.status) });
           return;
@@ -126,11 +130,12 @@ export function Analitica() {
 
         if (data.estado === 'pendiente' || data.estado === 'enCurso') {
           sondeoRef.current = window.setTimeout(() => {
+            if (!sigueVigente()) return;
             void consultarEstadoEjecucion(consultaId);
           }, INTERVALO_SONDEO_ANALITICA_MS);
         }
       } catch {
-        if (montadoRef.current) {
+        if (sigueVigente()) {
           setAviso({ tipo: 'error', clave: 'errores.noDisponible' });
         }
       }
@@ -606,6 +611,7 @@ export function Analitica() {
                   type="button"
                   className="secundario"
                   onClick={() => {
+                    detenerSondeo();
                     setResultadoDirecto(undefined);
                     setEjecucionActiva(item);
                     if (item.estado === 'pendiente' || item.estado === 'enCurso') {

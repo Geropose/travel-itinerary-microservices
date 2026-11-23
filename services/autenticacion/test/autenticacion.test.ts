@@ -443,13 +443,23 @@ describe.skipIf(!hayDocker)('Servicio de Autenticación', { timeout: 60_000 }, (
       expect(await noExiste.json()).toEqual({ existe: false, region: 'region-1' });
     });
 
-    it('GET /interna/cuentas/existe rechaza a otros servicios y a los usuarios', async () => {
+    it('GET /interna/cuentas/existe rechaza a otros servicios, usuarios y variantes en mayúsculas', async () => {
       const deCorreo = await firmarTokenDeServicio(claves, 'correo', 'region-1');
       const usuario = (await sesion('ulises@correo.example')).jwt;
       const ruta = '/interna/cuentas/existe?email=a%40correo.example';
       expect((await pedir(ruta, undefined, deCorreo, 'GET')).status).toBe(403);
       expect((await pedir(ruta, undefined, usuario, 'GET')).status).toBe(403);
       expect((await pedir(ruta, undefined, undefined, 'GET')).status).toBe(401);
+      expect(
+        (
+          await pedir(
+            '/Interna/Cuentas/Existe?email=a%40correo.example',
+            undefined,
+            undefined,
+            'GET',
+          )
+        ).status,
+      ).toBe(401);
     });
 
     it('POST /interna/tokens-servicio emite un token de 5 minutos con el secreto correcto', async () => {

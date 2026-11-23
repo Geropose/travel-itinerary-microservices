@@ -21,7 +21,7 @@ const config = cargarConfig(esquemaConfig);
 const logger = crearLogger({ servicio: SERVICIO, region: config.REGION, nivel: config.NIVEL_LOG });
 const otraRegion: Region = config.REGION === 'region-1' ? 'region-2' : 'region-1';
 
-const pool = crearPool({ url: config.URL_BASE });
+const pool = crearPool({ url: config.URL_BASE, logger });
 await migrar(
   pool,
   [

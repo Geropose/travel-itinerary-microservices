@@ -272,6 +272,12 @@ export function crearAdaptadorOutlook(opciones: OpcionesAdaptadorOutlook): Adapt
         `${urlApi}/v1.0/me/messages/${encodeURIComponent(mensajeId)}?${qs}`,
         { headers: { Prefer: 'outlook.body-content-type="html"' } },
       );
+      if (status === 404) {
+        throw new ErrorProveedorCorreo(
+          'mensaje-no-encontrado',
+          `Graph /me/messages/{id} respondió 404 para el mensaje ${mensajeId}.`,
+        );
+      }
       if (status >= 400) {
         throw new ErrorProveedorCorreo(
           'proveedor-no-disponible',

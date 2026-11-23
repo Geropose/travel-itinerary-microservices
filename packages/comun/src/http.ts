@@ -1,5 +1,14 @@
 import { contextoActual } from './contexto.ts';
 
+/** Ruta para logs y mensajes de error: quita query string y oculta segmentos con email. */
+export function rutaParaLog(ruta: string): string {
+  const sinQuery = ruta.split('?')[0] ?? '';
+  return sinQuery
+    .split('/')
+    .map((parte) => (/@|%40/i.test(parte) ? ':email' : parte))
+    .join('/');
+}
+
 /** La llamada a otro servicio no respondió dentro del tiempo máximo. */
 export class ErrorTiempoAgotado extends Error {
   readonly url: string;
@@ -94,8 +103,10 @@ export function crearClienteHttp(opciones: OpcionesCliente): ClienteHttp {
     if (llamada.cuerpo !== undefined) encabezados['content-type'] = 'application/json';
     Object.assign(encabezados, llamada.encabezados);
 
+    const urlParaError = `${url.origin}${rutaParaLog(url.pathname)}`;
     const tiempo = llamada.tiempoMaximoMs ?? tiempoMaximoMs;
     let respuesta: Response;
+    let texto: string;
     try {
       respuesta = await hacerFetch(url, {
         method: metodo,
@@ -103,18 +114,23 @@ export function crearClienteHttp(opciones: OpcionesCliente): ClienteHttp {
         ...(llamada.cuerpo !== undefined ? { body: JSON.stringify(llamada.cuerpo) } : {}),
         signal: AbortSignal.timeout(tiempo),
       });
+      texto = await respuesta.text();
     } catch (error) {
       if (error instanceof DOMException && error.name === 'TimeoutError') {
-        throw new ErrorTiempoAgotado(url.toString(), tiempo);
+        throw new ErrorTiempoAgotado(urlParaError, tiempo);
       }
       throw error;
     }
-    const texto = await respuesta.text();
     let datos: unknown = texto;
     if (texto && (respuesta.headers.get('content-type') ?? '').includes('json')) {
-      datos = JSON.parse(texto);
+      try {
+        datos = JSON.parse(texto);
+      } catch (error) {
+        if (!respuesta.ok) throw new ErrorRespuestaHttp(urlParaError, respuesta.status, texto);
+        throw new Error(`${urlParaError} devolvió JSON inválido`, { cause: error });
+      }
     }
-    if (!respuesta.ok) throw new ErrorRespuestaHttp(url.toString(), respuesta.status, datos);
+    if (!respuesta.ok) throw new ErrorRespuestaHttp(urlParaError, respuesta.status, datos);
     return { status: respuesta.status, datos: datos as T, encabezados: respuesta.headers };
   }
 

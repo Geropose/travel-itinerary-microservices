@@ -37,9 +37,14 @@ function useEnvio() {
   const enviar = async (accion: () => Promise<{ ok: boolean; error?: ErrorAcceso }>) => {
     setEnviando(true);
     setError(undefined);
-    const resultado = await accion();
-    setEnviando(false);
-    if (!resultado.ok) setError(resultado.error ?? 'inesperado');
+    try {
+      const resultado = await accion();
+      if (!resultado.ok) setError(resultado.error ?? 'inesperado');
+    } catch {
+      setError('inesperado');
+    } finally {
+      setEnviando(false);
+    }
   };
   return { error, enviando, enviar };
 }

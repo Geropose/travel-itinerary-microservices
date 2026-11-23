@@ -11,7 +11,7 @@ import {
 import { REGIONES, type Region } from './config.ts';
 import { contextoActual } from './contexto.ts';
 import { aProblema, errores, type ErrorHttp } from './errores.ts';
-import { crearClienteHttp, type ClienteHttp } from './http.ts';
+import { crearClienteHttp, rutaParaLog, type ClienteHttp } from './http.ts';
 import type { Logger } from './logger.ts';
 import type { MotivoRechazo, RegistrarRechazo } from './registro-accesos.ts';
 import type { Spec } from './spec.ts';
@@ -84,7 +84,7 @@ export function autenticacion(req: Request): Autenticacion {
   return auth;
 }
 
-function ipDe(req: Request): string | undefined {
+export function ipDe(req: { ip?: string }): string | undefined {
   const ip = (req.ip ?? '').replace(/^::ffff:(?=\d+\.\d+\.\d+\.\d+$)/, '');
   return isIP(ip) ? ip : undefined;
 }
@@ -130,6 +130,9 @@ export function crearValidador(opciones: OpcionesValidador): Validador {
   const renovarCadaMs = opciones.renovarClavesCadaMs ?? 10 * 60 * 1000;
   const hacerFetch = opciones.fetch ?? fetch;
   const juegos = new Map<Region, JWTVerifyGetKey>();
+  const recargasEnCurso = new Map<Region, Promise<boolean>>();
+  const ultimaRecargaPorKidMs = new Map<Region, number>();
+  const COOLDOWN_RECARGA_KID_MS = 30_000;
   const temporizadores: NodeJS.Timeout[] = [];
   if (!opciones.claves[region]) throw new Error(`Faltan las claves de la región ${region}`);
 
@@ -142,6 +145,30 @@ export function crearValidador(opciones: OpcionesValidador): Validador {
     if (!respuesta.ok) throw new Error(`${fuente.url} respondió ${respuesta.status}`);
     juegos.set(r, createLocalJWKSet((await respuesta.json()) as JSONWebKeySet));
     logger.info({ regionClaves: r }, 'Claves del JWKS descargadas');
+  }
+
+  async function intentarRecargaPorKidDesconocido(r: Region): Promise<boolean> {
+    const fuente = opciones.claves[r];
+    if (!fuente || !('url' in fuente)) return false;
+    const enCurso = recargasEnCurso.get(r);
+    if (enCurso) return await enCurso;
+    const ahoraMs = Date.now();
+    if (ahoraMs - (ultimaRecargaPorKidMs.get(r) ?? 0) < COOLDOWN_RECARGA_KID_MS) return false;
+    ultimaRecargaPorKidMs.set(r, ahoraMs);
+    const promesa = cargarClaves(r, fuente)
+      .then(() => true)
+      .catch((error: unknown) => {
+        logger.warn(
+          { err: error, regionClaves: r },
+          'No se pudo recargar el JWKS ante kid desconocido',
+        );
+        return false;
+      })
+      .finally(() => {
+        recargasEnCurso.delete(r);
+      });
+    recargasEnCurso.set(r, promesa);
+    return await promesa;
   }
 
   let detenido = false;
@@ -201,14 +228,16 @@ export function crearValidador(opciones: OpcionesValidador): Validador {
     }
     // Primero con las claves de la región que dice el token (si las tenemos) y después con las
     // propias: si las dos regiones comparten la clave, el claim region igual se controla abajo.
-    const candidatas = [...new Set([REGIONES.find((r) => r === regionReclamada), region])]
-      .map((r) => (r ? juegos.get(r) : undefined))
-      .filter((c): c is JWTVerifyGetKey => c !== undefined);
-    if (candidatas.length === 0)
+    const regionesCandidatas = [
+      ...new Set([REGIONES.find((r) => r === regionReclamada), region]),
+    ].filter((r): r is Region => r !== undefined && juegos.has(r));
+    if (regionesCandidatas.length === 0)
       throw new ErrorTokenInvalido('token-invalido', 'Todavía no hay claves para verificar');
     let payload: JWTPayload | undefined;
     let ultimoError: unknown;
-    for (const claves of candidatas) {
+    for (const rCandidata of regionesCandidatas) {
+      const claves = juegos.get(rCandidata);
+      if (!claves) continue;
       try {
         ({ payload } = await jwtVerify(token, claves, {
           algorithms: ['RS256'],
@@ -216,6 +245,22 @@ export function crearValidador(opciones: OpcionesValidador): Validador {
         }));
         break;
       } catch (error) {
+        if ((error as { code?: string } | null)?.code === 'ERR_JWKS_NO_MATCHING_KEY') {
+          const recargado = await intentarRecargaPorKidDesconocido(rCandidata);
+          const nuevasClaves = recargado ? juegos.get(rCandidata) : undefined;
+          if (nuevasClaves) {
+            try {
+              ({ payload } = await jwtVerify(token, nuevasClaves, {
+                algorithms: ['RS256'],
+                requiredClaims: ['exp', 'sub'],
+              }));
+              break;
+            } catch (errorReintento) {
+              ultimoError = errorReintento;
+              continue;
+            }
+          }
+        }
         ultimoError = error;
       }
     }
@@ -253,7 +298,7 @@ export function crearValidador(opciones: OpcionesValidador): Validador {
     const requestId = contextoActual()?.requestId ?? '';
     const ip = ipDe(req);
     // Ruta completa: en el gateway el validador está montado en /api/<servicio>.
-    const ruta = req.baseUrl + req.path;
+    const ruta = rutaParaLog(req.baseUrl + req.path);
     registrar({
       servicio,
       metodo: req.method,

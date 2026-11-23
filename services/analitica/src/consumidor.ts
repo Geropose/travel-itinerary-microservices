@@ -34,13 +34,14 @@ export async function registrarConsumidorAnonimizador(
       tipo: 'ViajeActualizado',
       pool: poolRegional,
       prefetch,
-      manejar: async (evento) => {
+      manejar: async (evento, cliente) => {
         const anonimizada = anonimizarViajeActualizado(evento, secretoAnalitica, region);
-        const { accion } = await repositorio.guardarFilaAnonimizada(
-          poolAnalitica,
-          anonimizada,
-          new Date(ahora()),
-        );
+        const tsEvento = Date.parse(evento.ocurridoEn);
+        const fechaEvento = Number.isNaN(tsEvento) ? new Date(ahora()) : new Date(tsEvento);
+        const { accion } =
+          poolAnalitica === poolRegional
+            ? await repositorio.guardarFilaAnonimizadaEnCliente(cliente, anonimizada, fechaEvento)
+            : await repositorio.guardarFilaAnonimizada(poolAnalitica, anonimizada, fechaEvento);
         // Nunca logueamos numeroReserva ni SECRETO_ANALITICA; solo metadatos anonimizados.
         logger.debug(
           {

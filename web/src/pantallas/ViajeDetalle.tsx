@@ -51,10 +51,20 @@ export function ViajeDetalle() {
   const [errorRedSocial, setErrorRedSocial] = useState<string>();
 
   const montadoRef = useRef(true);
+  const secuenciaViajeRef = useRef(0);
+  const viajeIdActualRef = useRef(viajeId);
+  viajeIdActualRef.current = viajeId;
 
   const cargarViaje = useCallback(
     async (opciones?: { silencioso?: boolean }): Promise<'ok' | 'no-encontrado' | 'error'> => {
       if (!viajeId) return 'error';
+      const secuencia = ++secuenciaViajeRef.current;
+      const idSolicitado = viajeId;
+      const sigueVigente = () =>
+        montadoRef.current &&
+        secuencia === secuenciaViajeRef.current &&
+        viajeIdActualRef.current === idSolicitado;
+
       if (!opciones?.silencioso) {
         setCargando(true);
         setErrorViaje(undefined);
@@ -62,9 +72,9 @@ export function ViajeDetalle() {
       }
       try {
         const { data, response } = await api.viajes.GET('/viajes/{viajeId}', {
-          params: { path: { viajeId } },
+          params: { path: { viajeId: idSolicitado } },
         });
-        if (!montadoRef.current) return 'error';
+        if (!sigueVigente()) return 'error';
         if (!data) {
           if (response.status === 404) {
             setErrorViaje('viaje.noEncontrado');
@@ -77,10 +87,10 @@ export function ViajeDetalle() {
         setErrorViaje(undefined);
         return 'ok';
       } catch {
-        if (montadoRef.current) setErrorViaje('errores.noDisponible');
+        if (sigueVigente()) setErrorViaje('errores.noDisponible');
         return 'error';
       } finally {
-        if (montadoRef.current && !opciones?.silencioso) setCargando(false);
+        if (sigueVigente() && !opciones?.silencioso) setCargando(false);
       }
     },
     [api, viajeId],
@@ -88,6 +98,7 @@ export function ViajeDetalle() {
 
   useEffect(() => {
     montadoRef.current = true;
+    viajeIdActualRef.current = viajeId;
     setDesignados([]);
     setAvisoCompartir(undefined);
     setAvisoReserva(undefined);
@@ -98,8 +109,9 @@ export function ViajeDetalle() {
     void cargarViaje();
     return () => {
       montadoRef.current = false;
+      secuenciaViajeRef.current += 1;
     };
-  }, [cargarViaje]);
+  }, [cargarViaje, viajeId]);
 
   const esDueno = Boolean(viaje && claims?.sub && viaje.usuarioId === claims.sub);
   const puedeEditar = Boolean(esDueno && viaje?.estado === 'activo');
@@ -107,10 +119,11 @@ export function ViajeDetalle() {
   useEffect(() => {
     if (!viajeId || !esDueno) return;
     let vigente = true;
+    const idSolicitado = viajeId;
     void api.usuarios
-      .GET('/itinerarios/{viajeId}/designados', { params: { path: { viajeId } } })
+      .GET('/itinerarios/{viajeId}/designados', { params: { path: { viajeId: idSolicitado } } })
       .then(({ data, response }) => {
-        if (!vigente) return;
+        if (!vigente || viajeIdActualRef.current !== idSolicitado) return;
         if (!data) {
           setAvisoCompartir({ tipo: 'error', clave: claveErrorHttp(response.status) });
           return;
@@ -118,7 +131,9 @@ export function ViajeDetalle() {
         setDesignados(data.designados);
       })
       .catch(() => {
-        if (vigente) setAvisoCompartir({ tipo: 'error', clave: 'errores.noDisponible' });
+        if (vigente && viajeIdActualRef.current === idSolicitado) {
+          setAvisoCompartir({ tipo: 'error', clave: 'errores.noDisponible' });
+        }
       });
     return () => {
       vigente = false;
@@ -128,15 +143,17 @@ export function ViajeDetalle() {
   const designar = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!viajeId) return;
+    const idSolicitado = viajeId;
     const limpio = email.trim().toLowerCase();
     if (!limpio) return;
     setOcupadoCompartir(true);
     setAvisoCompartir(undefined);
     try {
       const { data, response } = await api.usuarios.POST('/itinerarios/{viajeId}/designados', {
-        params: { path: { viajeId } },
+        params: { path: { viajeId: idSolicitado } },
         body: { email: limpio },
       });
+      if (!montadoRef.current || viajeIdActualRef.current !== idSolicitado) return;
       if (!data) {
         const clave =
           response.status === 400
@@ -155,20 +172,26 @@ export function ViajeDetalle() {
         params: { email: data.email },
       });
     } catch {
-      setAvisoCompartir({ tipo: 'error', clave: 'errores.noDisponible' });
+      if (montadoRef.current && viajeIdActualRef.current === idSolicitado) {
+        setAvisoCompartir({ tipo: 'error', clave: 'errores.noDisponible' });
+      }
     } finally {
-      setOcupadoCompartir(false);
+      if (montadoRef.current && viajeIdActualRef.current === idSolicitado) {
+        setOcupadoCompartir(false);
+      }
     }
   };
 
   const quitar = async (correoDesignado: string) => {
     if (!viajeId) return;
+    const idSolicitado = viajeId;
     setOcupadoCompartir(true);
     setAvisoCompartir(undefined);
     try {
       const { response } = await api.usuarios.DELETE('/itinerarios/{viajeId}/designados/{email}', {
-        params: { path: { viajeId, email: correoDesignado } },
+        params: { path: { viajeId: idSolicitado, email: correoDesignado } },
       });
+      if (!montadoRef.current || viajeIdActualRef.current !== idSolicitado) return;
       if (!response.ok) {
         setAvisoCompartir({ tipo: 'error', clave: claveErrorHttp(response.status) });
         return;
@@ -180,9 +203,13 @@ export function ViajeDetalle() {
         params: { email: correoDesignado },
       });
     } catch {
-      setAvisoCompartir({ tipo: 'error', clave: 'errores.noDisponible' });
+      if (montadoRef.current && viajeIdActualRef.current === idSolicitado) {
+        setAvisoCompartir({ tipo: 'error', clave: 'errores.noDisponible' });
+      }
     } finally {
-      setOcupadoCompartir(false);
+      if (montadoRef.current && viajeIdActualRef.current === idSolicitado) {
+        setOcupadoCompartir(false);
+      }
     }
   };
 
@@ -207,12 +234,14 @@ export function ViajeDetalle() {
   };
 
   const alEliminarReserva = async (reserva: Reserva) => {
+    const idSolicitado = viajeId;
     setOcupadoReserva(true);
     setAvisoReserva(undefined);
     try {
       const { response } = await api.viajes.DELETE('/reservas/{reservaId}', {
         params: { path: { reservaId: reserva.reservaId } },
       });
+      if (!montadoRef.current || viajeIdActualRef.current !== idSolicitado) return;
       if (!response.ok) {
         setAvisoReserva({
           tipo: 'error',
@@ -228,6 +257,7 @@ export function ViajeDetalle() {
       }
       // Si era la última reserva del viaje, el backend elimina el viaje vacío: volvemos al panel.
       const resultado = await cargarViaje({ silencioso: true });
+      if (!montadoRef.current || viajeIdActualRef.current !== idSolicitado) return;
       if (resultado === 'no-encontrado') {
         void navigate('/', { replace: true });
         return;
@@ -238,21 +268,27 @@ export function ViajeDetalle() {
         params: { codigo: reserva.numeroReserva },
       });
     } catch {
-      setAvisoReserva({ tipo: 'error', clave: 'errores.noDisponible' });
+      if (montadoRef.current && viajeIdActualRef.current === idSolicitado) {
+        setAvisoReserva({ tipo: 'error', clave: 'errores.noDisponible' });
+      }
     } finally {
-      setOcupadoReserva(false);
+      if (montadoRef.current && viajeIdActualRef.current === idSolicitado) {
+        setOcupadoReserva(false);
+      }
     }
   };
 
   const compartirEnRed = async () => {
     if (!viajeId) return;
+    const idSolicitado = viajeId;
     setPublicandoRed(true);
     setErrorRedSocial(undefined);
     try {
       const { data, response } = await api.viajes.POST('/viajes/{viajeId}/compartir-red', {
-        params: { path: { viajeId } },
+        params: { path: { viajeId: idSolicitado } },
         body: { red: RED_SOCIAL_POR_DEFECTO },
       });
+      if (!montadoRef.current || viajeIdActualRef.current !== idSolicitado) return;
       if (!data) {
         setErrorRedSocial(
           response.status === 503
@@ -263,9 +299,13 @@ export function ViajeDetalle() {
       }
       setPublicacionRed(data);
     } catch {
-      setErrorRedSocial('viaje.compartirRed.errorNoDisponible');
+      if (montadoRef.current && viajeIdActualRef.current === idSolicitado) {
+        setErrorRedSocial('viaje.compartirRed.errorNoDisponible');
+      }
     } finally {
-      setPublicandoRed(false);
+      if (montadoRef.current && viajeIdActualRef.current === idSolicitado) {
+        setPublicandoRed(false);
+      }
     }
   };
 

@@ -109,6 +109,12 @@ export function Whitelist() {
       <h1 id="titulo-whitelist">{t('whitelist.titulo')}</h1>
       <p className="nota">{t('whitelist.descripcion')}</p>
 
+      {aviso && (
+        <p role={aviso.tipo === 'error' ? 'alert' : 'status'} className={`mensaje ${aviso.tipo}`}>
+          {t(aviso.clave)}
+        </p>
+      )}
+
       {cargando ? (
         <p className="nota">{t('app.cargando')}</p>
       ) : (
@@ -159,15 +165,6 @@ export function Whitelist() {
                 {t('whitelist.agregar')}
               </button>
             </form>
-
-            {aviso && (
-              <p
-                role={aviso.tipo === 'error' ? 'alert' : 'status'}
-                className={`mensaje ${aviso.tipo}`}
-              >
-                {t(aviso.clave)}
-              </p>
-            )}
 
             <h2 className="subtitulo">{t('whitelist.listaTitulo')}</h2>
             {whitelist.remitentesPermitidos.length === 0 ? (

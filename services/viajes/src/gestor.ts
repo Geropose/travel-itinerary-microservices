@@ -43,6 +43,20 @@ function esDuplicadoPg(err: unknown): boolean {
   return (err as { code?: string } | null)?.code === '23505';
 }
 
+function normalizarTextoObligatorio(valor: string, campo: string): string {
+  const limpio = typeof valor === 'string' ? valor.trim() : '';
+  if (!limpio) {
+    throw new ErrorNegocioViajes('solicitud-invalida', `El campo ${campo} es obligatorio.`);
+  }
+  return limpio;
+}
+
+function normalizarTextoOpcional(valor: string | undefined): string | undefined {
+  if (typeof valor !== 'string') return undefined;
+  const limpio = valor.trim();
+  return limpio.length > 0 ? limpio : undefined;
+}
+
 export interface OpcionesGestorViajes {
   region: Region;
   logger: Logger;
@@ -194,8 +208,6 @@ export function crearGestorViajes(opciones: OpcionesGestorViajes): GestorViajes 
         logger.warn(
           {
             proveedor: datos.proveedor,
-            numeroReserva: datos.numeroReserva,
-            viajeId: existente.viajeId,
           },
           'ReservaDetectada omitida: la reserva pertenece a otro usuario',
         );
@@ -286,7 +298,6 @@ export function crearGestorViajes(opciones: OpcionesGestorViajes): GestorViajes 
       logger.info(
         {
           proveedor: datos.proveedor,
-          numeroReserva: datos.numeroReserva,
           estado: datos.estado,
           requestId: contextoActual()?.requestId,
         },
@@ -308,7 +319,6 @@ export function crearGestorViajes(opciones: OpcionesGestorViajes): GestorViajes 
       logger.info(
         {
           proveedor: datos.proveedor,
-          numeroReserva: datos.numeroReserva,
           requestId: contextoActual()?.requestId,
         },
         'ReservaActualizada ignorada: reserva eliminada antes de actualizar',
@@ -370,14 +380,18 @@ export function crearGestorViajes(opciones: OpcionesGestorViajes): GestorViajes 
       );
     }
 
+    const proveedor = normalizarTextoObligatorio(datos.proveedor, 'proveedor');
+    const numeroReserva = normalizarTextoObligatorio(datos.numeroReserva, 'numeroReserva');
+    const destino = normalizarTextoObligatorio(datos.destino, 'destino');
+    const origen =
+      datos.tipoReserva === 'vuelo'
+        ? normalizarTextoObligatorio(datos.origen ?? '', 'origen')
+        : normalizarTextoOpcional(datos.origen);
+
     const fechaActual = new Date(ahora());
     await repositorio.bloquearUsuarioParaAgrupacion(db, usuarioId);
 
-    const yaExiste = await repositorio.buscarReservaPorClave(
-      db,
-      datos.proveedor,
-      datos.numeroReserva,
-    );
+    const yaExiste = await repositorio.buscarReservaPorClave(db, proveedor, numeroReserva);
     if (yaExiste) {
       throw new ErrorNegocioViajes(
         'conflicto',
@@ -389,6 +403,13 @@ export function crearGestorViajes(opciones: OpcionesGestorViajes): GestorViajes 
     let requiereRecalculo: boolean;
 
     if (datos.viajeId) {
+      const preliminarViaje = await repositorio.buscarViajePorId(db, datos.viajeId);
+      if (!preliminarViaje) {
+        throw new ErrorNegocioViajes('no-encontrado', 'El viaje indicado no existe.');
+      }
+      if (preliminarViaje.usuarioId !== usuarioId) {
+        throw new ErrorNegocioViajes('prohibido', 'No podés agregar reservas a un viaje ajeno.');
+      }
       const viajeDestino = await repositorio.buscarViajePorId(db, datos.viajeId, {
         paraActualizar: true,
       });
@@ -412,7 +433,7 @@ export function crearGestorViajes(opciones: OpcionesGestorViajes): GestorViajes 
         usuarioId,
         {
           tipoReserva: datos.tipoReserva,
-          destino: datos.destino,
+          destino,
           inicio: datos.inicio,
           fin: datos.fin,
           estado: 'confirmada',
@@ -428,13 +449,13 @@ export function crearGestorViajes(opciones: OpcionesGestorViajes): GestorViajes 
       creada = await repositorio.insertarReserva(db, {
         viajeId,
         usuarioId,
-        proveedor: datos.proveedor,
+        proveedor,
         tipoReserva: datos.tipoReserva,
-        numeroReserva: datos.numeroReserva,
+        numeroReserva,
         inicio: datos.inicio,
         fin: datos.fin,
-        ...(datos.origen !== undefined ? { origen: datos.origen } : {}),
-        destino: datos.destino,
+        ...(origen !== undefined ? { origen } : {}),
+        destino,
         detalle: datos.detalle ?? {},
         estado: 'confirmada',
         origenCambio: 'manual',
@@ -472,6 +493,17 @@ export function crearGestorViajes(opciones: OpcionesGestorViajes): GestorViajes 
       throw new ErrorNegocioViajes('prohibido', 'Solo el dueño puede modificar esta reserva.');
     }
 
+    const destinoValidado =
+      cambios.destino !== undefined
+        ? normalizarTextoObligatorio(cambios.destino, 'destino')
+        : undefined;
+    const origenValidado =
+      cambios.origen !== undefined
+        ? preliminar.tipoReserva === 'vuelo'
+          ? normalizarTextoObligatorio(cambios.origen, 'origen')
+          : normalizarTextoOpcional(cambios.origen)
+        : undefined;
+
     await repositorio.bloquearUsuarioParaAgrupacion(db, usuarioId);
 
     const actual = await repositorio.buscarReservaPorId(db, reservaId, { paraActualizar: true });
@@ -494,6 +526,13 @@ export function crearGestorViajes(opciones: OpcionesGestorViajes): GestorViajes 
 
     let viajeDestinoId = actual.viajeId;
     if (cambios.viajeId && cambios.viajeId !== actual.viajeId) {
+      const preliminarDestino = await repositorio.buscarViajePorId(db, cambios.viajeId);
+      if (!preliminarDestino) {
+        throw new ErrorNegocioViajes('no-encontrado', 'El viaje destino no existe.');
+      }
+      if (preliminarDestino.usuarioId !== usuarioId) {
+        throw new ErrorNegocioViajes('prohibido', 'No podés mover una reserva a un viaje ajeno.');
+      }
       const viajeDestino = await repositorio.buscarViajePorId(db, cambios.viajeId, {
         paraActualizar: true,
       });
@@ -523,14 +562,14 @@ export function crearGestorViajes(opciones: OpcionesGestorViajes): GestorViajes 
       );
     }
 
-    const nuevoOrigen = cambios.origen ?? actual.origen;
+    const nuevoOrigen = cambios.origen !== undefined ? origenValidado : actual.origen;
     const fechaActual = new Date(ahora());
     const actualizada = await repositorio.actualizarReserva(db, actual.reservaId, {
       viajeId: viajeDestinoId,
       inicio: nuevoInicio,
       fin: nuevoFin,
       ...(nuevoOrigen !== undefined ? { origen: nuevoOrigen } : {}),
-      destino: cambios.destino ?? actual.destino,
+      destino: destinoValidado ?? actual.destino,
       detalle: cambios.detalle ?? actual.detalle,
       estado: cambios.estado ?? actual.estado,
       origenCambio: 'manual',

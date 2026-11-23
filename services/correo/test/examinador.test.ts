@@ -79,6 +79,28 @@ describe('clasificación y prioridades del Examinador (ADR-010)', () => {
     expect(decision).toEqual({ debeEncolar: false });
   });
 
+  it('vuelve al polling por intervalo cuando suscripcionVenceEn ya venció', () => {
+    const decision = clasificarCuentaParaRevision(
+      {
+        id: randomUUID(),
+        usuarioId: randomUUID(),
+        proveedor: 'outlook',
+        email: 'ana@outlook.example',
+        suscripcionId: 'sub-vencida',
+        suscripcionVenceEn: new Date(ahoraMs - 60_000),
+        revisionPrioritaria: false,
+        proximaRevision: new Date(ahoraMs - 120 * 60_000),
+        ultimoEncolado: new Date(ahoraMs - 61 * 60_000),
+        intentos429: 0,
+      },
+      new Set(),
+      adaptadores,
+      intervalos,
+      ahoraMs,
+    );
+    expect(decision).toEqual({ debeEncolar: true, origen: 'periodica', prioridad: 3 });
+  });
+
   it('aplica intervalo de 5 min con viaje próximo y 60 min al resto en buzones sin push', () => {
     const usuarioProximo = randomUUID();
     const usuarioNormal = randomUUID();

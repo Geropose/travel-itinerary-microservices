@@ -311,7 +311,8 @@ describe.skipIf(!hayDocker)(
       expect(publicadosViaje).toHaveLength(3);
       const logIgnorado = pruebaLogger.lineas.find(
         (l) =>
-          l.numeroReserva === 'INEXISTENTE-999' &&
+          String(l.mensaje ?? '').includes('ReservaActualizada ignorada') &&
+          l.proveedor === 'aerolinea-andina' &&
           typeof l.requestId === 'string' &&
           l.requestId.length > 0,
       );

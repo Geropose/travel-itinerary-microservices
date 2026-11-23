@@ -20,20 +20,17 @@ const config = cargarConfig(esquemaConfig);
 const logger = crearLogger({ servicio: SERVICIO, region: config.REGION, nivel: config.NIVEL_LOG });
 
 const dirMigraciones = fileURLToPath(new URL('../migrations/', import.meta.url));
-const poolRegional = crearPool({ url: config.URL_BASE });
-poolRegional.on('error', (err) => {
-  logger.warn({ err }, 'error en conexión inactiva de la base regional de analítica');
-});
+const maximoPool = Math.max(10, config.CANTIDAD_CONSUMIDORES * 2);
+const poolRegional = crearPool({ url: config.URL_BASE, maximo: maximoPool, logger });
 
 const poolAnalitica =
   config.URL_BASE_ANALITICA && config.URL_BASE_ANALITICA !== config.URL_BASE
-    ? crearPool({ url: config.URL_BASE_ANALITICA, maximo: 15 })
+    ? crearPool({
+        url: config.URL_BASE_ANALITICA,
+        maximo: Math.max(15, config.CANTIDAD_CONSUMIDORES * 2),
+        logger,
+      })
     : poolRegional;
-if (poolAnalitica !== poolRegional) {
-  poolAnalitica.on('error', (err) => {
-    logger.warn({ err }, 'error en conexión inactiva de la base global de analítica');
-  });
-}
 
 if (poolAnalitica === poolRegional) {
   await migrar(poolRegional, [MIGRACIONES_EVENTOS, dirMigraciones], logger);

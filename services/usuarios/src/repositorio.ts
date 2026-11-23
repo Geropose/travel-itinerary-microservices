@@ -106,11 +106,23 @@ function aDesignado(fila: FilaDesignado): Designado {
 // --- Cuentas y preferencias ---------------------------------------------------------------
 
 /**
- * Crea la cuenta con moneda USD, sin agencia preferida y whitelist inicial vacía. También vincula
- * designaciones previas donde este email había quedado con usuario_id NULL.
+ * Crea la cuenta con moneda USD, sin agencia preferida y whitelist inicial vacía. Es idempotente si
+ * ya existe exactamente con el mismo (usuarioId, email, region) ante reintentos de timeout, y
+ * vincula designaciones previas donde este email había quedado con usuario_id NULL (lockeando el email).
  */
 export async function crearCuenta(db: Db, cuenta: CuentaNueva): Promise<Perfil> {
   const email = normalizarEmail(cuenta.email);
+  await db.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`email:${email}`]);
+  const existente = await db.query<FilaPerfil>(
+    `SELECT usuario_id AS "usuarioId", email, nombre, region, idioma, moneda,
+            agencia_preferida AS "agenciaPreferida", creado_en AS "creadoEn"
+       FROM cuentas
+      WHERE usuario_id = $1 AND email = $2 AND region = $3`,
+    [cuenta.usuarioId, email, cuenta.region],
+  );
+  if (existente.rows[0]) {
+    return aPerfil(existente.rows[0]);
+  }
   const { rows } = await db.query<FilaPerfil>(
     `INSERT INTO cuentas (usuario_id, email, nombre, region, idioma)
      VALUES ($1, $2, $3, $4, $5)
@@ -284,6 +296,21 @@ export async function designarPersona(
   const creado = rows[0];
   if (!creado) throw new Error('No se pudo guardar el designado');
   return aDesignado(creado);
+}
+
+/**
+ * Serializa mediante lock transaccional por email con `crearCuenta`, resuelve la cuenta
+ * existente dentro de la transacción y guarda al designado para evitar `usuario_id = NULL`.
+ */
+export async function designarPersonaConCuenta(
+  db: ClienteDb,
+  viajeId: string,
+  email: string,
+): Promise<Designado> {
+  const normalizado = normalizarEmail(email);
+  await db.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`email:${normalizado}`]);
+  const cuenta = await buscarPorEmail(db, normalizado);
+  return designarPersona(db, viajeId, normalizado, cuenta?.usuarioId ?? null);
 }
 
 export async function quitarDesignado(db: Db, viajeId: string, email: string): Promise<boolean> {

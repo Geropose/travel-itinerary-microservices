@@ -63,9 +63,33 @@ function textoNoVacio(valor: unknown): string | undefined {
 
 function esFechaIsoValida(valor: string | undefined): valor is string {
   if (!valor) return false;
-  // Exigimos formato date-time con zona o Z compatible con ajv-formats date-time.
-  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/.test(valor)) {
+  // Exige date-time RFC 3339 completo con segundos y zona/Z compatible con ajv-formats.
+  const match =
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|([+-])(\d{2}):(\d{2}))$/.exec(
+      valor,
+    );
+  if (!match) return false;
+  const anio = Number(match[1]);
+  const mes = Number(match[2]);
+  const dia = Number(match[3]);
+  const hora = Number(match[4]);
+  const minuto = Number(match[5]);
+  const segundo = Number(match[6]);
+  if (mes < 1 || mes > 12 || dia < 1 || hora > 23 || minuto > 59 || segundo > 59) {
     return false;
+  }
+  const fechaCalendario = new Date(Date.UTC(anio, mes - 1, dia));
+  if (
+    fechaCalendario.getUTCFullYear() !== anio ||
+    fechaCalendario.getUTCMonth() !== mes - 1 ||
+    fechaCalendario.getUTCDate() !== dia
+  ) {
+    return false;
+  }
+  if (match[7]) {
+    const offH = Number(match[8]);
+    const offM = Number(match[9]);
+    if (offH > 23 || offM > 59) return false;
   }
   return !Number.isNaN(Date.parse(valor));
 }

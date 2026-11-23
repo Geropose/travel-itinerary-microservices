@@ -38,6 +38,13 @@ export class ErrorColaNoDisponible extends Error {
   }
 }
 
+export class ErrorProcesadorDeteniendo extends Error {
+  constructor() {
+    super('El procesador de correo se está deteniendo.');
+    this.name = 'ErrorProcesadorDeteniendo';
+  }
+}
+
 export interface OpcionesColaBuzones {
   url: string;
   logger: Logger;
@@ -53,12 +60,71 @@ export interface OpcionesConsumidorCola {
 export interface ColaBuzones {
   encolar(trabajo: TrabajoRevisionBuzon): Promise<void>;
   consumir(opciones: OpcionesConsumidorCola): Promise<void>;
+  pausarConsumidores?(): Promise<void>;
   conectado(): boolean;
   verificar(): Promise<void>;
   cerrar(): Promise<void>;
 }
 
 const esperar = (ms: number) => new Promise((resolver) => setTimeout(resolver, ms));
+
+/** Procesa un mensaje de la cola interna de buzones, reencolando si el servicio se detiene. */
+export async function procesarMensajeCola(
+  canal: Pick<Channel, 'ack' | 'nack'>,
+  mensaje: ConsumeMessage,
+  c: OpcionesConsumidorCola,
+  logger: Logger,
+): Promise<void> {
+  const confirmar = (ok: boolean, reencolar = false) => {
+    try {
+      if (ok) canal.ack(mensaje);
+      else canal.nack(mensaje, false, reencolar);
+    } catch {
+      // Canal cerrado: RabbitMQ reentrega otro trabajador cuando reconecta.
+    }
+  };
+
+  let trabajo: TrabajoRevisionBuzon;
+  try {
+    const parsed = JSON.parse(mensaje.content.toString('utf8')) as TrabajoRevisionBuzon;
+    if (!parsed.trabajoId || !parsed.cuentaId || !parsed.proveedor) {
+      throw new Error('Mensaje de revisión incompleto');
+    }
+    trabajo = parsed;
+  } catch (err) {
+    logger.error({ err, cola: COLA_BUZONES }, 'trabajo inválido: va a DLQ');
+    confirmar(false);
+    return;
+  }
+
+  const esperas = c.esperasReintentoMs ?? [500, 1000, 2000];
+  for (let intento = 0; ; intento++) {
+    try {
+      await conContexto({ requestId: trabajo.trabajoId }, () => c.manejar(trabajo));
+      confirmar(true);
+      return;
+    } catch (err) {
+      if (err instanceof ErrorProcesadorDeteniendo) {
+        logger.info(
+          { trabajoId: trabajo.trabajoId, cuentaId: trabajo.cuentaId },
+          'trabajo reencolado por apagado ordenado',
+        );
+        confirmar(false, true);
+        return;
+      }
+      const espera = esperas[intento];
+      if (espera === undefined) {
+        logger.error(
+          { err, trabajoId: trabajo.trabajoId, cuentaId: trabajo.cuentaId },
+          'trabajo falló en todos los reintentos: va a DLQ',
+        );
+        confirmar(false);
+        return;
+      }
+      await esperar(espera);
+    }
+  }
+}
 
 async function asegurarColas(canal: Channel): Promise<void> {
   await canal.assertQueue(COLA_BUZONES_DLQ, {
@@ -78,6 +144,7 @@ async function asegurarColas(canal: Channel): Promise<void> {
 export async function conectarColaBuzones(opciones: OpcionesColaBuzones): Promise<ColaBuzones> {
   const { url, logger } = opciones;
   const consumidores: OpcionesConsumidorCola[] = [];
+  const suscripcionesActivas: Array<{ canal: Channel; consumerTag: string }> = [];
   let canalPublicar: ConfirmChannel | undefined;
   let estaConectado = false;
   let cerrando = false;
@@ -89,57 +156,10 @@ export async function conectarColaBuzones(opciones: OpcionesColaBuzones): Promis
     );
     await asegurarColas(canal);
     await canal.prefetch(c.prefetch ?? 10);
-    await canal.consume(COLA_BUZONES, (msg) => {
-      if (msg) void procesarMensaje(canal, msg, c);
+    const { consumerTag } = await canal.consume(COLA_BUZONES, (msg) => {
+      if (msg) void procesarMensajeCola(canal, msg, c, logger);
     });
-  }
-
-  async function procesarMensaje(
-    canal: Channel,
-    mensaje: ConsumeMessage,
-    c: OpcionesConsumidorCola,
-  ) {
-    const confirmar = (ok: boolean) => {
-      try {
-        if (ok) canal.ack(mensaje);
-        else canal.nack(mensaje, false, false);
-      } catch {
-        // Canal cerrado: RabbitMQ reentrega otro trabajador cuando reconecta.
-      }
-    };
-
-    let trabajo: TrabajoRevisionBuzon;
-    try {
-      const parsed = JSON.parse(mensaje.content.toString('utf8')) as TrabajoRevisionBuzon;
-      if (!parsed.trabajoId || !parsed.cuentaId || !parsed.proveedor) {
-        throw new Error('Mensaje de revisión incompleto');
-      }
-      trabajo = parsed;
-    } catch (err) {
-      logger.error({ err, cola: COLA_BUZONES }, 'trabajo inválido: va a DLQ');
-      confirmar(false);
-      return;
-    }
-
-    const esperas = c.esperasReintentoMs ?? [500, 1000, 2000];
-    for (let intento = 0; ; intento++) {
-      try {
-        await conContexto({ requestId: trabajo.trabajoId }, () => c.manejar(trabajo));
-        confirmar(true);
-        return;
-      } catch (err) {
-        const espera = esperas[intento];
-        if (espera === undefined) {
-          logger.error(
-            { err, trabajoId: trabajo.trabajoId, cuentaId: trabajo.cuentaId },
-            'trabajo falló en todos los reintentos: va a DLQ',
-          );
-          confirmar(false);
-          return;
-        }
-        await esperar(espera);
-      }
-    }
+    suscripcionesActivas.push({ canal, consumerTag });
   }
 
   const reconexion = opciones.reconexion ?? {};
@@ -155,6 +175,7 @@ export async function conectarColaBuzones(opciones: OpcionesColaBuzones): Promis
           logger.warn({ err, cola: COLA_BUZONES }, 'error en canal publicador de cola'),
         );
         await asegurarColas(canal);
+        suscripcionesActivas.length = 0;
         for (const c of consumidores) await prepararConsumidor(modelo, c);
         canalPublicar = canal;
       },
@@ -199,6 +220,12 @@ export async function conectarColaBuzones(opciones: OpcionesColaBuzones): Promis
         const modelo = { createChannel: () => conexion.createChannel() } as unknown as ChannelModel;
         await prepararConsumidor(modelo, c);
       }
+    },
+    async pausarConsumidores() {
+      const activos = suscripcionesActivas.splice(0, suscripcionesActivas.length);
+      await Promise.allSettled(
+        activos.map(({ canal, consumerTag }) => canal.cancel(consumerTag).catch(() => undefined)),
+      );
     },
     conectado: () => estaConectado,
     async verificar() {

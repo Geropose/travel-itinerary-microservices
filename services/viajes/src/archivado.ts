@@ -178,6 +178,7 @@ export function crearTareaArchivado(opciones: OpcionesTareaArchivado): TareaArch
   async function ejecutarInterno(lanzarSiOcupado: boolean): Promise<ResultadoArchivado | null> {
     const cliente = await pool.connect();
     let lockAdquirido = false;
+    let destruirConexion = false;
 
     try {
       const resLock = await cliente.query<{ adquirido: boolean }>(
@@ -241,7 +242,13 @@ export function crearTareaArchivado(opciones: OpcionesTareaArchivado): TareaArch
 
         await cliente.query('COMMIT');
       } catch (err) {
-        await cliente.query('ROLLBACK').catch(() => undefined);
+        await cliente.query('ROLLBACK').catch((errRb: unknown) => {
+          destruirConexion = true;
+          logger.warn(
+            { err: errRb },
+            'no se pudo revertir la transacción de archivado; se descarta la conexión',
+          );
+        });
         throw err;
       }
 
@@ -269,10 +276,11 @@ export function crearTareaArchivado(opciones: OpcionesTareaArchivado): TareaArch
         await cliente
           .query('SELECT pg_advisory_unlock($1)', [LOCK_ARCHIVADO])
           .catch((err: unknown) => {
+            destruirConexion = true;
             logger.warn({ err }, 'no se pudo liberar el advisory lock de archivado');
           });
       }
-      cliente.release();
+      cliente.release(destruirConexion);
     }
   }
 

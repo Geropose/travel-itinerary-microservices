@@ -111,6 +111,22 @@ test('whitelist: agrega y quita remitentes y activa o desactiva filtros', async 
   ).toBeVisible();
 });
 
+test('whitelist: muestra role=alert si falla GET /whitelist con 503', async ({ page }) => {
+  await apiFalsa(page);
+  await page.route('**/api/usuarios/whitelist', (route) =>
+    route.fulfill({
+      status: 503,
+      contentType: 'application/problem+json',
+      body: JSON.stringify({ status: 503, title: 'No disponible' }),
+    }),
+  );
+
+  await iniciarSesion(page);
+  await menu(page).getByRole('link', { name: 'Whitelist' }).click();
+  await expect(page.getByRole('heading', { name: 'Whitelist' })).toBeVisible();
+  await expect(page.getByRole('alert')).toBeVisible();
+});
+
 test('preferencias: cambia idioma al instante y guarda idioma, moneda y agencia', async ({
   page,
 }) => {

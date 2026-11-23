@@ -17,6 +17,7 @@ import type {
 interface DatosInicioTrabajador {
   urlBaseAnalitica: string;
   tarea: TareaMap;
+  connectionTimeoutMs?: number;
 }
 
 async function ejecutarMapDestinos(
@@ -127,12 +128,32 @@ async function iniciarTrabajador(): Promise<void> {
   const puerto = parentPort;
   if (!puerto) return;
 
-  const { urlBaseAnalitica, tarea } = workerData as DatosInicioTrabajador;
-  const cliente = new pg.Client({ connectionString: urlBaseAnalitica });
+  const { urlBaseAnalitica, tarea, connectionTimeoutMs } = workerData as DatosInicioTrabajador;
+  const cliente = new pg.Client({
+    connectionString: urlBaseAnalitica,
+    connectionTimeoutMillis: connectionTimeoutMs ?? 10_000,
+  });
+  let cerrando = false;
+
+  cliente.on('error', (err: Error) => {
+    if (cerrando) return;
+    cerrando = true;
+    try {
+      const respuesta: MensajeDelTrabajador = {
+        tipo: 'error',
+        mensaje: err.message || 'Error inesperado en conexión PostgreSQL del trabajador.',
+      };
+      puerto.postMessage(respuesta);
+    } catch {
+      // Puerto ya cerrado.
+    }
+    void cliente.end().catch(() => undefined);
+  });
 
   try {
     await cliente.connect();
   } catch (err) {
+    cerrando = true;
     const mensaje: MensajeDelTrabajador = {
       tipo: 'error',
       mensaje: err instanceof Error ? err.message : 'No se pudo conectar a la base de analítica.',
@@ -143,6 +164,7 @@ async function iniciarTrabajador(): Promise<void> {
 
   puerto.on('message', (msg: MensajeAlTrabajador) => {
     if (msg.tipo === 'fin') {
+      cerrando = true;
       void cliente
         .end()
         .catch(() => undefined)

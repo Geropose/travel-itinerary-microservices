@@ -7,6 +7,7 @@ import {
   enTransaccion,
   errores,
   guardarEnOutbox,
+  ipDe,
   type Pool,
   type Region,
   type RegistrarRechazo,
@@ -40,6 +41,7 @@ export function registrarRutas(
   const { pool, viajes, agencias } = negocio;
 
   function rechazo(req: Request, status: 401 | 403, usuarioId?: string): void {
+    const ip = ipDe(req);
     negocio.registrar({
       servicio,
       metodo: req.method,
@@ -47,7 +49,7 @@ export function registrarRutas(
       status,
       motivo: status === 401 ? 'token-invalido' : 'sin-permiso',
       ...(usuarioId ? { usuarioId } : {}),
-      ...(req.ip ? { ip: req.ip } : {}),
+      ...(ip ? { ip } : {}),
       requestId: contextoActual()?.requestId ?? '',
     });
   }
@@ -195,13 +197,9 @@ export function registrarRutas(
       ]);
     }
 
-    const cuentaDesignada = await repositorio.buscarPorEmail(pool, email);
     try {
-      const designado = await repositorio.designarPersona(
-        pool,
-        viajeId,
-        email,
-        cuentaDesignada?.usuarioId ?? null,
+      const designado = await enTransaccion(pool, (db) =>
+        repositorio.designarPersonaConCuenta(db, viajeId, email),
       );
       res.status(201).json(designado);
     } catch (error) {

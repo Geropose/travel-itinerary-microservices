@@ -5,8 +5,9 @@ import { AsyncResource } from 'node:async_hooks';
 import express, { type Express, type RequestHandler } from 'express';
 import * as OpenApiValidator from 'express-openapi-validator';
 import type { Region } from './config.ts';
-import { conContexto } from './contexto.ts';
+import { conContexto, contextoActual } from './contexto.ts';
 import { aProblema, errores, manejadorErrores } from './errores.ts';
+import { rutaParaLog } from './http.ts';
 import type { Logger } from './logger.ts';
 import { cargarSpec, type Spec } from './spec.ts';
 import type { Validador } from './validador.ts';
@@ -63,7 +64,7 @@ export function sinValidador(spec: Spec): RequestHandler {
     res
       .status(401)
       .type('application/problem+json')
-      .json(aProblema(errores.noAutenticado(), randomUUID()));
+      .json(aProblema(errores.noAutenticado(), contextoActual()?.requestId ?? randomUUID()));
   };
 }
 
@@ -90,6 +91,7 @@ export function crearServidor(opciones: OpcionesServidor): Servidor {
     const requestId = typeof recibido === 'string' && UUID.test(recibido) ? recibido : randomUUID();
     req.headers['x-request-id'] = requestId;
     res.setHeader('X-Request-Id', requestId);
+    const rutaLog = rutaParaLog(req.path);
     conContexto({ requestId }, () => {
       const inicio = performance.now();
       res.on(
@@ -98,7 +100,7 @@ export function crearServidor(opciones: OpcionesServidor): Servidor {
           logger.info(
             {
               metodo: req.method,
-              ruta: req.path,
+              ruta: rutaLog,
               status: res.statusCode,
               duracionMs: Math.round((performance.now() - inicio) * 10) / 10,
             },
