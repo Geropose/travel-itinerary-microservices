@@ -146,3 +146,16 @@ El código de los microservicios está en [`services/`](services), la app en [`w
 | CONST-4 · Completar al menos cuatro iteraciones ADD | 1–7 | 001–019 | Registro del proceso ADD | [wiki de GitHub](https://github.com/Geropose/travel-itinerary-microservices/wiki) | Revisión documental: siete iteraciones publicadas, del diseño general al asistente. | Sin medición. |
 | CONST-5 · Desarrollar a partir de contratos | Transversal (1–7) | 001, 002, 003, 005, 016, 018 | Contratos HTTP y de eventos, cliente generado de la web y validadores | [specs](specs), [paquete común](packages/comun/src), [API web](web/src/api) | [suite estática](tests/contratos), [contratos HTTP A](tests/e2e/openapi-a.test.ts), [B](tests/e2e/openapi-b.test.ts), [C](tests/e2e/openapi-c.test.ts) y [D](tests/e2e/openapi-d.test.ts), [captura RabbitMQ](tests/e2e/captura-contratos.ts) | Sin medición propia. El [informe de contratos](docs/contratos-prototipo.md) documenta la verificación en vivo de las 63 operaciones OpenAPI y los 6 eventos AsyncAPI (0 pendientes). |
 | CONST-6 · Mantener los datos personales en la región de origen | 6, 7 | 012, 013, 016, 017 | Enrutador global, Postgres y réplica regional, anonimizador e historial de conversaciones | [Enrutador](services/enrutador/src), [Analítica](services/analitica/src), [Asistente](services/asistente/src), [infra](infra) | [residencia](tests/e2e/residencia/residencia.test.ts), [anonimización](services/analitica/test/anonimizador.integration.test.ts) | Sin medición propia. La suite verifica aislamiento, réplica en la misma región y reenvío del login. [§ 1](docs/mediciones.md#1-pruebas-de-caídas-y-disponibilidad-qa-4-p35-y-p41) mide el failover regional. |
+
+## Autoría
+
+Trabajo Especial grupal de Diseño de Sistemas de Software (UNICEN), hecho por cuatro integrantes. El reparto sale del historial de commits.
+
+| Integrante | Aporte principal |
+| --- | --- |
+| Geronimo Pose | Plataforma y seguridad: Autenticación (JWT y claves públicas entre regiones), gateway, enrutador global, monitor de salud, infraestructura de Docker Compose con dos regiones, kit común (`packages/comun`), contratos OpenAPI y esquemas de eventos, base de la web como PWA, mocks de Gmail y Outlook, y las mediciones de calidad (k6, Lighthouse). |
+| Facundo Belmonte | Servicios de dominio: Correo, Viajes, Integraciones, Asistente, Analítica y Usuarios, y pantallas de la web. |
+| Gonzalo de Caseres | Pruebas de extremo a extremo y flujo de integración continua. |
+| Juan Pedro Hobiague | Pruebas de extremo a extremo. |
+
+La arquitectura (iteraciones de ADD, vistas y ADR) se diseñó entre los cuatro y está en la [wiki](https://github.com/Geropose/travel-itinerary-microservices/wiki).
